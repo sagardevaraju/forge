@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "migrate": "tsx lib/db/migrate.ts"
+    "migrate": "tsx lib/db/migrate.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
@@ -18,12 +19,14 @@
     "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.2",
     "autoprefixer": "^10.4.21",
     "eslint": "^9",
     "eslint-config-next": "^16.2.6",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.22.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.6"
   }
 }
