@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, test, expect } from 'vitest';
 import { TOOLS, TOOL_MAP } from '@/lib/llm/tool-registry';
 

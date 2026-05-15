@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { POST } from '@/app/api/agent/chat/route';
 import {

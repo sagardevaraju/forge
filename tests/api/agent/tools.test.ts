@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { fetchNhcCone } from '@/app/api/agent/tools/fetch_nhc_cone';
 import { fetchFirmsFires } from '@/app/api/agent/tools/fetch_firms_fires';
