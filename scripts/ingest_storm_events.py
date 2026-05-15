@@ -16,7 +16,6 @@ use INSERT OR IGNORE, so re-running the same year is safe.
 import argparse
 import csv
 import gzip
-import io
 import re
 import sqlite3
 import sys
@@ -109,10 +108,17 @@ def discover_filename(year: int, session: requests.Session) -> str | None:
     return matches[-1]
 
 
+BATCH_SIZE = 500
+
+
 def stream_year(year: int, session: requests.Session) -> tuple[int, int, int]:
     """Download, filter, and insert storm events for one year.
 
     Returns (fetched_rows, kept_rows, inserted_rows).
+
+    Streams the gzipped CSV row by row — memory footprint is flat
+    regardless of file size. Rows are batched and inserted with
+    executemany every BATCH_SIZE filtered rows.
     """
     filename = discover_filename(year, session)
     if filename is None:
@@ -120,14 +126,11 @@ def stream_year(year: int, session: requests.Session) -> tuple[int, int, int]:
         return 0, 0, 0
 
     url = NOAA_DIR_URL + filename
-    resp = session.get(url, timeout=REQUEST_TIMEOUT, stream=True)
+    resp = session.get(url, stream=True, timeout=REQUEST_TIMEOUT)
     resp.raise_for_status()
-
-    raw_bytes = resp.content  # download fully (files are ~1-5 MB gzipped)
-    decompressed = gzip.decompress(raw_bytes)
-    text = decompressed.decode("latin-1")  # NOAA files use Latin-1
-
-    reader = csv.DictReader(io.StringIO(text))
+    # Ensure the underlying socket yields raw gzipped bytes (not
+    # auto-decoded by urllib3's content-encoding handling).
+    resp.raw.decode_content = False
 
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -135,60 +138,71 @@ def stream_year(year: int, session: requests.Session) -> tuple[int, int, int]:
     fetched = 0
     kept = 0
     inserted = 0
+    batch: list[tuple] = []
 
-    rows_to_insert: list[tuple] = []
-
-    for row in reader:
-        fetched += 1
-        state_full = row.get("STATE", "").strip().upper()
-        event_type = row.get("EVENT_TYPE", "").strip()
-
-        if state_full not in TARGET_STATES:
-            continue
-        if event_type not in TARGET_EVENT_TYPES:
-            continue
-
-        kept += 1
-        state_code = TARGET_STATES[state_full]
-        event_id = row.get("EVENT_ID", "").strip()
-        row_year = row.get("YEAR", "").strip()
-        county = row.get("CZ_NAME", "").strip()
-        peak_wind_raw = row.get("MAGNITUDE", "").strip()
-        damage_raw = row.get("DAMAGE_PROPERTY", "").strip()
-
-        try:
-            peak_wind = float(peak_wind_raw) if peak_wind_raw else None
-        except ValueError:
-            peak_wind = None
-
-        damage_property = parse_damage_property(damage_raw)
-
-        rows_to_insert.append((
-            event_id,
-            int(row_year) if row_year else year,
-            state_code,
-            county,
-            event_type,
-            peak_wind,
-            damage_property,
-            "NOAA Storm Events",
-        ))
-
-    for row_tuple in rows_to_insert:
-        cur.execute(
+    def flush(batch: list[tuple]) -> int:
+        if not batch:
+            return 0
+        before = conn.total_changes
+        cur.executemany(
             """
             INSERT OR IGNORE INTO storm_events
                 (event_id, year, state, county, event_type,
                  peak_wind, damage_property, source)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            row_tuple,
+            batch,
         )
-        if cur.rowcount > 0:
-            inserted += 1
+        return conn.total_changes - before
 
-    conn.commit()
-    conn.close()
+    try:
+        with gzip.open(resp.raw, mode="rt", encoding="latin-1", errors="replace") as gz:
+            reader = csv.DictReader(gz)
+            for row in reader:
+                fetched += 1
+                state_full = row.get("STATE", "").strip().upper()
+                event_type = row.get("EVENT_TYPE", "").strip()
+
+                if state_full not in TARGET_STATES:
+                    continue
+                if event_type not in TARGET_EVENT_TYPES:
+                    continue
+
+                kept += 1
+                state_code = TARGET_STATES[state_full]
+                event_id = row.get("EVENT_ID", "").strip()
+                row_year = row.get("YEAR", "").strip()
+                county = row.get("CZ_NAME", "").strip()
+                peak_wind_raw = row.get("MAGNITUDE", "").strip()
+                damage_raw = row.get("DAMAGE_PROPERTY", "").strip()
+
+                try:
+                    peak_wind = float(peak_wind_raw) if peak_wind_raw else None
+                except ValueError:
+                    peak_wind = None
+
+                damage_property = parse_damage_property(damage_raw)
+
+                batch.append((
+                    event_id,
+                    int(row_year) if row_year else year,
+                    state_code,
+                    county,
+                    event_type,
+                    peak_wind,
+                    damage_property,
+                    "NOAA Storm Events",
+                ))
+
+                if len(batch) >= BATCH_SIZE:
+                    inserted += flush(batch)
+                    batch.clear()
+
+        inserted += flush(batch)
+        conn.commit()
+    finally:
+        conn.close()
+        resp.close()
 
     return fetched, kept, inserted
 
@@ -214,17 +228,21 @@ def main() -> None:
     session = requests.Session()
     session.headers.update({"User-Agent": "FORGE-ingest/1.0 (research)"})
 
+    skipped: list[int] = []
     for year in years:
         try:
             fetched, kept, inserted = stream_year(year, session)
             print(f"{year}: fetched {fetched} rows, kept {kept}, inserted {inserted}")
         except requests.exceptions.RequestException as exc:
-            print(f"{year}: network error — {exc}", file=sys.stderr)
-            # Try once more (the caller may retry a different year externally)
-            raise
+            print(f"  {year}: SKIPPED (network error: {exc})", file=sys.stderr)
+            skipped.append(year)
+            continue
 
     session.close()
-    print("Done.")
+    if skipped:
+        print(f"Done. Skipped years: {skipped}")
+    else:
+        print("Done.")
 
 
 if __name__ == "__main__":
