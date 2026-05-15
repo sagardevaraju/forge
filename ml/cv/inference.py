@@ -200,13 +200,14 @@ def predict_chip(chip: np.ndarray) -> np.ndarray:
     ------
     NotImplementedError
         If the trained head artifact is not found at
-        ``artifacts/cv_head.pt``. Run ``ml/cv/train.py`` on a GPU first.
+        ``artifacts/cv_head.pt``. Run ``ml/cv/train.py`` first
+        (Apple Silicon MPS, CUDA, or CPU all supported).
     RuntimeError
         If PyTorch is not installed.
     """
     if not HEAD_ARTIFACT.exists():
         raise NotImplementedError(
-            "Real CV inference requires trained head — run train.py on a GPU first.\n"
+            "Real CV inference requires trained head — run train.py first.\n"
             f"Expected artifact: {HEAD_ARTIFACT}"
         )
 
@@ -218,9 +219,9 @@ def predict_chip(chip: np.ndarray) -> np.ndarray:
             "Install via: pip install torch timm"
         ) from exc
 
-    from ml.cv.train import build_mlp_head, build_backbone  # noqa: PLC0415
+    from ml.cv.train import build_mlp_head, build_backbone, select_device  # noqa: PLC0415
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = select_device()
 
     # Load backbone (frozen)
     backbone = build_backbone().to(device).eval()

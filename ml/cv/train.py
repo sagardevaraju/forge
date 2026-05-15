@@ -1,7 +1,14 @@
 """
 FORGE — CV training pipeline: Prithvi/Clay backbone + 4-layer MLP head.
 
-NOTE: Run on a workstation with a GPU. Not executed in this session.
+NOTE: Run on Apple Silicon (MPS), CUDA GPU, or CPU. ``select_device()``
+picks the fastest available backend automatically. Not executed in the
+autonomous build session — the head artifact is created by a real
+training run before any non-mock inference works.
+
+On Apple Silicon, set ``PYTORCH_ENABLE_MPS_FALLBACK=1`` so any operator
+the MPS backend doesn't yet implement falls back to CPU instead of
+raising.
 
 This file documents the real training workflow. The heavy backbone weights
 (Prithvi-100M or Clay) must be downloaded before running. Imports of
@@ -52,11 +59,19 @@ Weak supervision labels
   Val split: 10 % holdout. Target val MAE < 0.15 per dim.
 
 =============================================================================
-Usage (GPU workstation)
+Usage
 =============================================================================
 
-    export FORGE_CV_MODE=mock      # use mock chips during training dev
+    # Apple Silicon (MacBook M-series) — MPS backend, ~10-20x faster than CPU
+    export PYTORCH_ENABLE_MPS_FALLBACK=1
+    export FORGE_CV_MODE=mock          # use mock chips during dev
     python ml/cv/train.py --epochs 20 --lr 1e-4 --batch-size 32
+
+    # NVIDIA workstation — CUDA picked automatically
+    python ml/cv/train.py --epochs 20 --lr 1e-4 --batch-size 32 --device cuda
+
+    # CPU-only fallback (slow but works anywhere)
+    python ml/cv/train.py --epochs 20 --lr 1e-4 --batch-size 16 --device cpu
 
     # Then to cache real features:
     export FORGE_CV_MODE=real
@@ -103,6 +118,29 @@ S2_MAX = 10_000.0
 BACKBONE_DIM = 768        # ViT-B/16 and Prithvi-100M output dim
 OUTPUT_DIM = 8
 DROPOUT = 0.1
+
+
+# ---------------------------------------------------------------------------
+# Device selection
+# ---------------------------------------------------------------------------
+
+def select_device(prefer: str | None = None) -> str:
+    """Pick the fastest available PyTorch backend.
+
+    Priority: ``prefer`` (if given) > MPS (Apple Silicon) > CUDA > CPU.
+
+    On Apple Silicon, set ``PYTORCH_ENABLE_MPS_FALLBACK=1`` so any operator
+    the MPS backend doesn't yet implement falls back to CPU.
+    """
+    if prefer:
+        return prefer
+    if not _TORCH_AVAILABLE:
+        return "cpu"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    if torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
 
 
 # ---------------------------------------------------------------------------
@@ -304,9 +342,7 @@ def train(
     import torch.nn as nn  # noqa: PLC0415
     from torch.utils.data import DataLoader, random_split  # noqa: PLC0415
 
-    # Resolve device
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = select_device(device)
     print(f"[train] Using device: {device}")
 
     # Load policy rows
