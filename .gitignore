@@ -48,3 +48,8 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+
+# Eval artifacts — regenerate via `python -m eval.component_metrics`
+# and `python -m eval.end_to_end`.
+eval/results/*.json
+eval/results/*.png
