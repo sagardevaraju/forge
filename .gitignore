@@ -38,3 +38,9 @@ next-env.d.ts
 
 # local SQLite db (libsql fallback)
 forge-local.db*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
