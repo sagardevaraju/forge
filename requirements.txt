@@ -1,3 +1,9 @@
 numpy>=1.26
 pytest>=8.0
 requests>=2.31
+
+# Optional — only required for real-mode Sentinel-2 fetches (FORGE_CV_MODE=real)
+planetary-computer>=1.0
+pystac-client>=0.7
+rasterio>=1.3
+rioxarray>=0.15
