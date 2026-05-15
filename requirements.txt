@@ -10,6 +10,10 @@ optuna>=3.5
 scikit-learn>=1.4
 joblib>=1.3
 
+# Task 16-17: optimization (Portfolio MIP + Operational VRP)
+pulp>=2.7
+ortools>=9.10
+
 # Optional — only required for real-mode Sentinel-2 fetches (FORGE_CV_MODE=real)
 planetary-computer>=1.0
 pystac-client>=0.7
