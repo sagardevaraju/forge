@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "migrate": "tsx lib/db/migrate.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
