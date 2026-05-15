@@ -1,6 +1,6 @@
 """Seed 10,000 synthetic residential policies across FL, TX, LA, NC.
 
-Run from the FORGE/ directory:
+Run from anywhere — DB path is resolved relative to this file:
     python scripts/seed_policy_book.py
 
 The script is idempotent: it truncates the policies table before inserting
@@ -9,9 +9,11 @@ so repeated runs always produce the same deterministic dataset (random.seed=42).
 
 import random
 import sqlite3
-import math
+from pathlib import Path
 
 random.seed(42)
+
+DB_PATH = Path(__file__).resolve().parent.parent / "forge-local.db"
 
 # ---------------------------------------------------------------------------
 # State configuration
@@ -110,7 +112,7 @@ def generate_policy():
 
 
 def main():
-    conn = sqlite3.connect("forge-local.db")
+    conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
     # Idempotency: truncate before seeding
@@ -131,36 +133,32 @@ def main():
     )
 
     conn.commit()
-    conn.close()
 
-    # Summary stats
-    import sqlite3 as _sqlite3
-    conn2 = _sqlite3.connect("forge-local.db")
-    cur2 = conn2.cursor()
-    cur2.execute("""
+    # Summary stats (reuse the same connection)
+    cur.execute("""
         SELECT
             COUNT(*) AS n,
             ROUND(AVG(tiv)) AS avg_tiv,
             ROUND(SUM(premium_annual)) AS total_premium
         FROM policies
     """)
-    n, avg_tiv, total_premium = cur2.fetchone()
+    n, avg_tiv, total_premium = cur.fetchone()
     print(f"\nVerification:")
     print(f"  Total policies   : {n:,}")
     print(f"  Avg TIV ($)      : {avg_tiv:,.0f}")
     print(f"  Total premium ($): {total_premium:,.0f}")
 
-    cur2.execute("""
+    cur.execute("""
         SELECT state, COUNT(*) AS cnt
         FROM policies
         GROUP BY state
         ORDER BY cnt DESC
     """)
     print("\n  Policies by state:")
-    for row in cur2.fetchall():
+    for row in cur.fetchall():
         print(f"    {row[0]}: {row[1]:,}")
 
-    conn2.close()
+    conn.close()
     print("\nDone.")
 
 
