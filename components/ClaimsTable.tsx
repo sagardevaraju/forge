@@ -106,10 +106,10 @@ export function ClaimsTable({ policies }: Props) {
               <td
                 className={`p-2 font-medium ${
                   p.severity === 'high'
-                    ? 'text-red-600'
+                    ? 'text-red-700'
                     : p.severity === 'medium'
-                      ? 'text-orange-600'
-                      : 'text-zinc-600'
+                      ? 'text-orange-700'
+                      : 'text-zinc-700'
                 }`}
               >
                 {p.severity}

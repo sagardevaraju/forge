@@ -10,6 +10,12 @@ export default function Home() {
         <Link href="/events" className="underline">Event Console</Link>
         <Link href="/claims" className="underline">Claims Pre-Brief</Link>
       </nav>
+      <Link
+        href="/load"
+        className="text-xs text-zinc-600 underline hover:text-zinc-900"
+      >
+        Load your own book (CSV) →
+      </Link>
     </main>
   );
 }

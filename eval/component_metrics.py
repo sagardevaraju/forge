@@ -83,26 +83,25 @@ def _weak_labels(flood_zone: str | None, elevation_m: float | None) -> np.ndarra
 
 
 def compute_cv_head_block(*, sample_n: int = 500) -> dict[str, Any]:
-    """Run the mock CV head over a sample of policies and compute per-dim MAE."""
-    try:
-        from ml.cv.data_loaders import mock_chip
-        from ml.cv.inference import predict_chip_mock
-    except Exception as exc:   # pragma: no cover — defensive
-        return {
-            "error": f"failed to import CV modules: {exc}",
-            "per_dim_mae": None,
-            "context": (
-                "Real CV head training is deferred; this block evaluates the "
-                "mock CV head's outputs against weak-label proxies (flood "
-                "zone -> water_proximity, elevation_m -> elevation_bucket / "
-                "vegetation_density).  It is a sanity check on the mock "
-                "head's variability, NOT a real-model evaluation."
-            ),
-        }
+    """Read trained-CV-head outputs from policies.cv_features and compute per-dim MAE.
 
+    The trained Prithvi backbone + 8-dim MLP head (``artifacts/cv_head.pt``)
+    was run offline by ``scripts/populate_cv_features.py`` against the cached
+    Sentinel-2 chips in ``artifacts/chips/``; the 8-dim predictions for every
+    policy live in ``policies.cv_features``. We evaluate those cached
+    predictions here, avoiding a torch dependency at eval time and ensuring
+    we score what the running app actually consumes.
+    """
     if not DB_PATH.exists():
         return {
             "error": f"db not found: {DB_PATH}",
+            "per_dim_mae": None,
+        }
+
+    head_artifact = ROOT / "artifacts" / "cv_head.pt"
+    if not head_artifact.exists():
+        return {
+            "error": "artifacts/cv_head.pt missing — train the CV head first (ml/cv/train.py)",
             "per_dim_mae": None,
         }
 
@@ -110,8 +109,9 @@ def compute_cv_head_block(*, sample_n: int = 500) -> dict[str, Any]:
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT lat, lon, flood_zone, elevation_m FROM policies "
+            "SELECT lat, lon, flood_zone, elevation_m, cv_features FROM policies "
             "WHERE lat IS NOT NULL AND lon IS NOT NULL "
+            "  AND cv_features IS NOT NULL AND cv_features != '' "
             "ORDER BY id LIMIT ?",
             (sample_n,),
         )
@@ -121,7 +121,7 @@ def compute_cv_head_block(*, sample_n: int = 500) -> dict[str, Any]:
 
     if not rows:
         return {
-            "error": "no policies returned from DB",
+            "error": "no policies returned with populated cv_features",
             "per_dim_mae": None,
         }
 
@@ -131,19 +131,32 @@ def compute_cv_head_block(*, sample_n: int = 500) -> dict[str, Any]:
 
     pred_sum = np.zeros(8, dtype=np.float64)
     pred_sq_sum = np.zeros(8, dtype=np.float64)
+    malformed = 0
 
-    for lat, lon, fz, elev in rows:
-        chip = mock_chip(float(lat), float(lon))
-        pred = predict_chip_mock(chip).astype(np.float64)
+    for lat, lon, fz, elev, cv_str in rows:
+        try:
+            vec = np.array(json.loads(cv_str), dtype=np.float64)
+            if vec.shape != (8,):
+                malformed += 1
+                continue
+        except (TypeError, ValueError, json.JSONDecodeError):
+            malformed += 1
+            continue
+
         labels = _weak_labels(fz, elev)
-        pred_sum += pred
-        pred_sq_sum += pred * pred
+        pred_sum += vec
+        pred_sq_sum += vec * vec
         for i in range(8):
             if not np.isnan(labels[i]):
-                abs_err_sum[i] += abs(pred[i] - labels[i])
+                abs_err_sum[i] += abs(vec[i] - labels[i])
                 abs_err_n[i] += 1
 
-    n = len(rows)
+    n = len(rows) - malformed
+    if n <= 0:
+        return {
+            "error": "all sampled cv_features rows malformed",
+            "per_dim_mae": None,
+        }
     per_dim_mae: dict[str, float | None] = {}
     per_dim_pred_mean: dict[str, float] = {}
     per_dim_pred_std: dict[str, float] = {}
@@ -158,15 +171,16 @@ def compute_cv_head_block(*, sample_n: int = 500) -> dict[str, Any]:
 
     return {
         "context": (
-            "Real CV head training is deferred; this block evaluates the "
-            "mock CV head's outputs against weak-label proxies derived "
-            "from the policy book itself (flood_zone -> water_proximity, "
-            "elevation_m -> elevation_bucket / vegetation_density).  Dims "
-            "without a defensible proxy report null MAE.  This is a "
-            "sanity check on the mock head's variability, not a "
-            "real-model evaluation."
+            "Per-dim MAE of the trained CV head (Prithvi backbone + 8-dim MLP "
+            "head from artifacts/cv_head.pt) against weak-label proxies derived "
+            "from the policy book (flood_zone -> water_proximity, elevation_m -> "
+            "elevation_bucket / vegetation_density). Predictions are the cached "
+            "outputs of the real head, materialized by scripts/populate_cv_features.py "
+            "against the real Sentinel-2 chips in artifacts/chips/. Dims without "
+            "a defensible weak label report null MAE."
         ),
         "sample_n": n,
+        "malformed_rows": malformed,
         "per_dim_mae": per_dim_mae,
         "per_dim_pred_mean": per_dim_pred_mean,
         "per_dim_pred_std": per_dim_pred_std,

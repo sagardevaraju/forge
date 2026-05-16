@@ -1,28 +1,37 @@
 'use client';
 /**
- * Task 20 — Portfolio Map view.
+ * Portfolio Map view.
  *
- * Renders the underwriting book as size-scaled circles over a Mapbox base
- * layer. Each circle represents one ZIP3 of the seeded policy book; its
- * radius scales with log10(total TIV) so a single megapolicy zip doesn't
- * swallow the rest of the map. Clicking a circle opens a side panel listing
- * the cohorts inside that ZIP3.
+ * Renders the underwriting book as size-scaled circles over a MapLibre /
+ * OpenFreeMap base layer. Each circle represents one ZIP3 of the policy
+ * book; its radius scales with log10(total TIV) so a single megapolicy
+ * zip doesn't swallow the rest of the map. Color encodes the MIP-recommended
+ * dominant action for that ZIP3 (retain / reprice / non-renew / cede).
+ * Clicking a circle opens a drilldown panel showing per-cohort action
+ * fractions inside that ZIP3.
  *
- * Why centroids rather than choropleth: the prototype operates on the 38
- * ZIP3s seeded by `scripts/seed_policy_book.py`. Shipping a full ZIP3
- * polygon TopoJSON for those would balloon the bundle by ~MB-class assets
+ * Why centroids rather than choropleth: the FL/TX/LA/NC seed book covers
+ * ~38 ZIP3s. Shipping a full ZIP3 polygon TopoJSON would balloon the bundle
  * for a demo that only needs to communicate "this is where your exposure
- * is concentrated". We hand-code centroids derived from the seed
- * distribution and revisit when the book grows past hardcoded scope.
+ * is concentrated and what we're doing about it." Hand-coded centroids
+ * derived from the seed distribution; revisit when the book widens.
  */
 import { useState, useMemo, useCallback } from 'react';
 import { MapBase } from './MapBase';
 import { PortfolioDrillDown } from './PortfolioDrillDown';
 import type { Cohort } from '@/lib/db/cohorts';
-import { Source, Layer, type MapMouseEvent } from 'react-map-gl/mapbox';
+import {
+  type PortfolioOptimization,
+  type ActionName,
+  indexByZip3,
+  ACTION_COLORS,
+  ACTION_LABELS,
+} from '@/lib/portfolio-actions';
+import { Source, Layer, type MapMouseEvent } from 'react-map-gl/maplibre';
 
 interface Props {
   cohorts: Cohort[];
+  optimization: PortfolioOptimization | null;
 }
 
 /**
@@ -78,7 +87,7 @@ const ZIP3_CENTROIDS: Record<string, [number, number]> = {
 
 const FALLBACK_CENTROID: [number, number] = [-82, 28];
 
-export function PortfolioMap({ cohorts }: Props) {
+export function PortfolioMap({ cohorts, optimization }: Props) {
   const [selectedZip3, setSelectedZip3] = useState<string | null>(null);
 
   /** Aggregate per-ZIP3 totals over the cohort list. */
@@ -92,18 +101,42 @@ export function PortfolioMap({ cohorts }: Props) {
     return m;
   }, [cohorts]);
 
+  /** Per-zip3 dominant action recommendation (by TIV-weighted share). */
+  const zip3Actions = useMemo(
+    () => (optimization ? indexByZip3(optimization) : {}),
+    [optimization],
+  );
+
+  /**
+   * Per-cohort action lookup for the drilldown. Keyed by `cohort.id`.
+   */
+  const actionByCohort = useMemo(() => {
+    if (!optimization) return {};
+    const m: Record<string, (typeof optimization.actions)[number]> = {};
+    for (const a of optimization.actions) m[a.cohort_id] = a;
+    return m;
+  }, [optimization]);
+
   /** GeoJSON FeatureCollection feeding the circle layer. */
   const geojson = useMemo(() => {
     const features = Object.entries(zip3Totals).map(([zip3, { tiv, policies }]) => {
       const c = ZIP3_CENTROIDS[zip3] ?? FALLBACK_CENTROID;
+      const action = zip3Actions[zip3]?.dominantActionByTiv ?? null;
       return {
         type: 'Feature' as const,
         geometry: { type: 'Point' as const, coordinates: c },
-        properties: { zip3, tiv, policies, log_tiv: Math.log10(tiv + 1) },
+        properties: {
+          zip3,
+          tiv,
+          policies,
+          log_tiv: Math.log10(tiv + 1),
+          color: action ? ACTION_COLORS[action] : '#9ca3af',
+          action: action ?? 'unknown',
+        },
       };
     });
     return { type: 'FeatureCollection' as const, features };
-  }, [zip3Totals]);
+  }, [zip3Totals, zip3Actions]);
 
   const handleMapClick = useCallback((e: MapMouseEvent) => {
     const feature = e.features?.[0];
@@ -143,10 +176,10 @@ export function PortfolioMap({ cohorts }: Props) {
                 9,
                 30,
               ],
-              'circle-color': '#2563eb',
-              'circle-opacity': 0.6,
-              'circle-stroke-width': 1,
-              'circle-stroke-color': '#1e40af',
+              'circle-color': ['get', 'color'],
+              'circle-opacity': 0.75,
+              'circle-stroke-width': 1.5,
+              'circle-stroke-color': '#1f2937',
             }}
           />
         </Source>
@@ -162,7 +195,7 @@ export function PortfolioMap({ cohorts }: Props) {
           border: '1px solid #e5e7eb',
           borderRadius: 4,
           fontSize: 12,
-          maxWidth: 280,
+          maxWidth: 320,
         }}
       >
         <div style={{ fontWeight: 600, marginBottom: 8 }}>Book exposure by ZIP3</div>
@@ -172,14 +205,66 @@ export function PortfolioMap({ cohorts }: Props) {
         </div>
         <div>Total policies: {aggregatePolicies.toLocaleString()}</div>
         <div>ZIP3s: {Object.keys(zip3Totals).length}</div>
-        <div style={{ marginTop: 8, fontSize: 11, color: '#6b7280' }}>
-          Click a circle to drill down (TODO when MIP wired).
+        {optimization && (
+          <div
+            style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #e5e7eb' }}
+          >
+            <div style={{ fontWeight: 600, marginBottom: 6 }}>
+              MIP recommendation
+            </div>
+            <div>
+              Expected margin: $
+              {(optimization.objective / 1e6).toFixed(1)}M
+            </div>
+            <div>
+              Annual loss (p50): $
+              {(optimization.book_totals.loss_p50 / 1e6).toFixed(1)}M · p99 $
+              {(optimization.book_totals.loss_p99 / 1e6).toFixed(1)}M
+            </div>
+            <div
+              style={{
+                marginTop: 8,
+                display: 'grid',
+                gridTemplateColumns: 'auto 1fr auto',
+                gap: '2px 8px',
+                fontSize: 11,
+              }}
+            >
+              {(Object.entries(optimization.action_summary) as [
+                ActionName,
+                { count: number; tiv: number },
+              ][])
+                .filter(([, v]) => v.tiv > 0)
+                .sort((a, b) => b[1].tiv - a[1].tiv)
+                .map(([action, v]) => (
+                  <div key={action} style={{ display: 'contents' }}>
+                    <span
+                      style={{
+                        width: 10,
+                        height: 10,
+                        background: ACTION_COLORS[action],
+                        borderRadius: '50%',
+                        alignSelf: 'center',
+                      }}
+                    />
+                    <span>{ACTION_LABELS[action]}</span>
+                    <span style={{ color: '#6b7280' }}>
+                      {((v.tiv / aggregateTiv) * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+        <div style={{ marginTop: 10, fontSize: 11, color: '#6b7280' }}>
+          Click a circle to inspect its cohorts and recommended actions.
         </div>
       </div>
       {selectedZip3 && (
         <PortfolioDrillDown
           zip3={selectedZip3}
           cohorts={selectedCohorts}
+          actionByCohort={actionByCohort}
           onClose={() => setSelectedZip3(null)}
         />
       )}

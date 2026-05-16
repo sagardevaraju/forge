@@ -1,16 +1,14 @@
 'use client';
 /**
- * Task 21 — Agent chat panel.
+ * Agent chat panel.
  *
- * Minimal chat UI against `POST /api/agent/chat`. Each user submission posts
- * the running message list and appends the plain-text response. The endpoint
- * already returns `text/plain` so there's no JSON parsing here.
- *
- * Streaming UX (token-by-token) is a deliberate future enhancement; the
- * current backend returns the final assistant content after the tool-call
- * loop completes, which keeps the wire format simple for the demo.
+ * Consumes the NDJSON stream from `POST /api/agent/chat` so users see tool
+ * calls happen in real time instead of waiting in silence. Each `tool_call`
+ * event becomes a "Calling X…" status line; each `tool_result` collapses
+ * it; the `final` event becomes the assistant's reply.
  */
 import { useState } from 'react';
+import { readChatStream } from '@/lib/chat-stream';
 
 interface Msg {
   role: 'user' | 'assistant';
@@ -21,6 +19,7 @@ export function AgentChat() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [statusLine, setStatusLine] = useState<string>('');
 
   async function send() {
     if (!input.trim() || busy) return;
@@ -28,18 +27,38 @@ export function AgentChat() {
     setMessages(next);
     setInput('');
     setBusy(true);
+    setStatusLine('Thinking…');
     try {
       const r = await fetch('/api/agent/chat', {
         method: 'POST',
         body: JSON.stringify({ messages: next }),
       });
-      const text = await r.text();
-      setMessages([...next, { role: 'assistant', content: text }]);
+      if (!r.ok) throw new Error(`chat returned ${r.status}`);
+
+      let final = '';
+      for await (const ev of readChatStream(r)) {
+        if (ev.type === 'tool_call') {
+          setStatusLine(`Calling ${ev.name}…`);
+        } else if (ev.type === 'tool_result') {
+          setStatusLine(
+            ev.ok ? `${ev.name} → ${ev.summary}` : `${ev.name} failed`,
+          );
+        } else if (ev.type === 'final') {
+          final = ev.text;
+        } else if (ev.type === 'error') {
+          throw new Error(ev.message);
+        }
+      }
+      setMessages([
+        ...next,
+        { role: 'assistant', content: final || '(empty response)' },
+      ]);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setMessages([...next, { role: 'assistant', content: `Error: ${msg}` }]);
     } finally {
       setBusy(false);
+      setStatusLine('');
     }
   }
 
@@ -66,7 +85,14 @@ export function AgentChat() {
             <span style={{ whiteSpace: 'pre-wrap' }}>{m.content}</span>
           </div>
         ))}
-        {busy && <div className="text-zinc-500 text-xs">Thinking…</div>}
+        {busy && statusLine && (
+          <div
+            className="text-zinc-600 text-xs italic"
+            data-testid="agent-status-line"
+          >
+            {statusLine}
+          </div>
+        )}
       </div>
       <div className="flex gap-2">
         <input

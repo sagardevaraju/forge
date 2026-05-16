@@ -15,7 +15,7 @@
  */
 import { useState } from 'react';
 import { MapBase } from './MapBase';
-import { Source, Layer } from 'react-map-gl/mapbox';
+import { Source, Layer } from 'react-map-gl/maplibre';
 import { AgentChat } from './AgentChat';
 import { SitrepPanel } from './SitrepPanel';
 import type { FetchNhcConeResult } from '@/app/api/agent/tools/fetch_nhc_cone';
@@ -28,6 +28,16 @@ interface Props {
 
 export function EventConsole({ cone, fires }: Props) {
   const [sitrepMd, setSitrepMd] = useState<string>('');
+
+  const sitrepCtx = cone
+    ? {
+        storm_id: 'AL092024',
+        advisory_number: cone.advisory_number ?? null,
+        peak_wind: cone.peak_wind ?? null,
+        fire_count: (fires ?? []).length,
+        source: cone.source,
+      }
+    : null;
 
   const firesGeoJson = {
     type: 'FeatureCollection' as const,
@@ -78,8 +88,24 @@ export function EventConsole({ cone, fires }: Props) {
               data-testid="event-summary"
               className="absolute top-3 left-3 bg-white p-3 border rounded shadow-sm text-xs max-w-xs"
             >
-              <div className="font-semibold mb-1">
-                Storm: {cone.advisory_number || 'N/A'}
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <div className="font-semibold">
+                  Storm: {cone.advisory_number || 'N/A'}
+                </div>
+                <span
+                  className={
+                    cone.source === 'live'
+                      ? 'inline-flex items-center gap-1 rounded px-1.5 py-0.5 bg-green-100 text-green-800 text-[10px] font-medium'
+                      : 'inline-flex items-center gap-1 rounded px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-medium'
+                  }
+                  title={
+                    cone.source === 'live'
+                      ? 'Cone fetched live from NHC'
+                      : 'Mock scenario — NHC has no active advisory for this storm ID. Replace storm_id in app/events/page.tsx with a currently active system to fetch live data.'
+                  }
+                >
+                  {cone.source === 'live' ? '● Live NHC' : 'Demo scenario'}
+                </span>
               </div>
               <div>Peak wind: {cone.peak_wind ?? 'N/A'} mph</div>
               <div>{(fires ?? []).length} active fires nearby</div>
@@ -88,7 +114,11 @@ export function EventConsole({ cone, fires }: Props) {
         </div>
         <div className="flex flex-col gap-4 overflow-auto">
           <AgentChat />
-          <SitrepPanel sitrepMd={sitrepMd} onGenerate={setSitrepMd} />
+          <SitrepPanel
+            sitrepMd={sitrepMd}
+            context={sitrepCtx}
+            onGenerate={setSitrepMd}
+          />
         </div>
       </div>
     </main>
