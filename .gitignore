@@ -59,3 +59,9 @@ __pycache__/
 # and `python -m eval.end_to_end`.
 eval/results/*.json
 eval/results/*.png
+
+# Playwright MCP traces
+.playwright-mcp/
+
+# Root-level dev screenshots (not docs)
+/*.png
