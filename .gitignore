@@ -43,6 +43,12 @@ forge-local.db*
 artifacts/*.parquet
 artifacts/*.joblib
 
+# Pre-cached Sentinel-2 chips (~6.5 GB for 10k policies). Rebuild with
+# scripts/cache_s2_chips.py. Failure log + raw stdout log also regenerate.
+artifacts/chips/
+artifacts/chips_fetch_failures.txt
+artifacts/chips_fetch.log
+
 # Python
 __pycache__/
 *.pyc

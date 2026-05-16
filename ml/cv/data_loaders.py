@@ -20,6 +20,7 @@ defaults to mock mode.  Set it to ``real`` to hit the live catalog.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import List, Sequence
 
 import numpy as np
@@ -37,6 +38,11 @@ CHIP_SIZE: int = 256
 
 #: Sentinel-2 L2A reflectance scale max (values are integer * 1e-4).
 _S2_MAX: int = 10_000
+
+#: Filesystem root for pre-cached Sentinel-2 chips.
+#: One .npy file per policy: ``CHIPS_DIR/<policy_id // 100:02d>/<policy_id>.npy``.
+#: Override with ``FORGE_CHIPS_DIR`` for test isolation.
+CHIPS_DIR: Path = Path(__file__).resolve().parent.parent.parent / "artifacts" / "chips"
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +150,7 @@ def fetch_chip(
     import planetary_computer  # noqa: PLC0415
     import pystac_client  # noqa: PLC0415
     import rasterio  # noqa: PLC0415
+    from rasterio.warp import transform as _crs_transform  # noqa: PLC0415
     from rasterio.windows import Window  # noqa: PLC0415
 
     # -----------------------------------------------------------------------
@@ -188,8 +195,12 @@ def fetch_chip(
     for band in bands:
         asset_href = item.assets[band].href
         with rasterio.open(asset_href) as src:
-            # Convert geographic coordinates to pixel row/col in this scene.
-            py, px = src.index(lon, lat)
+            # Sentinel-2 tiles are stored in UTM (per-tile EPSG), not 4326.
+            # Convert the (lat, lon) anchor into the tile's CRS *first*,
+            # otherwise src.index() returns indices far outside the raster
+            # bounds and src.read returns silently-zero windows.
+            xs, ys = _crs_transform("EPSG:4326", src.crs, [lon], [lat])
+            py, px = src.index(xs[0], ys[0])
             window = Window(
                 col_off=max(px - half, 0),
                 row_off=max(py - half, 0),
@@ -210,36 +221,102 @@ def fetch_chip(
 
 
 # ---------------------------------------------------------------------------
+# Cached path — pre-fetched chips on disk
+# ---------------------------------------------------------------------------
+
+
+def _chips_root() -> Path:
+    """Return the active chips directory (env-var override for tests)."""
+    override = os.environ.get("FORGE_CHIPS_DIR")
+    return Path(override) if override else CHIPS_DIR
+
+
+def chip_path(policy_id: int) -> Path:
+    """Return the on-disk path for a given policy_id's cached chip.
+
+    Layout: ``<root>/<policy_id // 100:02d>/<policy_id>.npy`` so 10k policies
+    spread across ~100 directories of ~100 files each — comfortable for APFS.
+    """
+    shard = f"{policy_id // 100:02d}"
+    return _chips_root() / shard / f"{policy_id}.npy"
+
+
+def save_cached_chip(policy_id: int, chip: np.ndarray) -> Path:
+    """Write a chip to disk under :func:`chip_path`. Returns the path written.
+
+    Validates shape/dtype before writing so a corrupt fetch can't poison
+    the cache silently.
+    """
+    if chip.shape != (len(DEFAULT_BANDS), CHIP_SIZE, CHIP_SIZE):
+        raise ValueError(
+            f"chip shape {chip.shape} != ({len(DEFAULT_BANDS)},{CHIP_SIZE},{CHIP_SIZE})"
+        )
+    if chip.dtype != np.uint16:
+        chip = chip.astype(np.uint16)
+    path = chip_path(policy_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(path, chip, allow_pickle=False)
+    return path
+
+
+def load_cached_chip(policy_id: int) -> np.ndarray:
+    """Load a pre-fetched chip from disk.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the chip has not been cached for this policy_id. Run
+        ``scripts/cache_s2_chips.py`` first.
+    """
+    path = chip_path(policy_id)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"No cached chip for policy {policy_id} at {path}. "
+            "Run scripts/cache_s2_chips.py to populate the cache."
+        )
+    chip = np.load(path, allow_pickle=False)
+    if chip.shape != (len(DEFAULT_BANDS), CHIP_SIZE, CHIP_SIZE):
+        raise ValueError(
+            f"cached chip {path} has shape {chip.shape}, expected "
+            f"({len(DEFAULT_BANDS)},{CHIP_SIZE},{CHIP_SIZE})"
+        )
+    return chip.astype(np.uint16, copy=False)
+
+
+# ---------------------------------------------------------------------------
 # Unified entry point
 # ---------------------------------------------------------------------------
 
 
 def load_chip(
-    lat: float,
-    lon: float,
+    lat: float | None = None,
+    lon: float | None = None,
     mode: str | None = None,
     bands: Sequence[str] = DEFAULT_BANDS,
     seed: int | None = None,
+    policy_id: int | None = None,
 ) -> np.ndarray:
-    """Load a Sentinel-2 chip for the given location.
+    """Load a Sentinel-2 chip for the given location or policy.
 
-    Dispatches to either :func:`fetch_chip` (real Planetary Computer data) or
-    :func:`mock_chip` (deterministic synthetic data) based on *mode*.
+    Dispatches to one of three loaders based on *mode*:
+
+    - ``"real"``    → :func:`fetch_chip` (Planetary Computer, lat/lon required)
+    - ``"mock"``    → :func:`mock_chip` (deterministic synthetic, lat/lon required)
+    - ``"cached"``  → :func:`load_cached_chip` (disk, policy_id required)
 
     Parameters
     ----------
-    lat:
-        Latitude of the property centroid (WGS-84 decimal degrees).
-    lon:
-        Longitude of the property centroid (WGS-84 decimal degrees).
+    lat, lon:
+        Property centroid in WGS-84 (required for ``real`` and ``mock`` modes).
     mode:
-        ``"real"`` or ``"mock"``.  If *None* (the default), the value of the
-        environment variable ``FORGE_CV_MODE`` is used.  When the variable is
-        absent or set to ``"mock"`` (case-insensitive), mock mode is active.
+        ``"real"``, ``"mock"``, or ``"cached"``. If *None* (the default), the
+        ``FORGE_CV_MODE`` environment variable is consulted (default ``mock``).
     bands:
-        Band identifiers to include.
+        Band identifiers (ignored in ``cached`` mode — the file is fixed).
     seed:
-        Seed override forwarded to :func:`mock_chip` (ignored in real mode).
+        Seed override forwarded to :func:`mock_chip` (ignored in other modes).
+    policy_id:
+        Required for ``cached`` mode; ignored otherwise.
 
     Returns
     -------
@@ -248,9 +325,16 @@ def load_chip(
     """
     if mode is None:
         env = os.environ.get("FORGE_CV_MODE", "mock").strip().lower()
-        mode = env if env in {"real", "mock"} else "mock"
+        mode = env if env in {"real", "mock", "cached"} else "mock"
 
+    if mode == "cached":
+        if policy_id is None:
+            raise ValueError("policy_id is required for mode='cached'")
+        return load_cached_chip(policy_id)
     if mode == "real":
+        if lat is None or lon is None:
+            raise ValueError("lat and lon are required for mode='real'")
         return fetch_chip(lat=lat, lon=lon, bands=bands)
-    else:
-        return mock_chip(lat=lat, lon=lon, seed=seed, bands=bands)
+    if lat is None or lon is None:
+        raise ValueError("lat and lon are required for mode='mock'")
+    return mock_chip(lat=lat, lon=lon, seed=seed, bands=bands)

@@ -85,9 +85,18 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
 import numpy as np
+
+# Ensure the repo root is on sys.path when this file is invoked as a script
+# (`python ml/cv/train.py ...`). Without this, the in-function imports of
+# `ml.cv.data_loaders` fail because `ml` isn't a top-level package on the
+# default path.
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 # ---------------------------------------------------------------------------
 # Guard heavy imports — not available in this autonomous session
@@ -240,16 +249,36 @@ class PolicyChipDataset:
     """Minimal Dataset wrapping (id, lat, lon) rows from policies.
 
     When __getitem__ is called it:
-      1. Calls data_loaders.load_chip(lat, lon) to fetch the chip.
+      1. Loads the chip via ``data_loaders.load_chip`` — routed by ``mode``:
+           - ``"cached"`` (preferred for training): reads pre-fetched chip
+             from ``artifacts/chips/<id // 100>/<id>.npy`` (no network).
+           - ``"mock"``: deterministic synthetic chip from lat/lon seed.
+           - ``"real"``: live Planetary Computer fetch (~3-5 s/row — only
+             use this for one-off lookups, never for an epoch loop).
       2. Normalises uint16 → float32 in [0, 1].
       3. Returns (chip_tensor, label_tensor, policy_id).
+
+    When ``mode == "cached"`` the constructor pre-scans every cached chip
+    and drops policies whose chip is all-zero or missing. These are policies
+    the synthetic policy book placed offshore (state=NC at FL-centred lat/lon
+    seeds), where Sentinel-2 returns a no-data window. Filtering them keeps
+    the head's training signal clean; their cv_features are filled at
+    inference time via the mock path (see :func:`load_chip_features`).
 
     Weak labels are derived from policy-book columns via ``_derive_labels``.
     """
 
-    def __init__(self, rows: list, mode: str = "mock"):
-        self.rows = rows
+    def __init__(self, rows: list, mode: str = "cached"):
         self.mode = mode
+        if mode == "cached":
+            self.rows, dropped = _filter_empty_cached(rows)
+            if dropped:
+                print(
+                    f"[PolicyChipDataset] mode=cached: dropped {len(dropped)} "
+                    f"policies with empty/missing chips (offshore seed quirk)."
+                )
+        else:
+            self.rows = rows
 
     def __len__(self) -> int:
         return len(self.rows)
@@ -262,12 +291,45 @@ class PolicyChipDataset:
         from ml.cv.data_loaders import load_chip  # noqa: PLC0415
 
         policy_id, lat, lon, flood_zone, build_type, elevation_m = self.rows[idx]
-        chip = load_chip(lat=lat, lon=lon, mode=self.mode)
+        if self.mode == "cached":
+            chip = load_chip(mode="cached", policy_id=policy_id)
+        else:
+            chip = load_chip(lat=lat, lon=lon, mode=self.mode)
         chip_f = torch.from_numpy(chip.astype(np.float32) / S2_MAX)
 
         # Weak labels from policy metadata
         labels = _derive_labels(flood_zone, build_type, elevation_m)
         return chip_f, labels, policy_id
+
+
+def _filter_empty_cached(rows: list) -> tuple[list, list[int]]:
+    """Drop rows whose cached chip is all-zero or missing.
+
+    Returns ``(kept_rows, dropped_policy_ids)``. Reads each .npy via mmap so
+    a 10k-policy scan takes ~5-10 s on M-series — comfortable one-time cost.
+    """
+    from ml.cv.data_loaders import chip_path  # noqa: PLC0415
+
+    kept: list = []
+    dropped: list[int] = []
+    for row in rows:
+        policy_id = row[0]
+        path = chip_path(policy_id)
+        if not path.exists():
+            dropped.append(policy_id)
+            continue
+        try:
+            chip = np.load(path, mmap_mode="r")
+            if int(chip.max()) == 0:
+                dropped.append(policy_id)
+                continue
+        except Exception:  # noqa: BLE001
+            # Corrupt .npy (e.g., from an interrupted write) — skip and let
+            # cache_s2_chips.py --retry-failed clean it up.
+            dropped.append(policy_id)
+            continue
+        kept.append(row)
+    return kept, dropped
 
 
 def _derive_labels(
@@ -317,9 +379,10 @@ def train(
     lr: float = 1e-4,
     batch_size: int = 32,
     backbone: str = "vit_base_patch16_224",
-    mode: str = "mock",
+    mode: str = "cached",
     val_split: float = 0.1,
     device: str | None = None,
+    num_workers: int = 0,
 ) -> None:
     """Train the MLP head on top of the frozen backbone.
 
@@ -361,8 +424,11 @@ def train(
     n_train = len(dataset) - n_val
     train_ds, val_ds = random_split(dataset, [n_train, n_val])
 
-    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=4)
-    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=4)
+    # num_workers=0 by default on macOS — DataLoader worker processes
+    # interact poorly with MPS + Python 3.12 + fork semantics. Override
+    # via --num-workers if you've confirmed it works on your machine.
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
 
     # Build model
     backbone_model = build_backbone(backbone).to(device)
@@ -447,11 +513,22 @@ if __name__ == "__main__":
     parser.add_argument(
         "--mode",
         type=str,
-        default="mock",
-        choices=["mock", "real"],
-        help="Chip loading mode (default: mock)",
+        default="cached",
+        choices=["cached", "mock", "real"],
+        help=(
+            "Chip loading mode (default: cached). 'cached' reads pre-fetched "
+            "chips from artifacts/chips/; 'mock' generates deterministic "
+            "synthetic chips; 'real' hits Planetary Computer per __getitem__ "
+            "(do NOT use in a training loop)."
+        ),
     )
     parser.add_argument("--device", type=str, default=None)
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=0,
+        help="DataLoader workers (default 0 — macOS+MPS safe).",
+    )
     args = parser.parse_args()
 
     train(
@@ -461,4 +538,5 @@ if __name__ == "__main__":
         backbone=args.backbone,
         mode=args.mode,
         device=args.device,
+        num_workers=args.num_workers,
     )

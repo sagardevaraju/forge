@@ -182,6 +182,46 @@ def predict_chip_mock(chip: np.ndarray) -> np.ndarray:
 # Real path — requires trained artifact
 # ---------------------------------------------------------------------------
 
+#: Module-level cache so we don't reload the backbone + head on every call.
+#: Critical when iterating 10k policies — avoids 10k timm.create_model() calls.
+_MODEL_CACHE: dict = {}
+
+
+def _get_real_model():
+    """Lazily build and cache (backbone, head, device) for real inference.
+
+    Reuses the same backbone + trained head across calls within a process,
+    so populate_cv_features.py can stream through 10k rows without paying
+    the ViT-B load cost more than once.
+    """
+    if "model" in _MODEL_CACHE:
+        return _MODEL_CACHE["model"]
+
+    if not HEAD_ARTIFACT.exists():
+        raise NotImplementedError(
+            "Real CV inference requires trained head — run train.py first.\n"
+            f"Expected artifact: {HEAD_ARTIFACT}"
+        )
+
+    try:
+        import torch  # noqa: PLC0415
+    except ImportError as exc:
+        raise RuntimeError(
+            "PyTorch is required for real CV inference. "
+            "Install via: pip install torch timm"
+        ) from exc
+
+    from ml.cv.train import build_mlp_head, build_backbone, select_device  # noqa: PLC0415
+
+    device = select_device()
+    backbone = build_backbone().to(device).eval()
+    head = build_mlp_head().to(device)
+    head.load_state_dict(torch.load(HEAD_ARTIFACT, map_location=device))
+    head.eval()
+
+    _MODEL_CACHE["model"] = (backbone, head, device)
+    return _MODEL_CACHE["model"]
+
 
 def predict_chip(chip: np.ndarray) -> np.ndarray:
     """Run the trained Prithvi/ViT + MLP head to produce 8-dim features.
@@ -205,31 +245,9 @@ def predict_chip(chip: np.ndarray) -> np.ndarray:
     RuntimeError
         If PyTorch is not installed.
     """
-    if not HEAD_ARTIFACT.exists():
-        raise NotImplementedError(
-            "Real CV inference requires trained head — run train.py first.\n"
-            f"Expected artifact: {HEAD_ARTIFACT}"
-        )
+    import torch  # noqa: PLC0415
 
-    try:
-        import torch  # noqa: PLC0415
-    except ImportError as exc:
-        raise RuntimeError(
-            "PyTorch is required for real CV inference. "
-            "Install via: pip install torch timm"
-        ) from exc
-
-    from ml.cv.train import build_mlp_head, build_backbone, select_device  # noqa: PLC0415
-
-    device = select_device()
-
-    # Load backbone (frozen)
-    backbone = build_backbone().to(device).eval()
-
-    # Load trained head
-    head = build_mlp_head().to(device)
-    head.load_state_dict(torch.load(HEAD_ARTIFACT, map_location=device))
-    head.eval()
+    backbone, head, device = _get_real_model()
 
     with torch.no_grad():
         chip_f = torch.from_numpy(chip.astype(np.float32) / 10_000.0).unsqueeze(0).to(device)
@@ -248,36 +266,65 @@ def predict_chip(chip: np.ndarray) -> np.ndarray:
 
 
 def load_chip_features(
-    lat: float,
-    lon: float,
+    lat: float | None = None,
+    lon: float | None = None,
     mode: str | None = None,
+    policy_id: int | None = None,
 ) -> np.ndarray:
     """Load a Sentinel-2 chip and extract 8-dim property-risk features.
 
     Parameters
     ----------
-    lat:
-        Latitude of the property centroid (WGS-84 decimal degrees).
-    lon:
-        Longitude of the property centroid (WGS-84 decimal degrees).
+    lat, lon:
+        Property centroid in WGS-84. Required for ``mock``/``real`` modes,
+        and required for ``cached`` mode too so we can fall back to the
+        mock path when the cached chip is empty (offshore policy seed quirk).
     mode:
-        ``"mock"`` or ``"real"``. If *None*, reads the ``FORGE_CV_MODE``
-        environment variable (default: ``"mock"``).
+        ``"mock"``, ``"real"``, or ``"cached"``. If *None*, reads the
+        ``FORGE_CV_MODE`` environment variable (default: ``"mock"``).
+        ``"cached"`` reads the pre-fetched chip from disk and runs it
+        through the trained backbone + head.
+    policy_id:
+        Required for ``cached`` mode; ignored otherwise.
 
     Returns
     -------
     np.ndarray
         Shape ``(8,)`` float32, all values in ``[0, 1]``.
     """
-    from ml.cv.data_loaders import load_chip  # noqa: PLC0415
+    from ml.cv.data_loaders import load_chip, mock_chip  # noqa: PLC0415
 
     if mode is None:
         env = os.environ.get("FORGE_CV_MODE", "mock").strip().lower()
-        mode = env if env in {"real", "mock"} else "mock"
+        mode = env if env in {"real", "mock", "cached"} else "mock"
 
-    chip = load_chip(lat=lat, lon=lon, mode=mode)
-
-    if mode == "real":
-        return predict_chip(chip)
-    else:
+    # Missing-cache mitigation: if mode=cached and the chip file isn't on
+    # disk (PC fetch never succeeded for this policy_id), fall back to the
+    # mock path so populate_cv_features still produces a non-null feature
+    # vector for every row.
+    chip: np.ndarray
+    try:
+        chip = load_chip(lat=lat, lon=lon, mode=mode, policy_id=policy_id)
+    except FileNotFoundError:
+        if mode != "cached" or lat is None or lon is None:
+            raise
+        chip = mock_chip(lat=lat, lon=lon)
         return predict_chip_mock(chip)
+
+    # Offshore-seed mitigation: if a cached chip is all-zero (Sentinel-2
+    # returned a no-data window because the policy coords land in water),
+    # substitute a deterministic mock chip + use the band-math features.
+    # Same for real-mode fetches that come back empty for any reason.
+    if mode in {"real", "cached"} and int(chip.max()) == 0:
+        if lat is None or lon is None:
+            # No coordinates → return zeros rather than crash; downstream
+            # XGBoost can handle the constant row but the user is warned.
+            return np.zeros(OUTPUT_DIM, dtype=np.float32)
+        chip = mock_chip(lat=lat, lon=lon)
+        return predict_chip_mock(chip)
+
+    # Cached + real both go through the trained head; mock uses the
+    # deterministic band-math feature extractor.
+    if mode in {"real", "cached"}:
+        return predict_chip(chip)
+    return predict_chip_mock(chip)

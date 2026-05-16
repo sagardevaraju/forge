@@ -3,31 +3,31 @@ Batch-populate cv_features for all 10k policies in forge-local.db.
 
 Usage
 -----
+    # Default — fast deterministic mock features (no trained model needed)
     python scripts/populate_cv_features.py
+
+    # Run the trained MLP head over pre-fetched real S2 chips
+    python scripts/populate_cv_features.py --mode cached
+
+    # Hit Planetary Computer live (slow; not recommended for the full 10k)
+    python scripts/populate_cv_features.py --mode real
 
 The script:
   1. Reads all (id, lat, lon) rows from policies.
-  2. For each policy, calls load_chip_features(lat, lon, mode="mock")
-     to get an 8-dim feature vector.
+  2. For each policy, calls load_chip_features(...) to get an 8-dim vector.
   3. Writes the feature as a JSON-stringified array to the cv_features
      column via: UPDATE policies SET cv_features = ? WHERE id = ?
   4. Prints progress every 1000 policies.
 
-The script is idempotent — running it again will overwrite existing
-cv_features values with freshly computed ones (same deterministic result).
-
-Mode
-----
-The default mode is "mock". To switch to real Sentinel-2 fetches (requires
-planetary-computer + rasterio), set the FORGE_CV_MODE environment variable:
-
-    FORGE_CV_MODE=real python scripts/populate_cv_features.py
-
-Real mode is deferred to an offline workstation run.
+The script is idempotent — running it again overwrites existing values.
+Offshore-seed policies (cached chip = all-zero) auto-fall-back to the
+mock feature extractor inside load_chip_features so all 10k rows end up
+with deterministic non-null features.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -53,8 +53,21 @@ DB_PATH = _REPO_ROOT / "forge-local.db"
 
 
 def main() -> None:
-    mode = os.environ.get("FORGE_CV_MODE", "mock").strip().lower()
-    if mode not in {"mock", "real"}:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default=None,
+        choices=["mock", "real", "cached"],
+        help=(
+            "Feature extraction path. Default: $FORGE_CV_MODE or 'mock'. "
+            "'cached' requires artifacts/cv_head.pt and a populated chips dir."
+        ),
+    )
+    args = parser.parse_args()
+
+    mode = args.mode or os.environ.get("FORGE_CV_MODE", "mock").strip().lower()
+    if mode not in {"mock", "real", "cached"}:
         mode = "mock"
 
     print(f"[populate_cv_features] mode={mode}  db={DB_PATH}")
@@ -65,7 +78,7 @@ def main() -> None:
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # Fetch all policies
+    # Fetch all policies (lat/lon needed for offshore-seed mock fallback)
     cur.execute("SELECT id, lat, lon FROM policies ORDER BY id")
     rows = cur.fetchall()
     total = len(rows)
@@ -76,7 +89,9 @@ def main() -> None:
 
     for i, (policy_id, lat, lon) in enumerate(rows, start=1):
         try:
-            feats = load_chip_features(lat=lat, lon=lon, mode=mode)
+            feats = load_chip_features(
+                lat=lat, lon=lon, mode=mode, policy_id=policy_id,
+            )
             # Serialize as compact JSON array, rounded to 6 decimal places
             cv_json = json.dumps([round(float(v), 6) for v in feats])
             updates.append((cv_json, policy_id))
