@@ -81,6 +81,13 @@ export interface ParsedPolicy {
   elevation_m: number | null;
   premium_annual: number | null;
   cv_features: string | null;
+  /**
+   * 0-based index into the *data* portion of the input table (i.e. excluding
+   * the header row). Preserved through validation so callers that drop
+   * invalid rows can still trace each survivor back to its source row —
+   * critical for the wizard's lineage tagging.
+   */
+  srcDataIndex: number;
 }
 
 export interface ParseResult {
@@ -216,6 +223,10 @@ export function validatePolicies(rawRows: string[][]): ParseResult {
       elevation_m,
       premium_annual,
       cv_features,
+      // i is the index into rawRows (header=0, data=1..N). The data-portion
+      // index is therefore i-1; callers join this back to their original
+      // pre-validation row array.
+      srcDataIndex: i - 1,
     });
   }
   return { rows: out, errors };
@@ -294,46 +305,120 @@ export interface MappingSuggestion {
 }
 
 /**
- * Suggest a mapping from CSV columns to FORGE fields by lower-cased
- * substring match against each field's aliases. The match is symmetric:
- * a CSV column wins if it contains an alias OR an alias contains it. The
- * first matching column per field wins (stable order is the column order
- * of the CSV header). PII-named CSV columns are skipped — the wizard
- * never auto-routes a deny-listed column to anything.
+ * Suggest a mapping from CSV columns to FORGE fields by lower-cased,
+ * delimiter-stripped match against each field's aliases.
+ *
+ * Scoring (higher = better):
+ *   100  exact match (lc === la)
+ *    80  alias is a full word inside the CSV column (e.g. 'tiv' inside
+ *        'total_tiv_usd') — uses \b boundaries on the original (pre-strip)
+ *        column name where possible
+ *    60  CSV column is a full word inside an alias
+ *    20  one is a substring of the other (raw includes check) — generic
+ *        substring fallback, weakest signal
+ *
+ * After scoring every (csvColumn, forgeField) pair, we de-duplicate: each
+ * CSV column maps to **at most one** FORGE field — the field with the
+ * highest score for that column (ties broken by FORGE_FIELDS order). This
+ * prevents a short CSV column like 'st' from auto-suggesting to state,
+ * zip3 (via 'postal'), and build_type (via 'construction') simultaneously.
+ *
+ * PII-named CSV columns are skipped — the wizard never auto-routes a
+ * deny-listed column to anything.
  */
 export function suggestMapping(
   csvColumns: string[],
   fields: ForgeField[] = FORGE_FIELDS,
 ): MappingSuggestion[] {
-  const out: MappingSuggestion[] = [];
-  for (const f of fields) {
-    let pick: string | null = null;
-    let bestLen = Infinity;
-    for (const c of csvColumns) {
-      if (isPII(c)) continue;
-      const lc = c.toLowerCase().replace(/[\s_-]/g, '');
+  const norm = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
+  // Build candidate (csvColumn, forgeField, score) triples.
+  type Cand = { col: string; field: string; score: number; order: number };
+  const cands: Cand[] = [];
+  const fieldOrder = new Map(fields.map((f, idx) => [f.id, idx]));
+
+  for (const c of csvColumns) {
+    if (isPII(c)) continue;
+    const lc = norm(c);
+    if (lc === '') continue;
+    for (const f of fields) {
+      let best = 0;
       for (const a of f.aliases) {
-        const la = a.toLowerCase().replace(/[\s_-]/g, '');
+        const la = norm(a);
+        if (la === '') continue;
+        let score = 0;
         if (lc === la) {
-          // exact match: short-circuit win
-          pick = c;
-          bestLen = 0;
-          break;
-        }
-        if (lc.includes(la) || la.includes(lc)) {
-          // closest-length match wins on ties — favours specific over generic
-          const distance = Math.abs(lc.length - la.length);
-          if (distance < bestLen) {
-            pick = c;
-            bestLen = distance;
+          score = 100;
+        } else {
+          // Full-word match against the alias inside the CSV column name.
+          // We test against both the stripped and the original-with-_- form.
+          const wordRe = new RegExp(
+            `(?:^|[\\s_\\-])${escapeRegex(la)}(?:$|[\\s_\\-])`,
+            'i',
+          );
+          if (wordRe.test(c)) {
+            score = 80;
+          } else {
+            const wordReRev = new RegExp(
+              `(?:^|[\\s_\\-])${escapeRegex(c)}(?:$|[\\s_\\-])`,
+              'i',
+            );
+            if (wordReRev.test(a)) {
+              score = 60;
+            } else if (lc.includes(la) || la.includes(lc)) {
+              // Weak substring fallback — only credited when the shorter
+              // string is at least 3 chars, to keep noise like 'st' inside
+              // 'postal' / 'construction' from polluting suggestions.
+              const shorter = lc.length < la.length ? lc : la;
+              if (shorter.length >= 3) score = 20;
+            }
           }
         }
+        if (score > best) best = score;
       }
-      if (bestLen === 0) break;
+      if (best > 0) {
+        cands.push({
+          col: c,
+          field: f.id,
+          score: best,
+          order: fieldOrder.get(f.id) ?? 0,
+        });
+      }
     }
-    out.push({ forgeField: f.id, csvColumn: pick });
   }
-  return out;
+
+  // For each CSV column, keep only its highest-scoring field assignment.
+  const colBest = new Map<string, Cand>();
+  for (const cand of cands) {
+    const prev = colBest.get(cand.col);
+    if (
+      !prev ||
+      cand.score > prev.score ||
+      (cand.score === prev.score && cand.order < prev.order)
+    ) {
+      colBest.set(cand.col, cand);
+    }
+  }
+
+  // Invert: field → best CSV column (highest score; ties broken by
+  // CSV header order via csvColumns iteration).
+  const fieldPick = new Map<string, { col: string; score: number }>();
+  for (const c of csvColumns) {
+    const cand = colBest.get(c);
+    if (!cand) continue;
+    const prev = fieldPick.get(cand.field);
+    if (!prev || cand.score > prev.score) {
+      fieldPick.set(cand.field, { col: c, score: cand.score });
+    }
+  }
+
+  return fields.map((f) => ({
+    forgeField: f.id,
+    csvColumn: fieldPick.get(f.id)?.col ?? null,
+  }));
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export type Mapping = Record<string, string | null>;
@@ -352,12 +437,20 @@ export interface MappedRow {
  * refused_columns (every PII column the row carried, regardless of whether
  * the user tried to map it). PII-mapped fields are dropped from forgeRow
  * — the column NAME is the filter, so the value never reaches the DB.
+ *
+ * `srcRowNumbers` is an optional parallel array of 1-indexed CSV line
+ * numbers for each input row. Callers that filter blank lines client-side
+ * MUST supply this so the lineage points to the actual file line, not the
+ * post-filter index. When omitted, src_row defaults to `i + 2` (header
+ * counted as row 1) — preserves the simple zero-config behavior used by
+ * tests and small inputs.
  */
 export function applyMapping(
   rows: Record<string, string>[],
   mapping: Mapping,
   srcFile: string,
   now: () => string = () => new Date().toISOString(),
+  srcRowNumbers?: number[],
 ): MappedRow[] {
   const ts = now();
   const out: MappedRow[] = [];
@@ -380,11 +473,12 @@ export function applyMapping(
         forgeRow[forgeField] = row[csvCol];
       }
     }
+    const srcRow = srcRowNumbers?.[i] ?? i + 2; // header is row 1
     out.push({
       forgeRow,
       lineage: JSON.stringify({
         src_file: srcFile,
-        src_row: i + 2, // header is row 1
+        src_row: srcRow,
         mapped_at: ts,
         refused_columns: [...refused].sort(),
       }),

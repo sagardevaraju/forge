@@ -20,6 +20,7 @@ import {
   isPII,
   suggestMapping,
   applyMapping,
+  validatePolicies,
 } from '@/lib/book/csv';
 
 describe('PII deny-list', () => {
@@ -109,6 +110,35 @@ describe('suggestMapping', () => {
       }
     }
   });
+
+  test('short CSV column is not mapped to multiple FORGE fields', () => {
+    // Regression: previously 'st' would substring-match into 'state', 'postal'
+    // (zip3 alias), and 'construction' (build_type alias) — auto-routing the
+    // same column to three different fields. With scored + de-duplicated
+    // matching, 'st' should land on at most one field (or none — it's too
+    // short to be a confident match).
+    const sug = suggestMapping(['st', 'tiv'], FORGE_FIELDS);
+    const picks = sug.filter((s) => s.csvColumn === 'st');
+    expect(picks.length).toBeLessThanOrEqual(1);
+    // 'tiv' must still map cleanly to the tiv FORGE field — the de-dup
+    // mustn't strip valid high-score matches.
+    const byId = Object.fromEntries(sug.map((s) => [s.forgeField, s.csvColumn]));
+    expect(byId.tiv).toBe('tiv');
+  });
+
+  test('every CSV column is suggested to at most one FORGE field', () => {
+    // De-duplication invariant: the same CSV column can never appear as the
+    // suggested csvColumn for two different forgeFields. This is what makes
+    // the wizard's auto-mapping reviewable instead of confusing.
+    const cols = [
+      'policy_id', 'state', 'zip3', 'lat', 'lon', 'tiv',
+      'build_type', 'flood_zone', 'construction', 'postal',
+    ];
+    const sug = suggestMapping(cols, FORGE_FIELDS);
+    const picked = sug.map((s) => s.csvColumn).filter((c): c is string => !!c);
+    const dupes = picked.filter((c, i) => picked.indexOf(c) !== i);
+    expect(dupes).toEqual([]);
+  });
 });
 
 describe('applyMapping', () => {
@@ -182,5 +212,52 @@ describe('applyMapping', () => {
     expect(mapped[0].forgeRow.state).toBeUndefined();
     const lineage = JSON.parse(mapped[0].lineage);
     expect(lineage.refused_columns).toContain('customer_name');
+  });
+
+  test('honors explicit srcRowNumbers (blank-line preserving CSV index)', () => {
+    // Regression: callers that filter blank rows client-side MUST be able to
+    // pass through the original CSV line indices so lineage src_row still
+    // matches the actual file line, not the post-filter array index.
+    const rows = [
+      { policy_id: '1', state: 'FL', zip3: '331', lat: '25.7', lon: '-80.2',
+        tiv: '100000', build_type: 'wood_frame', flood_zone: 'X' },
+      { policy_id: '2', state: 'TX', zip3: '770', lat: '29.7', lon: '-95.3',
+        tiv: '180000', build_type: 'masonry', flood_zone: 'X' },
+    ];
+    const mapping = {
+      policy_id: 'policy_id', state: 'state', zip3: 'zip3', lat: 'lat',
+      lon: 'lon', tiv: 'tiv', build_type: 'build_type', flood_zone: 'flood_zone',
+    };
+    // Simulate a CSV with: header (line 1), data (line 2), blank (line 3),
+    // data (line 4). The wizard drops the blank but tracks the line indices.
+    const mapped = applyMapping(rows, mapping, 'book.csv', undefined, [2, 4]);
+    expect(JSON.parse(mapped[0].lineage).src_row).toBe(2);
+    expect(JSON.parse(mapped[1].lineage).src_row).toBe(4);
+  });
+});
+
+describe('validatePolicies — srcDataIndex preservation', () => {
+  test('survivors carry the original pre-validation data-row index', () => {
+    // Regression: when validatePolicies drops invalid rows, every survivor
+    // must still expose the index of its source row in the input table so
+    // the upload-wizard route can pull the matching lineage record. Without
+    // this, lineage gets silently misattributed on every dropped row.
+    const table: string[][] = [
+      ['policy_id', 'state', 'zip3', 'lat', 'lon', 'tiv', 'build_type', 'flood_zone'],
+      ['1', 'FL', '331', '25.7', '-80.2', '100000', 'wood_frame', 'X'], // valid → data idx 0
+      ['2', 'F1', '331', '25.7', '-80.2', '100000', 'wood_frame', 'X'], // bad state (non-letter) → drop
+      ['3', 'TX', '770', '29.7', '-95.3', '180000', 'masonry', 'X'],    // valid → data idx 2
+      ['4', 'LA', '703', '30.1', '-91.0', '-1', 'wood_frame', 'X'],     // bad tiv → drop
+      ['5', 'NC', '275', '35.7', '-78.6', '210000', 'wood_frame', 'A'], // valid → data idx 4
+    ];
+    const { rows, errors } = validatePolicies(table);
+    expect(rows).toHaveLength(3);
+    expect(errors).toHaveLength(2);
+    expect(rows[0].id).toBe(1);
+    expect(rows[0].srcDataIndex).toBe(0);
+    expect(rows[1].id).toBe(3);
+    expect(rows[1].srcDataIndex).toBe(2);
+    expect(rows[2].id).toBe(5);
+    expect(rows[2].srcDataIndex).toBe(4);
   });
 });

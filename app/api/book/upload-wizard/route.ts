@@ -38,6 +38,11 @@ export const maxDuration = 60;
 
 const MAX_ROWS = 200_000;
 const INSERT_BATCH = 200;
+// Match the legacy /api/book/upload route — a hand-crafted POST with a
+// massive lineage blob or a 250k-row payload would otherwise blow the
+// function's memory before validation could reject it.
+const MAX_BYTES = 25 * 1024 * 1024;
+const MAX_LINEAGE_LEN = 8192;
 
 async function runMipPrecompute(): Promise<'refreshed' | 'failed'> {
   return new Promise((resolve) => {
@@ -71,9 +76,26 @@ interface WizardPayload {
 }
 
 export async function POST(req: Request) {
+  // Enforce body-size cap before parsing JSON — protects against memory
+  // spikes from oversized payloads (matches MAX_BYTES on the legacy route).
+  const declaredLen = Number(req.headers.get('content-length') ?? '');
+  if (Number.isFinite(declaredLen) && declaredLen > MAX_BYTES) {
+    return Response.json(
+      { error: `payload too large (${declaredLen} > ${MAX_BYTES})` },
+      { status: 413 },
+    );
+  }
+
   let body: WizardPayload;
   try {
-    body = (await req.json()) as WizardPayload;
+    const raw = await req.text();
+    if (raw.length > MAX_BYTES) {
+      return Response.json(
+        { error: `payload too large (${raw.length} > ${MAX_BYTES})` },
+        { status: 413 },
+      );
+    }
+    body = JSON.parse(raw) as WizardPayload;
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     return Response.json({ error: `bad json: ${msg}` }, { status: 400 });
@@ -135,12 +157,20 @@ export async function POST(req: Request) {
     await db.execute('DELETE FROM policies');
     for (let i = 0; i < parsed.length; i += INSERT_BATCH) {
       const slice = parsed.slice(i, i + INSERT_BATCH);
-      const stmts = slice.map((p, j) => {
+      const stmts = slice.map((p) => {
         const cv =
           p.cv_features ?? JSON.stringify(mockCvFeatures(p.lat, p.lon));
-        // i+j+1 maps back to the original wizard-row index; lineage is the
-        // JSON string the client computed in applyMapping().
-        const lineage = rows[i + j]?.lineage ?? null;
+        // p.srcDataIndex maps back to rows[] BEFORE validation dropped any
+        // invalid rows — this is what keeps lineage pointing to the actual
+        // source row even when intermediate rows fail. Without this we'd
+        // misattribute lineage on every drop. Lineage is also type+length
+        // validated so a hand-crafted POST can't slip a huge or non-string
+        // blob into the DB.
+        const rawLineage = rows[p.srcDataIndex]?.lineage;
+        const lineage =
+          typeof rawLineage === 'string' && rawLineage.length < MAX_LINEAGE_LEN
+            ? rawLineage
+            : null;
         return {
           sql:
             'INSERT INTO policies (id, state, zip3, county, lat, lon, tiv, build_year, ' +

@@ -154,6 +154,53 @@ describe('LoadWizard', () => {
     expect(previewRows[4].textContent).toContain('6');
   });
 
+  test('lineage src_row matches the actual CSV line number when blank rows are present', async () => {
+    // Regression: previously LoadWizard filtered blank rows before calling
+    // applyMapping, but applyMapping numbered src_row from the post-filter
+    // index — so a blank line between rows would shift every subsequent
+    // src_row by one. The fix carries the original CSV line index through.
+    const csv = [
+      HEADER.join(','),
+      '101,FL,331,25.7,-80.2,250000,wood_frame,AE,Acme,a@b.com', // line 2
+      '', // blank line — line 3
+      '102,TX,770,29.7,-95.3,180000,masonry,X,Beta,b@b.com', // line 4
+      '', // blank line — line 5
+      '103,LA,703,30.1,-91.0,320000,manufactured,VE,Gamma,c@b.com', // line 6
+    ].join('\n');
+    const file = new File([csv], 'sparse.csv', { type: 'text/csv' });
+
+    const fetchSpy = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        accepted: 3,
+        rejected: 0,
+        errors: [],
+        refused_columns: [],
+        optimization: 'refreshed',
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<LoadWizard />);
+    await pickFile(file);
+    fireEvent.click(screen.getByTestId('wizard-next'));
+    fireEvent.click(screen.getByTestId('wizard-import'));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const [, init] = fetchSpy.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    const body = JSON.parse(init.body as string);
+    const srcRows = body.rows.map(
+      (r: { lineage: string }) => JSON.parse(r.lineage).src_row,
+    );
+    // Survivors are CSV lines 2, 4, 6 — NOT 2, 3, 4 (the post-filter
+    // sequence). Without the fix this assertion would have read [2, 3, 4].
+    expect(srcRows).toEqual([2, 4, 6]);
+  });
+
   test('import POSTs mapped rows + lineage to /api/book/upload-wizard', async () => {
     const fetchSpy = vi.fn(async () => ({
       ok: true,

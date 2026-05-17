@@ -37,6 +37,12 @@ interface ParsedFile {
   name: string;
   header: string[];
   rows: Record<string, string>[];
+  /**
+   * 1-indexed CSV line number for each entry in `rows`. The wizard filters
+   * blank lines client-side; this array preserves the original line index
+   * so lineage `src_row` matches the actual CSV (header is line 1).
+   */
+  srcRowNumbers: number[];
 }
 
 interface WizardResult {
@@ -76,17 +82,24 @@ export function LoadWizard() {
         return;
       }
       const header = parsed[0].map((c) => c.trim());
-      const dataRows = parsed.slice(1).filter(
-        (r) => r.length > 0 && !(r.length === 1 && r[0] === ''),
-      );
-      const rows: Record<string, string>[] = dataRows.map((cells) => {
+      // Keep blank-row filtering but track each survivor's original CSV
+      // line index so lineage src_row matches the actual file line. The
+      // header occupies line 1, so the first data row is line 2.
+      const rows: Record<string, string>[] = [];
+      const srcRowNumbers: number[] = [];
+      for (let i = 1; i < parsed.length; i++) {
+        const cells = parsed[i];
+        if (cells.length === 0 || (cells.length === 1 && cells[0] === '')) {
+          continue;
+        }
         const obj: Record<string, string> = {};
-        header.forEach((h, i) => {
-          obj[h] = (cells[i] ?? '').trim();
+        header.forEach((h, j) => {
+          obj[h] = (cells[j] ?? '').trim();
         });
-        return obj;
-      });
-      setFile({ name: f.name, header, rows });
+        rows.push(obj);
+        srcRowNumbers.push(i + 1); // parsed[0] is header (line 1)
+      }
+      setFile({ name: f.name, header, rows, srcRowNumbers });
       // Seed the mapping with auto-suggestions.
       const suggestions = suggestMapping(header, FORGE_FIELDS);
       const m: Mapping = {};
@@ -137,6 +150,8 @@ export function LoadWizard() {
       file.rows.slice(0, PREVIEW_ROWS),
       mapping,
       file.name,
+      undefined,
+      file.srcRowNumbers.slice(0, PREVIEW_ROWS),
     );
   }, [file, mapping]);
 
@@ -146,7 +161,13 @@ export function LoadWizard() {
     setStage('Validating + writing to database…');
     setResult(null);
     try {
-      const mapped = applyMapping(file.rows, mapping, file.name);
+      const mapped = applyMapping(
+        file.rows,
+        mapping,
+        file.name,
+        undefined,
+        file.srcRowNumbers,
+      );
       const r = await fetch('/api/book/upload-wizard', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
