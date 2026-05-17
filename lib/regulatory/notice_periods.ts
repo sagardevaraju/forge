@@ -13,7 +13,7 @@
  * ZIP3s in `lib/regulatory/zip3_to_county.ts`.
  */
 const NOTICE_PERIOD_DAYS: Record<string, number> = {
-  FL: 120, // per Fla. Stat. §627.7277 (homeowners non-renewal notice)
+  FL: 120, // per Fla. Stat. §627.4133 (homeowners cancellation / non-renewal notice)
   TX: 60,  // per Tex. Ins. Code §551.105
   LA: 30,  // per La. Rev. Stat. §22:1265
   NC: 45,  // per N.C. Gen. Stat. §58-41-15
