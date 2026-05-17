@@ -120,12 +120,32 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     The TS migrate script (lib/db/migrate.ts) is the canonical migrator; this
     helper mirrors its behaviour for Python callers (tests, ad-hoc seeding)
     so seed() can target a brand-new sqlite file without depending on Node.
+
+    Mirrors two quirks of migrate.ts:
+      1. Statements that are pure ``--`` comments after split-on-``;`` are
+         skipped (schema comments can contain semicolons that fragment the
+         split).
+      2. ``ALTER TABLE ... ADD COLUMN`` errors with ``duplicate column name``
+         once the column exists; that one error is swallowed so the seeder
+         can run against both fresh and pre-migrated DBs (Task P2.39).
     """
     schema = SCHEMA_PATH.read_text()
     stmts = [s.strip() for s in schema.split(";") if s.strip()]
     cur = conn.cursor()
     for stmt in stmts:
-        cur.execute(stmt)
+        # Strip leading "-- ..." comment lines.
+        code = "\n".join(
+            line for line in stmt.split("\n") if not line.lstrip().startswith("--")
+        ).strip()
+        if not code:
+            continue
+        try:
+            cur.execute(code)
+        except sqlite3.OperationalError as exc:
+            is_alter = code.upper().startswith("ALTER TABLE")
+            is_duplicate = "duplicate column name" in str(exc).lower()
+            if not (is_alter and is_duplicate):
+                raise
     conn.commit()
 
 

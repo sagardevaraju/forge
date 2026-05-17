@@ -11,9 +11,15 @@ CREATE TABLE IF NOT EXISTS policies (
   elevation_m REAL,
   premium_annual REAL,
   cv_features TEXT,  -- JSON: 8-dim risk vector
-  synthetic INTEGER NOT NULL DEFAULT 1
+  synthetic INTEGER NOT NULL DEFAULT 1,
+  lineage TEXT  -- Task P2.39: JSON {src_file, src_row, mapped_at, refused_columns}
 );
 CREATE INDEX IF NOT EXISTS idx_policies_zip3 ON policies(zip3);
+
+-- Task P2.39 — additive migration for DBs created before the lineage column shipped.
+-- ALTER TABLE ADD COLUMN errors with "duplicate column name" once the column exists.
+-- The migrate runner tolerates that specific error so re-running is idempotent.
+ALTER TABLE policies ADD COLUMN lineage TEXT;
 
 CREATE TABLE IF NOT EXISTS adjusters (
   id INTEGER PRIMARY KEY,
