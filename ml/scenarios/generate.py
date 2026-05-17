@@ -180,6 +180,7 @@ def generate_scenarios(
     storm_id: str,
     n: int = 1000,
     seed_track: list[dict] | None = None,
+    regime: dict | None = None,
 ) -> list[dict]:
     """Generate ``n`` Monte-Carlo scenarios for ``storm_id``.
 
@@ -195,6 +196,12 @@ def generate_scenarios(
         contain ``lat``, ``lon``, ``hours_from_now``, and optionally
         ``peak_wind``.  If omitted, a built-in Cat-4 Florida-bound seed
         is used.
+    regime:
+        Optional AMO/ENSO regime label (typically the return value of
+        :func:`ml.scenarios.regime.regime_label`).  Task P2.3 plumbing —
+        attached to every scenario as metadata so downstream consumers
+        can see the conditioning context.  P2.4+ will use this to bias
+        the scenario draws; for now it is pass-through.
 
     Returns
     -------
@@ -259,15 +266,18 @@ def generate_scenarios(
             dist_km = _min_distance_to_track_km(meta["lat"], meta["lon"], path)
             surge_grid[zip3] = _surge_depth(dist_km, peak_wind, meta["elev_m"])
 
-        scenarios.append(
-            {
-                "id": f"{storm_id}_{i + 1:04d}",
-                "path": path,
-                "peak_wind": peak_wind,
-                "surge_grid": surge_grid,
-                "prob": prob,
-            }
-        )
+        scenario = {
+            "id": f"{storm_id}_{i + 1:04d}",
+            "path": path,
+            "peak_wind": peak_wind,
+            "surge_grid": surge_grid,
+            "prob": prob,
+        }
+        if regime is not None:
+            # P2.3 plumbing — regime label rides along as scenario metadata.
+            # P2.4+ will branch the draw math on this; for now it is opaque.
+            scenario["regime"] = regime
+        scenarios.append(scenario)
 
     # Normalise (handles n where 1/n isn't exactly representable in float).
     total = sum(s["prob"] for s in scenarios)
