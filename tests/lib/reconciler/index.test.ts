@@ -187,6 +187,9 @@ describe('reconcile — notice-period filter (P2.31)', () => {
       d.setUTCFullYear(d.getUTCFullYear() + 1);
       return d.toISOString().slice(0, 10);
     })();
+    if (stamped.action !== 'non_renew_next_renewal') {
+      throw new Error('expected notice-period stamp');
+    }
     expect(stamped.effective_date_stamp).toBe(expectedStamp);
   });
 
@@ -302,5 +305,111 @@ describe('reconcile — notice-period filter (P2.31)', () => {
       today,
     });
     expect(out.stamped_actions).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task P2.32 — Per-(state, territory) regulatory caps
+// ---------------------------------------------------------------------------
+
+describe('reconcile — territory caps (P2.32)', () => {
+  const today = new Date('2026-05-17T00:00:00Z');
+  const addDays = (d: Date, days: number): string => {
+    const r = new Date(d.getTime());
+    r.setUTCDate(r.getUTCDate() + days);
+    return r.toISOString().slice(0, 10);
+  };
+
+  test('end-to-end: notice-period + territory-cap stamps coexist on the same call', () => {
+    // 4 FL:coastal cohorts non-renew 1M of a 10M FL:coastal book = 10% > 3% cap.
+    // One of them is also outside the FL 120-day notice window (60-day to
+    // renewal) and so gets a notice-period stamp; that cohort does NOT count
+    // toward this cycle's bucket cap, so the remaining 3 cohorts (700k total)
+    // are still well over the 3% (300k) cap and the smallest two get downgraded.
+    const longRenewal = addDays(today, 365); // inside FL 120-day window
+    const shortRenewal = addDays(today, 60); // outside FL 120-day window
+    const action = (cohort_id: string) => ({
+      cohort_id,
+      retain: 0.05,
+      non_renew: 0.9,
+      reprice_up: 0.05,
+      reprice_down: 0,
+      cede_qs: 0,
+      cede_xs: 0,
+    });
+    const out = reconcile({
+      portfolio: {
+        actions: [
+          action('deferred_big'), // 300k — gets a notice-period stamp
+          action('small'), // 100k
+          action('mid'), // 200k
+          action('big'), // 400k
+        ],
+      },
+      preflagged: [],
+      vrp: { assignments: [] },
+      cohort_zip3_map: {
+        deferred_big: '330',
+        small: '331',
+        mid: '332',
+        big: '339',
+      },
+      cohort_renewal_date_map: {
+        deferred_big: shortRenewal,
+        small: longRenewal,
+        mid: longRenewal,
+        big: longRenewal,
+      },
+      cohort_tiv_map: {
+        deferred_big: 300_000,
+        small: 100_000,
+        mid: 200_000,
+        big: 400_000,
+      },
+      bucket_total_tiv: { 'FL:coastal': 10_000_000 },
+      today,
+    });
+    const noticeStamps = out.stamped_actions.filter(
+      (s) => s.action === 'non_renew_next_renewal',
+    );
+    const capStamps = out.stamped_actions.filter(
+      (s) => s.action === 'non_renew_capped',
+    );
+    expect(noticeStamps.map((s) => s.cohort_id)).toEqual(['deferred_big']);
+    // small + mid go over cap (700k total, cap 300k → must drop 400k).
+    // smallest-first: drop small (100k → 600k), drop mid (200k → 400k still over),
+    // drop big (400k → 0k OK). All three remaining cohorts downgraded.
+    expect(capStamps.map((s) => s.cohort_id).sort()).toEqual(['big', 'mid', 'small']);
+  });
+
+  test('stamp shape — non_renew_capped carries bucket, cap_fraction, observed_fraction', () => {
+    const out = reconcile({
+      portfolio: {
+        actions: [
+          {
+            cohort_id: 'C',
+            retain: 0.05,
+            non_renew: 0.9,
+            reprice_up: 0.05,
+            reprice_down: 0,
+            cede_qs: 0,
+            cede_xs: 0,
+          },
+        ],
+      },
+      preflagged: [],
+      vrp: { assignments: [] },
+      cohort_zip3_map: { C: '330' }, // FL:coastal
+      cohort_tiv_map: { C: 500_000 },
+      bucket_total_tiv: { 'FL:coastal': 10_000_000 },
+      today,
+    });
+    const capStamp = out.stamped_actions.find((s) => s.action === 'non_renew_capped');
+    expect(capStamp).toBeDefined();
+    expect(capStamp!.bucket).toBe('FL:coastal');
+    expect(capStamp!.cap_fraction).toBeCloseTo(0.03, 6);
+    expect(capStamp!.observed_fraction).toBeCloseTo(0.05, 6); // 500k / 10M
+    expect(capStamp!.original_action).toBe('non_renew');
+    expect(capStamp!.downgrade_reason).toBe('territory_cap_exceeded');
   });
 });

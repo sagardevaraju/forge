@@ -27,12 +27,26 @@
  * emitted alongside the original portfolio actions; the MIP itself never
  * sees the new label.
  *
+ * Task P2.32 — Per-(state, territory) regulatory caps. After P2.31 runs,
+ * the surviving non-renew cohorts are grouped into ``(state, territory)``
+ * buckets (FL:coastal, TX:tier_1, etc.). For each bucket the reconciler
+ * sums non-renew TIV; if the total exceeds the bucket's cap (see
+ * ``lib/regulatory/territory_caps.ts``), the smallest cohorts are downgraded
+ * one at a time (least customer disruption first) until the bucket fits,
+ * each emitting a ``non_renew_capped`` stamp. Precedence: a cohort already
+ * deferred by P2.31 does NOT count toward this year's bucket cap; it has
+ * already been pushed to next year's cycle.
+ *
  * The reconciler is intentionally pure: same input → same output, no I/O,
  * no DB access. Inputs come in as plain objects; outputs are a new
  * `ReconcileOutput` (the original inputs are not mutated).
  */
 
 import { noticeWindowForZip3 } from '@/lib/regulatory/notice_periods';
+import {
+  applyTerritoryCaps,
+  type TerritoryCapStamp,
+} from '@/lib/regulatory/territory_caps';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -80,6 +94,18 @@ export interface ReconcileInput {
    * at call time.
    */
   today?: Date;
+  /**
+   * P2.32 — per-cohort total TIV, used to size the territory-cap denominator
+   * and to choose downgrade order (smallest-first). Cohorts whose TIV is
+   * unknown contribute zero to the bucket sum.
+   */
+  cohort_tiv_map?: Record<string, number>;
+  /**
+   * P2.32 — per-bucket total book TIV (e.g. ``{"FL:coastal": 1.2e9}``). When
+   * a bucket's denominator is missing, the cap-application pass falls back
+   * to the bucket's own non-renew TIV; see ``applyTerritoryCaps``.
+   */
+  bucket_total_tiv?: Record<string, number>;
 }
 
 export interface ReconcileConflict {
@@ -90,21 +116,25 @@ export interface ReconcileConflict {
 }
 
 /**
- * P2.31 — Reconciler-side action label. The MIP only emits the six base
- * actions in ``ActionName``; the reconciler emits this artifact label when a
- * ``non_renew`` action violates the state's statutory notice window and must
- * be deferred to the next renewal cycle.
+ * P2.31 / P2.32 — Reconciler-side action labels. The MIP only emits the six
+ * base actions in ``ActionName``; the reconciler emits these artifact labels
+ * when a ``non_renew`` action either (P2.31) fails the state's statutory
+ * notice window or (P2.32) exceeds a per-(state, territory) regulatory cap.
+ *
+ * A single cohort can carry both stamps simultaneously — they are surfaced
+ * as separate entries in ``stamped_actions``. The P2.31 (notice-period)
+ * downgrade takes precedence: a cohort already deferred to next year does
+ * not count toward this year's bucket cap.
  */
-export type ReconciledActionName = 'non_renew_next_renewal';
+export type ReconciledActionName = 'non_renew_next_renewal' | 'non_renew_capped';
 
 /**
- * P2.31 — A stamped reconciler-side action. Emitted alongside (not in place
- * of) the original ``PortfolioAction[]``: downstream consumers can pick
- * whichever matches their decision horizon.
+ * P2.31 — A stamped reconciler-side action for a cohort whose non-renewal
+ * must be deferred to the next renewal cycle (notice-period filter).
  */
-export interface StampedAction {
+export interface NoticePeriodStamp {
   cohort_id: string;
-  action: ReconciledActionName;
+  action: 'non_renew_next_renewal';
   original_action: 'non_renew';
   downgrade_reason: 'insufficient_notice_period';
   /** ISO ``YYYY-MM-DD`` — next renewal date + 1 year. */
@@ -116,6 +146,23 @@ export interface StampedAction {
   /** Days from ``today`` to the renewal we would have non-renewed at. */
   days_to_renewal: number;
 }
+
+/**
+ * P2.32 — A stamped reconciler-side action for a cohort the territory-cap
+ * filter downgraded because its (state, territory) bucket would otherwise
+ * exceed the regulatory annual non-renewal share.
+ */
+export interface TerritoryCapStampWithZip extends TerritoryCapStamp {
+  /** ZIP3 prefix that drove the territory lookup (for traceability). */
+  zip3?: string;
+}
+
+/**
+ * P2.31 / P2.32 — Stamped reconciler artifact. Emitted alongside (not in
+ * place of) the original ``PortfolioAction[]``: downstream consumers can
+ * pick whichever matches their decision horizon.
+ */
+export type StampedAction = NoticePeriodStamp | TerritoryCapStampWithZip;
 
 export interface ReconcileOutput {
   /** Pass-through: portfolio decisions are not mutated. */
@@ -189,6 +236,8 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
     zone_zip3_map = {},
     cohort_renewal_date_map = {},
     today = new Date(),
+    cohort_tiv_map = {},
+    bucket_total_tiv = {},
   } = input;
 
   // ── 1. Build a quick lookup of cohort → action. ────────────────────────
@@ -295,6 +344,7 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
   const defaultRenewal = addDays(todayStart, 365);
 
   const stampedActions: StampedAction[] = [];
+  const noticeDeferredIds = new Set<string>();
   for (const a of portfolio.actions) {
     if (a.non_renew <= NON_RENEW_THRESHOLD) continue;
     const zip3 = cohortZip3.get(a.cohort_id);
@@ -315,7 +365,32 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
         notice_days: noticeDays,
         days_to_renewal: daysToRenewal,
       });
+      noticeDeferredIds.add(a.cohort_id);
     }
+  }
+
+  // ── 6. P2.32 — Per-(state, territory) regulatory caps. ─────────────────
+  // After the notice-period pass, group the surviving non-renew cohorts by
+  // their (state, territory) bucket and check each bucket's annual cap.
+  // Cohorts already deferred by P2.31 are skipped — they roll to next cycle
+  // and do not consume this year's bucket capacity. Downgrades are stamped
+  // smallest-TIV-first (minimizes customer disruption per downgrade).
+  const territoryCohortInputs = portfolio.actions
+    .filter((a) => a.non_renew > NON_RENEW_THRESHOLD)
+    .map((a) => ({
+      cohort_id: a.cohort_id,
+      zip3: cohortZip3.get(a.cohort_id) ?? '',
+      total_tiv: cohort_tiv_map[a.cohort_id] ?? 0,
+      non_renew_share: a.non_renew,
+    }));
+  const territoryResult = applyTerritoryCaps({
+    non_renew_cohorts: territoryCohortInputs,
+    bucket_total_tiv,
+    already_deferred_cohort_ids: noticeDeferredIds,
+  });
+  for (const stamp of territoryResult.downgraded) {
+    const zip3 = cohortZip3.get(stamp.cohort_id);
+    stampedActions.push({ ...stamp, zip3 });
   }
 
   return {
