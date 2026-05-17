@@ -220,6 +220,102 @@ describe('EventConsole', () => {
     expect(screen.getByTestId('source-cone')).toBeInTheDocument();
     expect(screen.queryByTestId('advisory-ribbon-legend')).not.toBeInTheDocument();
   });
+
+  // -------------------------------------------------------------------------
+  // Task P2.23 — cone uncertainty envelope (GEFS perturbation hull).
+  // -------------------------------------------------------------------------
+
+  test('renders 3 envelope polygons UNDER prior cones and current cone (Task P2.23)', () => {
+    // A current cone with the envelope payload attached. The envelope
+    // sources must mount, AND they must render before the priors and the
+    // current cone in DOM order so MapLibre paints them at the bottom of
+    // the stack.
+    const envelopePoly = (offset: number): GeoJSON.Polygon => ({
+      type: 'Polygon',
+      coordinates: [
+        [
+          [-83 - offset, 24 - offset],
+          [-79 + offset, 24 - offset],
+          [-79 + offset, 31 + offset],
+          [-83 - offset, 31 + offset],
+          [-83 - offset, 24 - offset],
+        ],
+      ],
+    });
+    const coneWithEnvelope: FetchNhcConeResult = {
+      ...makeCone(),
+      prior_cones: [
+        {
+          advisory_number: 13,
+          issued_at: '2026-05-16T18:00:00Z',
+          cone: {
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'Polygon', coordinates: [[[0.2, 0], [1.2, 0], [1.2, 1], [0.2, 0]]] },
+          },
+        },
+      ],
+      cone_envelope: {
+        t24h: envelopePoly(0.5),
+        t48h: envelopePoly(1.0),
+        t72h: envelopePoly(1.5),
+      },
+    } as FetchNhcConeResult & {
+      cone_envelope: {
+        t24h: GeoJSON.Polygon;
+        t48h: GeoJSON.Polygon;
+        t72h: GeoJSON.Polygon;
+      };
+    };
+    const { container } = render(<EventConsole cone={coneWithEnvelope} fires={[]} />);
+    // Three envelope sources mount, one per horizon.
+    const env24 = screen.getByTestId('source-cone-envelope-t24h');
+    const env48 = screen.getByTestId('source-cone-envelope-t48h');
+    const env72 = screen.getByTestId('source-cone-envelope-t72h');
+    expect(env24).toBeInTheDocument();
+    expect(env48).toBeInTheDocument();
+    expect(env72).toBeInTheDocument();
+    // Fill layers materialize (the envelope is rendered as semi-transparent fills).
+    expect(screen.getByTestId('layer-cone-envelope-t24h-fill')).toBeInTheDocument();
+    expect(screen.getByTestId('layer-cone-envelope-t48h-fill')).toBeInTheDocument();
+    expect(screen.getByTestId('layer-cone-envelope-t72h-fill')).toBeInTheDocument();
+    // Layer-stack order check: all three envelope sources must appear in
+    // the DOM before the prior-cone source and the current-cone source.
+    // MapLibre paints in DOM order, so this is the regression guard that
+    // the envelope sits at the bottom of the stack.
+    const allSources = Array.from(
+      container.querySelectorAll('[data-testid^="source-"]'),
+    ).map((el) => el.getAttribute('data-testid'));
+    const idxEnv72 = allSources.indexOf('source-cone-envelope-t72h');
+    const idxEnv48 = allSources.indexOf('source-cone-envelope-t48h');
+    const idxEnv24 = allSources.indexOf('source-cone-envelope-t24h');
+    const idxPrior = allSources.indexOf('source-prior-cone-13');
+    const idxCurrent = allSources.indexOf('source-cone');
+    expect(idxEnv72).toBeGreaterThanOrEqual(0);
+    expect(idxEnv48).toBeGreaterThanOrEqual(0);
+    expect(idxEnv24).toBeGreaterThanOrEqual(0);
+    expect(idxPrior).toBeGreaterThanOrEqual(0);
+    expect(idxCurrent).toBeGreaterThanOrEqual(0);
+    // Envelopes paint first — all three before any prior or the current cone.
+    expect(idxEnv72).toBeLessThan(idxPrior);
+    expect(idxEnv48).toBeLessThan(idxPrior);
+    expect(idxEnv24).toBeLessThan(idxPrior);
+    expect(idxEnv72).toBeLessThan(idxCurrent);
+    expect(idxEnv48).toBeLessThan(idxCurrent);
+    expect(idxEnv24).toBeLessThan(idxCurrent);
+  });
+
+  test('no envelope renders when cone_envelope is missing (regression-safe, Task P2.23)', () => {
+    // Plain cone with no cone_envelope field — legacy P2.22-era result
+    // shape. The component must not throw and must not mount the envelope
+    // sources.
+    render(<EventConsole cone={makeCone()} fires={[]} />);
+    expect(screen.queryByTestId('source-cone-envelope-t24h')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('source-cone-envelope-t48h')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('source-cone-envelope-t72h')).not.toBeInTheDocument();
+    // Current cone still renders as the headline.
+    expect(screen.getByTestId('source-cone')).toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------------------

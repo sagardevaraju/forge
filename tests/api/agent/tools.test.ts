@@ -340,23 +340,29 @@ describe('query_book_exposure (real DB)', () => {
 });
 
 describe('generate_scenarios', () => {
+  // Task P2.23 — the handler now returns `{ scenarios, cone_envelope }`
+  // instead of `Scenario[]`. The envelope payload is the GEFS-perturbation
+  // convex hull at t24h/t48h/t72h. Existing assertions are rewritten to
+  // peek inside `out.scenarios`; new ones check the envelope shape.
+
   test('returns mock when FORGE_TOOLS_MODE=mock', async () => {
     process.env.FORGE_TOOLS_MODE = 'mock';
     const spy = vi.spyOn(globalThis, 'fetch');
     const out = await generateScenarios.handler({ storm_id: 'AL092024', n: 5 });
-    expect(out).toHaveLength(5);
-    expect(out[0].peak_wind).toBeGreaterThan(0);
+    expect(out.scenarios).toHaveLength(5);
+    expect(out.scenarios[0].peak_wind).toBeGreaterThan(0);
+    expect(out.cone_envelope).not.toBeNull();
     expect(spy).not.toHaveBeenCalled();
   });
 
-  test('proxies to /api/scenarios and returns its JSON', async () => {
+  test('proxies to /api/scenarios and surfaces its JSON as `scenarios`', async () => {
     delete process.env.FORGE_TOOLS_MODE;
     const payload = [{ id: 0, path: {}, peak_wind: 100, surge_grid: {}, prob: 0.5 }];
     const spy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }));
     const out = await generateScenarios.handler({ storm_id: 'AL092024', n: 1 });
-    expect(out).toEqual(payload);
+    expect(out.scenarios).toEqual(payload);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(String(spy.mock.calls[0][0])).toContain('storm_id=AL092024');
   });
@@ -365,7 +371,10 @@ describe('generate_scenarios', () => {
     delete process.env.FORGE_TOOLS_MODE;
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('boom', { status: 500 }));
     const out = await generateScenarios.handler({ storm_id: 'AL092024', n: 3 });
-    expect(out).toHaveLength(3);
+    expect(out.scenarios).toHaveLength(3);
+    // Mock fallback also synthesises the cone envelope so the UI has
+    // something to render offline.
+    expect(out.cone_envelope).not.toBeNull();
   });
 });
 

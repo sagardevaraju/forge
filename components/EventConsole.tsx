@@ -3,6 +3,7 @@
  * Task 21 — Event Console UI.
  * Task P2.21 — Cone-vs-outside book exposure mini-map.
  * Task P2.22 — Multi-advisory ribbon on the event console map.
+ * Task P2.23 — Cone uncertainty band from GEFS perturbation.
  *
  * Two-column layout for the active-event view:
  *   - Left: Mapbox base layer with the NHC cone polygon and FIRMS active-fire
@@ -15,13 +16,22 @@
  *     outlines UNDER the current cone — the operator can see how the
  *     forecast has shifted over the last ~24h without needing a separate
  *     timeline UI. A small legend strip labels each prior by advisory #.
+ *     The GEFS uncertainty envelope (Task P2.23) renders as three
+ *     concentric heat-tinted fills (t72h faintest, t24h densest)
+ *     UNDERNEATH both the prior ribbon and the current cone — visualising
+ *     ensemble spread without competing with the headline forecast.
  *   - Right: a chat panel against `/api/agent/chat` plus a SITREP panel that
  *     drafts a memo via the same endpoint (the LLM picks `draft_sitrep`).
  *
  * The cone is rendered as both a filled polygon and a stroked outline so the
  * advisory boundary remains visible against the dimmed fill. Prior advisory
  * cones are outline-only at reduced stroke opacity so they read as ghosts
- * and never compete with the headline cone visually.
+ * and never compete with the headline cone visually. The envelope fills
+ * scale fill-opacity by horizon (t72h = 0.08, t48h = 0.12, t24h = 0.18) so
+ * "closer in time = more certain = denser hue" matches operator intuition.
+ *
+ * Layer-stack bottom-to-top:
+ *   envelope (t72h → t48h → t24h) → prior cones → current cone → fires
  */
 import { useState } from 'react';
 import { MapBase } from './MapBase';
@@ -38,8 +48,23 @@ import type { FetchNhcConeResult } from '@/app/api/agent/tools/fetch_nhc_cone';
 import type { FireDetection } from '@/app/api/agent/tools/fetch_firms_fires';
 import type { PolygonLike } from '@/lib/geo/point_in_polygon';
 
+/**
+ * Task P2.23 — The GEFS-perturbation cone envelope can be attached to the
+ * `cone` payload as a peer field. The page glue (or the agent route, when
+ * driven by `generate_scenarios`) joins the envelope onto the cone result
+ * so EventConsole only needs a single prop. Legacy callers omit the field
+ * entirely, in which case nothing extra renders.
+ */
+type ConeWithEnvelope = FetchNhcConeResult & {
+  cone_envelope?: {
+    t24h: GeoJSON.Polygon;
+    t48h: GeoJSON.Polygon;
+    t72h: GeoJSON.Polygon;
+  } | null;
+};
+
 interface Props {
-  cone: FetchNhcConeResult | null;
+  cone: ConeWithEnvelope | null;
   fires: FireDetection[];
   /**
    * Cohort-level exposure rows for the P2.21 mini-map. Optional so existing
@@ -80,12 +105,61 @@ export function EventConsole({ cone, fires, cohorts }: Props) {
   // faint outlines only.
   const priorCones = cone?.prior_cones ?? [];
 
+  // Task P2.23 — GEFS perturbation uncertainty envelope. Three concentric
+  // hulls (t72h, t48h, t24h) ordered widest → narrowest. Rendered before
+  // the prior-cone ribbon AND before the current cone so MapLibre paints
+  // them at the bottom of the visual stack. The heat tint goes denser as
+  // the horizon shrinks ("closer in time = more certain") because that
+  // matches how operators think about ensemble spread.
+  const coneEnvelope = cone?.cone_envelope ?? null;
+  // Outer-to-inner order is load-bearing for layer painting: t72h (widest,
+  // faintest) goes down first, then t48h, then t24h on top of the envelope
+  // group but still below all forecast cones.
+  const envelopeHorizons = coneEnvelope
+    ? ([
+        { key: 't72h' as const, polygon: coneEnvelope.t72h, opacity: 0.08 },
+        { key: 't48h' as const, polygon: coneEnvelope.t48h, opacity: 0.12 },
+        { key: 't24h' as const, polygon: coneEnvelope.t24h, opacity: 0.18 },
+      ])
+    : [];
+
   return (
     <div className="p-6">
       <h1 className="text-2xl font-bold mb-4">Event Console</h1>
       <div className="grid grid-cols-[1fr_360px] gap-4 h-[80vh]">
         <div className="border rounded relative">
           <MapBase>
+            {/* Task P2.23 — GEFS perturbation uncertainty envelope. Three
+                heat-tinted polygons (t72h → t48h → t24h) rendered FIRST so
+                MapLibre paints them at the bottom of the stack, beneath
+                the prior-cone ribbon and the official current cone. The
+                outer/inner ordering is intentional: wider t72h sits
+                under the narrower t24h so the band reads as concentric
+                "uncertainty rings" — densest near the most-certain
+                horizon, fading outward. Fill-only (no stroke) so the
+                ring boundaries don't compete with the cone outlines. */}
+            {envelopeHorizons.map(({ key, polygon, opacity }) => (
+              <Source
+                key={`cone-envelope-${key}`}
+                id={`cone-envelope-${key}`}
+                type="geojson"
+                data={{
+                  type: 'Feature',
+                  properties: { horizon: key },
+                  geometry: polygon,
+                } as GeoJSON.Feature}
+              >
+                <Layer
+                  id={`cone-envelope-${key}-fill`}
+                  type="fill"
+                  paint={{
+                    'fill-color': '#f97316', // orange-500 — warm, distinct from the cone's red
+                    'fill-opacity': opacity,
+                    'fill-outline-color': 'transparent',
+                  }}
+                />
+              </Source>
+            ))}
             {/* Task P2.22 — prior-advisory ribbon. Rendered BEFORE the
                 current cone so MapLibre layers paint them underneath. Each
                 prior is outline-only at reduced opacity so the headline
