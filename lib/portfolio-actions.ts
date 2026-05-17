@@ -35,6 +35,11 @@ export interface OptimizedCohort {
   avg_elevation_m: number;
   loss_p50: number;
   loss_p99: number;
+  // Task P2.0 (schema_version 3): K=1000 lognormal draws on the server-side
+  // artifact only. `app/portfolio/page.tsx` strips this before passing the
+  // cohort down to client components, so it should never be observed in
+  // browser code.
+  loss_scenarios?: number[];
 }
 
 export interface PortfolioOptimization {

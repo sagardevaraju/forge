@@ -23,10 +23,26 @@ import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
 export const dynamic = 'force-dynamic';
 
 export default async function PortfolioPage() {
-  const [cohorts, optimization] = await Promise.all([
+  const [cohorts, optimizationRaw] = await Promise.all([
     aggregateCohorts(),
     loadPortfolioOptimization(),
   ]);
+  // Task P2.0: schema_version 3 ships per-cohort `loss_scenarios` arrays
+  // (K=1000 lognormal draws) for downstream P2.6 / P2.7 / P2.8 use. Those
+  // arrays are server-side only — at ~1000 floats × ~570 cohorts they
+  // weigh ~4.5 MB which we refuse to push down the wire. Strip them here
+  // before the client component touches the optimization object. Summary
+  // statistics (p50 / p99) stay on the cohort and continue to flow to the
+  // browser as before.
+  const optimization = optimizationRaw
+    ? {
+        ...optimizationRaw,
+        cohorts: optimizationRaw.cohorts.map((c) => {
+          const { loss_scenarios: _stripped, ...rest } = c;
+          return rest;
+        }),
+      }
+    : null;
   const totalTiv = cohorts.reduce((s, c) => s + c.total_tiv, 0);
   const nonrenewUsedTiv = optimization?.action_summary?.non_renew?.tiv ?? 0;
   return (

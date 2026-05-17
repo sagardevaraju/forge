@@ -18,16 +18,33 @@ Re-run after seeding policies or changing budgets:
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import sys
 from pathlib import Path
+
+import numpy as np
 
 # Make ``api_py`` importable when this script is run as ``python -m`` or directly.
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from api_py.optimize_portfolio import solve  # noqa: E402
+
+# Task P2.0 — Monte-Carlo scenario count per cohort. Sized so that the
+# 99th-percentile order statistic is stable (~30% sampling noise on 1000
+# draws under a lognormal with σ≈0.6) without inflating the artifact
+# beyond ~4.5 MB for the live ~570-cohort book. P2.6 / P2.7 / P2.8 will
+# consume these arrays for the TVaR-99 swap, the per-scenario retained
+# tail, and the elasticity MILP respectively.
+K_SCENARIOS = 1000
+
+# Φ⁻¹(0.99) — the standard-normal quantile at the 99th percentile.
+# Reconstructing the lognormal posterior whose median = p50 and whose 99th
+# percentile = p99 gives σ = (log(p99) − log(p50)) / Φ⁻¹(0.99). With
+# p99 = 4 × p50 that lands at σ ≈ log(4) / 2.326 ≈ 0.596.
+PHI_INV_99 = 2.326
 
 # Task 24: industry-standard cat treaty cycle (Jul 1 → Jun 30). Persist in the
 # artifact so the Portfolio UI can label the recommendation with its horizon
@@ -59,8 +76,34 @@ def _cohort_loss_quantiles(
     modal_flood_zone: str,
     build_type: str,
     avg_elevation_m: float,
-) -> tuple[float, float]:
-    """Return (loss_p50, loss_p99) for the cohort under the HAZUS prior."""
+    zip3: str,
+    tiv_quintile: int,
+) -> tuple[float, float, list[float]]:
+    """Return ``(loss_p50, loss_p99, loss_scenarios)`` for the cohort.
+
+    The scalar quantiles match the HAZUS-style prior used since Task 16:
+    ``p50 = total_tiv × annual_loss_rate`` and ``p99 = 4 × p50`` (heavy-
+    tailed coastal book).
+
+    Task P2.0 additionally emits ``loss_scenarios`` — a list of K = 1000
+    draws from the lognormal posterior whose median is ``p50`` and whose
+    99th percentile is ``p99``. The (μ, σ) of the lognormal are derived
+    from the two scalar quantiles:
+
+        X ~ Lognormal(μ, σ²)
+        median(X) = exp(μ)              ⇒ μ = log(p50)
+        P99(X)    = exp(μ + Φ⁻¹(0.99) σ) ⇒ σ = (log(p99) − log(p50)) / 2.326
+
+    With ``p99 = 4 × p50`` that gives σ ≈ log(4) / 2.326 ≈ 0.596 — the
+    same shape as the prior, just resolved into samples.
+
+    The draws are seeded with ``hash((zip3, build_type, q)) & 0xFFFFFFFF``
+    so that the artifact is reproducible *within a single precompute
+    run*. Python's ``hash()`` for strings is randomized per interpreter,
+    which is the granularity we want: re-running the precompute produces
+    a deterministic artifact from start to finish, but the seed is not
+    leaked across runs (it's a Monte-Carlo, not a regression fixture).
+    """
     zone_factor = FLOOD_ZONE_SEVERITY.get(modal_flood_zone, 1.0)
     build_factor = BUILD_VULNERABILITY.get(build_type, 1.0)
     # Elevation gives a partial mitigation: 1.0 at sea level, ~0.6 at 5m.
@@ -69,7 +112,22 @@ def _cohort_loss_quantiles(
     p50 = total_tiv * annual_loss_rate
     # Heavy-tailed: p99 ≈ 4× p50 in the FL/TX coastal book empirically.
     p99 = p50 * 4.0
-    return p50, p99
+
+    # Reconstruct (μ, σ) of the lognormal posterior and draw K samples.
+    if p50 > 0:
+        mu = math.log(p50)
+        sigma = (math.log(p99) - math.log(p50)) / PHI_INV_99
+        seed = hash((zip3, build_type, tiv_quintile)) & 0xFFFFFFFF
+        rng = np.random.default_rng(seed=seed)
+        # ``lognormal`` parameterized by (mean, sigma) of the underlying
+        # normal — exactly what we derived above.
+        scenarios = rng.lognormal(mean=mu, sigma=sigma, size=K_SCENARIOS)
+        loss_scenarios = [float(x) for x in scenarios]
+    else:
+        # Pathological zero-TIV cohort: deterministic zeros.
+        loss_scenarios = [0.0] * K_SCENARIOS
+
+    return p50, p99, loss_scenarios
 
 
 def _aggregate_cohorts_from_sqlite(db_path: Path) -> list[dict]:
@@ -148,8 +206,13 @@ def _aggregate_cohorts_from_sqlite(db_path: Path) -> list[dict]:
                 best = b["flood_zone_counts"][z]
                 modal = z
         avg_elev = b["elev_sum"] / b["elev_n"] if b["elev_n"] > 0 else 0.0
-        p50, p99 = _cohort_loss_quantiles(
-            b["total_tiv"], modal, b["build_type"], avg_elev
+        p50, p99, scenarios = _cohort_loss_quantiles(
+            total_tiv=b["total_tiv"],
+            modal_flood_zone=modal,
+            build_type=b["build_type"],
+            avg_elevation_m=avg_elev,
+            zip3=b["zip3"],
+            tiv_quintile=b["tiv_quintile"],
         )
         out.append(
             {
@@ -164,6 +227,11 @@ def _aggregate_cohorts_from_sqlite(db_path: Path) -> list[dict]:
                 "avg_elevation_m": avg_elev,
                 "loss_p50": p50,
                 "loss_p99": p99,
+                # Task P2.0: K=1000 lognormal draws for downstream tail
+                # measures (TVaR-99 in P2.6, per-scenario retained tail in
+                # P2.7, elasticity MILP in P2.8). Stripped server-side
+                # before the front-end ever sees this array.
+                "loss_scenarios": scenarios,
             }
         )
     out.sort(key=lambda c: c["id"])
@@ -223,12 +291,36 @@ def main() -> None:
     artifacts_dir = ROOT / "artifacts"
     artifacts_dir.mkdir(exist_ok=True)
     out_path = artifacts_dir / "portfolio_optimization.json"
+
+    # Task P2.0 review fix: the on-disk artifact carries each lognormal draw
+    # at full ~17-significant-digit float precision, which blows the file up
+    # to ~15 MB. Losses are dollar amounts — sub-cent precision is noise.
+    # Round to 2 decimal places for the artifact copy only; the in-memory
+    # ``cohorts`` list (already consumed by ``solve()`` above) keeps full
+    # precision for any downstream in-process use (P2.6+).
+    cohorts_for_artifact = [
+        {
+            **c,
+            "loss_scenarios": [round(x, 2) for x in c["loss_scenarios"]],
+        }
+        for c in cohorts
+    ]
     payload = {
-        # schema_version 2 (Task 12): cohort ids switched from `{zip3}_{build_type}_d{N}`
-        # to `{zip3}_{build_type}_q{N}` and the cohort field `tiv_decile` was
-        # renamed to `tiv_quintile`. Holders of v1 artifacts must re-run
+        # schema_version history:
+        #   1 — original Task 16 shape, cohort id = `{zip3}_{build_type}_d{N}`.
+        #   2 — Task 12 renamed `tiv_decile` → `tiv_quintile` and cohort ids
+        #       switched to `{zip3}_{build_type}_q{N}`.
+        #   3 — Task P2.0 (Phase 2): cohorts now carry
+        #       `loss_scenarios: list[float]` of K=1000 lognormal draws
+        #       (seeded reproducibly via `hash((zip3, build_type, q))`).
+        #       Adds ~4.5 MB to the artifact; consumed by P2.6 (TVaR-99),
+        #       P2.7 (per-scenario retained tail), P2.8 (elasticity MILP).
+        #       The server component must strip this field before passing
+        #       data to the client so we don't ship MBs of scenarios over
+        #       the wire (see `app/portfolio/page.tsx`).
+        # Holders of v1/v2 artifacts must re-run
         # `python -m scripts.precompute_portfolio_optimization` to refresh.
-        "schema_version": 2,
+        "schema_version": 3,
         "status": result["status"],
         "objective": result["objective"],
         "horizon_start": result["horizon_start"],
@@ -245,10 +337,13 @@ def main() -> None:
             "loss_p99": expected_loss_p99,
         },
         "action_summary": action_summary,
-        "cohorts": cohorts,
+        "cohorts": cohorts_for_artifact,
         "actions": enriched_actions,
     }
-    out_path.write_text(json.dumps(payload, indent=2))
+    # The artifact is consumed by code (``loadPortfolioOptimization``), not
+    # humans — drop the indent whitespace so the K=1000-draw cohort arrays
+    # don't pay for one-float-per-line newlines + spaces.
+    out_path.write_text(json.dumps(payload, separators=(",", ":")))
     print(f"Wrote {out_path.relative_to(ROOT)}  ({os.path.getsize(out_path):,} bytes)")
     print("Action distribution:")
     for a, s in action_summary.items():

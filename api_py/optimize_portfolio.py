@@ -91,6 +91,22 @@ def solve(
         List of cohort dicts. Each cohort must carry ``id``, a TIV (under
         ``total_tiv`` or ``tiv``), ``total_premium`` (or ``premium``),
         ``loss_p50`` and ``loss_p99``.
+
+        Task P2.0: cohort dicts *may* also carry an optional
+        ``loss_scenarios: list[float]`` field — K=1000 Monte-Carlo draws
+        from the lognormal posterior whose median is ``loss_p50`` and
+        whose 99th percentile is ``loss_p99``. The current MIP does not
+        consume this field (the legacy ``(p50, p99)`` scalars remain
+        authoritative); it's plumbed through for the P2.6 TVaR-99 swap,
+        the P2.7 per-scenario retained tail, and the P2.8 elasticity MILP
+        which will read it directly off the cohort dict.
+
+        Carrying the optional field on the cohort dict (rather than as a
+        parallel ``scenarios: list[list[float]]`` kwarg) is intentional —
+        it keeps the scenarios co-located with ``loss_p50`` / ``loss_p99``
+        on the same dict, matches the way the precompute artifact is
+        already shaped, and means legacy callers without the field
+        continue to work with no special-casing here.
     capital_budget
         Maximum tolerable Σ (cohort VaR-99 retained) across the portfolio.
     max_nonrenew_pct
