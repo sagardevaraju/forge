@@ -21,6 +21,13 @@ export type ChatEvent =
       summary: string;
       args_hash?: string;
       result_hash?: string;
+      /**
+       * Optional structured result payload. Task P2.24 — the SITREP panel
+       * pulls the StructuredSitrep off `draft_sitrep`'s tool_result rather
+       * than parsing the assistant's final-message text. Other tools may
+       * leave this undefined; consumers should feature-detect by tool name.
+       */
+      result?: unknown;
     }
   | { type: 'final'; text: string; citations?: Citation[] }
   | { type: 'error'; message: string };

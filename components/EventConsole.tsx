@@ -21,7 +21,11 @@ import { useState } from 'react';
 import { MapBase } from './MapBase';
 import { Source, Layer } from 'react-map-gl/maplibre';
 import { AgentChat } from './AgentChat';
-import { SitrepPanel } from './SitrepPanel';
+import {
+  SitrepPanel,
+  type StructuredSitrep,
+  type SitrepDataSource,
+} from './SitrepPanel';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
 import { ConeExposureBars, type ConeExposureCohort } from './ConeExposureBars';
 import type { FetchNhcConeResult } from '@/app/api/agent/tools/fetch_nhc_cone';
@@ -40,7 +44,8 @@ interface Props {
 }
 
 export function EventConsole({ cone, fires, cohorts }: Props) {
-  const [sitrepMd, setSitrepMd] = useState<string>('');
+  const [sitrep, setSitrep] = useState<StructuredSitrep | null>(null);
+  const [sitrepDataSource, setSitrepDataSource] = useState<SitrepDataSource | null>(null);
 
   const sitrepCtx = cone
     ? {
@@ -125,9 +130,13 @@ export function EventConsole({ cone, fires, cohorts }: Props) {
         <div className="flex flex-col gap-4 overflow-auto">
           <AgentChat />
           <SitrepPanel
-            sitrepMd={sitrepMd}
+            sitrep={sitrep}
+            dataSource={sitrepDataSource}
             context={sitrepCtx}
-            onGenerate={setSitrepMd}
+            onGenerate={(nextSitrep, nextDataSource) => {
+              setSitrep(nextSitrep);
+              setSitrepDataSource(nextDataSource);
+            }}
           />
         </div>
       </div>

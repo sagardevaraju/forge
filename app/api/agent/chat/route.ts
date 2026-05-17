@@ -154,6 +154,11 @@ export async function POST(req: Request) {
           summary,
           args_hash,
           result_hash,
+          // Task P2.24: attach the full structured result so clients (e.g.
+          // SitrepPanel) can pull StructuredSitrep off the tool_result
+          // event without re-parsing the LLM's final-message text. Other
+          // tools' payloads ride along too; consumers should feature-detect.
+          result,
         });
         convo.push({
           role: 'tool',
