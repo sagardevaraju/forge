@@ -69,6 +69,16 @@ describe('ClaimsTable', () => {
     expect(clickSpy).toHaveBeenCalledTimes(1);
     expect(revoke).toHaveBeenCalledWith('blob:mock');
   });
+
+  test('groups by ZIP3 with county header rows', () => {
+    render(<ClaimsTable policies={[
+      { policy_id: 1, zip3: '337', tiv: 1e6, build_type: 'wood_frame', flood_zone: 'AE', severity: 'medium', expected_loss: 150_000 },
+      { policy_id: 2, zip3: '337', tiv: 2e6, build_type: 'masonry', flood_zone: 'AE', severity: 'medium', expected_loss: 300_000 },
+      { policy_id: 3, zip3: '342', tiv: 1.5e6, build_type: 'manufactured', flood_zone: 'VE', severity: 'high', expected_loss: 600_000 },
+    ]} />);
+    expect(screen.getByText(/Pinellas, FL/)).toBeInTheDocument();
+    expect(screen.getByText(/Sarasota, FL/)).toBeInTheDocument();
+  });
 });
 
 // Some jsdom builds (and Node 20+) don't have a global Blob.prototype.text fast-path,
