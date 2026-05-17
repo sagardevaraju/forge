@@ -79,6 +79,55 @@ describe('ClaimsTable', () => {
     expect(screen.getByText(/Pinellas, FL/)).toBeInTheDocument();
     expect(screen.getByText(/Sarasota, FL/)).toBeInTheDocument();
   });
+
+  test('push button is disabled when the visible row set is empty', () => {
+    render(<ClaimsTable policies={[]} />);
+    const btn = screen.getByTestId('push-to-claims') as HTMLButtonElement;
+    expect(btn).toBeDisabled();
+  });
+
+  test('push button POSTs visible policy_ids and shows inline confirmation', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ received: 2, ids_preview: [2, 4] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+    render(<ClaimsTable policies={policies} />);
+    // Narrow to "high" → only ids 2 and 4 should be visible.
+    fireEvent.change(screen.getByLabelText('severity-filter'), { target: { value: 'high' } });
+    fireEvent.click(screen.getByTestId('push-to-claims'));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/claims/push');
+    expect(init.method).toBe('POST');
+    const body = JSON.parse(init.body as string);
+    expect(body.policy_ids).toEqual([2, 4]);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('push-toast')).toHaveTextContent('Pushed 2 policies'),
+    );
+  });
+
+  test('push button surfaces an error toast on non-OK response', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: 'policy_ids must be a non-empty array' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    render(<ClaimsTable policies={policies} />);
+    fireEvent.click(screen.getByTestId('push-to-claims'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('push-toast')).toHaveTextContent(/Push failed/),
+    );
+  });
 });
 
 // Some jsdom builds (and Node 20+) don't have a global Blob.prototype.text fast-path,

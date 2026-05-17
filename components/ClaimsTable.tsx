@@ -11,6 +11,11 @@
  *               Policies whose (zip3, build_type, quintile) cohort isn't in
  *               the artifact display "—" rather than a zero (so the table
  *               doesn't lie when the cohort is missing).
+ * Task P2.26 — "Push to claims system" button. POSTs the visible (filtered)
+ *               policy_ids to /api/claims/push, then surfaces an inline
+ *               transient confirmation ("Pushed N policies"). Disabled when
+ *               there are no visible rows. Phase 2 endpoint just logs;
+ *               Phase 3 will persist to a decisions table.
  *
  * Renders pre-flagged policies returned by the server component, with a
  * severity tier filter and a one-click CSV export. The export builds the
@@ -29,7 +34,7 @@
  * so the ops user can gut-check whether a non-renewal action is even
  * feasible against the regulatory clock.
  */
-import { useState, useMemo, Fragment } from 'react';
+import { useState, useMemo, useEffect, useRef, Fragment } from 'react';
 import { zip3ToCounty } from '@/lib/regulatory/zip3_to_county';
 import { noticeWindowForZip3 } from '@/lib/regulatory/notice_periods';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
@@ -90,6 +95,17 @@ function groupByZip3(policies: PreflagPolicy[]): Zip3Group[] {
 
 export function ClaimsTable({ policies }: Props) {
   const [filter, setFilter] = useState<SeverityFilter>('all');
+  const [pushState, setPushState] = useState<'idle' | 'pushing' | 'done' | 'error'>(
+    'idle',
+  );
+  const [pushMessage, setPushMessage] = useState<string>('');
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
 
   const filtered = useMemo(
     () => (filter === 'all' ? policies : policies.filter((p) => p.severity === filter)),
@@ -97,6 +113,37 @@ export function ClaimsTable({ policies }: Props) {
   );
 
   const groups = useMemo(() => groupByZip3(filtered), [filtered]);
+
+  async function pushToClaimsSystem() {
+    if (filtered.length === 0 || pushState === 'pushing') return;
+    setPushState('pushing');
+    setPushMessage('');
+    try {
+      const res = await fetch('/api/claims/push', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ policy_ids: filtered.map((p) => p.policy_id) }),
+      });
+      if (!res.ok) {
+        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(errBody.error ?? `HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as { received: number };
+      setPushState('done');
+      setPushMessage(
+        `Pushed ${data.received} ${data.received === 1 ? 'policy' : 'policies'}`,
+      );
+    } catch (e) {
+      setPushState('error');
+      setPushMessage(`Push failed: ${(e as Error).message}`);
+    } finally {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => {
+        setPushState('idle');
+        setPushMessage('');
+      }, 4000);
+    }
+  }
 
   const counts = useMemo(
     () => ({
@@ -145,9 +192,28 @@ export function ClaimsTable({ policies }: Props) {
         >
           Export CSV
         </button>
+        <button
+          onClick={pushToClaimsSystem}
+          disabled={filtered.length === 0 || pushState === 'pushing'}
+          data-testid="push-to-claims"
+          aria-label="push-to-claims-system"
+          className="bg-blue-700 text-white px-3 py-1 rounded text-sm disabled:bg-zinc-300 disabled:text-zinc-500 disabled:cursor-not-allowed"
+        >
+          {pushState === 'pushing' ? 'Pushing…' : 'Push to claims system'}
+        </button>
         <span className="text-xs text-zinc-500" data-testid="filtered-count">
           Showing {filtered.length}
         </span>
+        {pushMessage && (
+          <span
+            data-testid="push-toast"
+            role="status"
+            aria-live="polite"
+            className={`text-xs ${pushState === 'error' ? 'text-red-700' : 'text-emerald-700'}`}
+          >
+            {pushMessage}
+          </span>
+        )}
       </div>
       <table className="w-full border-collapse text-sm">
         <thead>
