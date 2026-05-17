@@ -16,7 +16,8 @@
  * dropped and called out in a footnote so reviewers don't mistake the
  * absence for a bug.
  */
-import { type Cohort, type CvFeatures, UNMODELED_CV_DIMS } from '@/lib/db/cohorts';
+import type { Cohort } from '@/lib/db/cohorts';
+import { type CvFeatures, UNMODELED_CV_DIMS } from '@/lib/portfolio/cv-features';
 import {
   type OptimizedAction,
   type ActionName,

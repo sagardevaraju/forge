@@ -34,45 +34,18 @@
  *   cohort). Ties are broken by lexical order, which is deterministic.
  */
 import { db } from './client';
+import {
+  type CvFeatureValue,
+  type CvFeatures,
+  UNMODELED_CV_DIMS,
+} from '../portfolio/cv-features';
 
-/**
- * A single modeled CV-head dimension with its cohort-averaged value.
- *
- * `modeled: true` is a phantom flag: consumers must not pattern-match on
- * `modeled === false`, since unmodeled dims are dropped entirely from the
- * object rather than being carried as null. The flag exists so the JSON
- * shape stays self-describing for the agent tools + drill-down UI.
- */
-export interface CvFeatureValue {
-  value: number;
-  modeled: true;
-}
-
-/**
- * Cohort-averaged CV features, restricted to the 5 dims with real label
- * signal in Phase 1.
- *
- * Index → name mapping (matches `ml/cv/inference.py`):
- *
- *   0  vegetation_density   modeled    (NDVI mean)
- *   1  imperviousness       UNMODELED  — dropped in Phase 1
- *   2  fuel_proximity       modeled    (SWIR mean)
- *   3  roof_complexity      UNMODELED  — dropped in Phase 1
- *   4  water_proximity      modeled    (NDWI mean)
- *   5  elevation_bucket     modeled    (chip-hash bucket 0..4 / 4)
- *   6  tree_overhang        UNMODELED  — dropped in Phase 1
- *   7  structure_density    modeled    (Sobel edge density on NIR)
- *
- * The three unmodeled dims (idx 1, 3, 6) are re-introduced in Phase 2 via
- * Task P2.37 (NLCD + OSM weak-label retraining).
- */
-export interface CvFeatures {
-  vegetation_density: CvFeatureValue;
-  fuel_proximity: CvFeatureValue;
-  water_proximity: CvFeatureValue;
-  elevation_bucket: CvFeatureValue;
-  structure_density: CvFeatureValue;
-}
+// Re-export the typed CV feature shapes for backwards compatibility with
+// existing server-side imports (`@/lib/db/cohorts`). Client components should
+// import them directly from `@/lib/portfolio/cv-features` so Turbopack can
+// tree-shake the libSQL DB client out of the client bundle.
+export type { CvFeatureValue, CvFeatures };
+export { UNMODELED_CV_DIMS };
 
 /**
  * Position of each modeled dim inside the raw 8-float `cv_features` JSON
@@ -86,13 +59,6 @@ const MODELED_DIM_INDEX = {
   elevation_bucket: 5,
   structure_density: 7,
 } as const;
-
-/** Names of the unmodeled dims (idx 1, 3, 6) for UI/agent transparency. */
-export const UNMODELED_CV_DIMS: readonly string[] = Object.freeze([
-  'imperviousness',
-  'roof_complexity',
-  'tree_overhang',
-]);
 
 export interface Cohort {
   id: string; // e.g., "330_wood_frame_q3"
