@@ -59,6 +59,7 @@ function makeCone(): FetchNhcConeResult {
     advisory_number: '14A',
     peak_wind: 115,
     prior_peak_wind: 108,
+    prior_cones: [],
     source: 'mock',
   };
 }
@@ -90,6 +91,7 @@ function floridaCone(): FetchNhcConeResult {
     advisory_number: '14A',
     peak_wind: 115,
     prior_peak_wind: 108,
+    prior_cones: [],
     source: 'mock',
   };
 }
@@ -132,6 +134,91 @@ describe('EventConsole', () => {
     // collide with the exposure-bars badge.
     const card = screen.getByTestId('event-summary');
     expect(within(card).getByTestId('trust-tier-badge')).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // Task P2.22 — multi-advisory ribbon. Prior advisories render as faint
+  // outlines under the current cone. Each one gets its own Source so the
+  // stubbed Layer ids let us assert on it.
+  // -------------------------------------------------------------------------
+
+  test('renders prior cones as faint outlines under the current cone (Task P2.22)', () => {
+    const coneWithPriors: FetchNhcConeResult = {
+      ...makeCone(),
+      prior_cones: [
+        {
+          advisory_number: 13,
+          issued_at: '2026-05-16T18:00:00Z',
+          cone: {
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'Polygon', coordinates: [[[0.2, 0], [1.2, 0], [1.2, 1], [0.2, 0]]] },
+          },
+        },
+        {
+          advisory_number: 12,
+          issued_at: '2026-05-16T12:00:00Z',
+          cone: {
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'Polygon', coordinates: [[[0.4, 0], [1.4, 0], [1.4, 1], [0.4, 0]]] },
+          },
+        },
+        {
+          advisory_number: 11,
+          issued_at: '2026-05-16T06:00:00Z',
+          cone: {
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'Polygon', coordinates: [[[0.6, 0], [1.6, 0], [1.6, 1], [0.6, 0]]] },
+          },
+        },
+      ],
+    };
+    render(<EventConsole cone={coneWithPriors} fires={[]} />);
+    // Current cone source still renders.
+    expect(screen.getByTestId('source-cone')).toBeInTheDocument();
+    // One Source per prior advisory, keyed by advisory_number so we can pin them.
+    expect(screen.getByTestId('source-prior-cone-13')).toBeInTheDocument();
+    expect(screen.getByTestId('source-prior-cone-12')).toBeInTheDocument();
+    expect(screen.getByTestId('source-prior-cone-11')).toBeInTheDocument();
+    // Each prior advisory renders ONLY a line layer (faint outline, no fill).
+    // The stub renders Layer ids as `layer-${id}` test ids.
+    expect(screen.getByTestId('layer-prior-cone-line-13')).toBeInTheDocument();
+    expect(screen.getByTestId('layer-prior-cone-line-12')).toBeInTheDocument();
+    expect(screen.getByTestId('layer-prior-cone-line-11')).toBeInTheDocument();
+    // No fill layer for priors — the ribbon is outlines-only by design.
+    expect(screen.queryByTestId('layer-prior-cone-fill-13')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('layer-prior-cone-fill-12')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('layer-prior-cone-fill-11')).not.toBeInTheDocument();
+    // A legend strip surfaces the advisory numbers so operators can read them.
+    const legend = screen.getByTestId('advisory-ribbon-legend');
+    expect(legend).toHaveTextContent('#13');
+    expect(legend).toHaveTextContent('#12');
+    expect(legend).toHaveTextContent('#11');
+  });
+
+  test('empty prior_cones array renders single-cone behavior (regression guard, Task P2.22)', () => {
+    const coneNoPriors: FetchNhcConeResult = { ...makeCone(), prior_cones: [] };
+    render(<EventConsole cone={coneNoPriors} fires={[]} />);
+    // Current cone still rendered.
+    expect(screen.getByTestId('source-cone')).toBeInTheDocument();
+    // No prior cone sources, no legend strip.
+    expect(screen.queryByTestId('advisory-ribbon-legend')).not.toBeInTheDocument();
+    // Spot-check a couple of advisory ids that should NOT appear.
+    expect(screen.queryByTestId('source-prior-cone-13')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('source-prior-cone-12')).not.toBeInTheDocument();
+  });
+
+  test('undefined prior_cones is tolerated (legacy callers, Task P2.22)', () => {
+    // Callers built before P2.22 may not set prior_cones at all. The
+    // component must treat that as "no priors" rather than throwing.
+    const coneLegacy = makeCone() as FetchNhcConeResult;
+    // @ts-expect-error — deliberately strip the field to mimic legacy shape.
+    delete coneLegacy.prior_cones;
+    render(<EventConsole cone={coneLegacy} fires={[]} />);
+    expect(screen.getByTestId('source-cone')).toBeInTheDocument();
+    expect(screen.queryByTestId('advisory-ribbon-legend')).not.toBeInTheDocument();
   });
 });
 

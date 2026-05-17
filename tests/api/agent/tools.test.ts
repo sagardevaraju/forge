@@ -79,6 +79,150 @@ describe('fetch_nhc_cone', () => {
     const out = await fetchNhcCone.handler({ storm_id: 'AL092024' });
     expect(out.prior_peak_wind).toBe(135);
   });
+
+  // -------------------------------------------------------------------------
+  // Task P2.22 — multi-advisory ribbon. The tool now also returns up to 4
+  // prior advisories' cones so the EventConsole can stack them as faint
+  // outlines under the current cone. The field is additive and never throws.
+  // -------------------------------------------------------------------------
+
+  test('mock fallback returns prior_cones with 3 entries deterministically (Task P2.22)', async () => {
+    process.env.FORGE_TOOLS_MODE = 'mock';
+    const out = await fetchNhcCone.handler({ storm_id: 'AL092024' });
+    expect(Array.isArray(out.prior_cones)).toBe(true);
+    expect(out.prior_cones).toHaveLength(3);
+    // Each entry has advisory_number, issued_at, and a cone GeoJSON feature.
+    for (const p of out.prior_cones) {
+      expect(typeof p.advisory_number).toBe('number');
+      expect(typeof p.issued_at).toBe('string');
+      expect(p.cone).toBeTruthy();
+    }
+    // Determinism: a second invocation produces the same advisory_number list.
+    const out2 = await fetchNhcCone.handler({ storm_id: 'AL092024' });
+    expect(out2.prior_cones.map((p) => p.advisory_number)).toEqual(
+      out.prior_cones.map((p) => p.advisory_number),
+    );
+  });
+
+  test('mock prior_cones are sorted by advisory_number desc (Task P2.22)', async () => {
+    process.env.FORGE_TOOLS_MODE = 'mock';
+    const out = await fetchNhcCone.handler({ storm_id: 'AL092024' });
+    const advs = out.prior_cones.map((p) => p.advisory_number);
+    const sortedDesc = [...advs].sort((a, b) => b - a);
+    expect(advs).toEqual(sortedDesc);
+    // And each prior advisory_number is strictly less than the current one
+    // (mock current is "14A" ⇒ numeric 14; priors should be 13, 12, 11).
+    for (const a of advs) expect(a).toBeLessThan(14);
+  });
+
+  test('live path returns prior_cones with up to 4 entries when archive serves them (Task P2.22)', async () => {
+    delete process.env.FORGE_TOOLS_MODE;
+    // First call is the CONE_latest.json; subsequent calls fetch advisory N-1,
+    // N-2, N-3, N-4. We let the spy serve a generic cone payload for all of
+    // them — the only thing that needs to differ is the ADVISNUM so the tool
+    // can sort by it. Counter mutates per call.
+    let callIndex = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      callIndex++;
+      // Latest is advisory 23; priors are 22, 21, 20, 19 (in some order).
+      const advisnum = callIndex === 1 ? 23 : 23 - (callIndex - 1);
+      return new Response(
+        JSON.stringify({
+          features: [
+            {
+              properties: {
+                ADVISNUM: String(advisnum),
+                MAXWIND: 110,
+                ADVDATE: `2026-05-1${callIndex}T00:00:00Z`,
+              },
+              geometry: { type: 'Polygon', coordinates: [[[callIndex, 0]]] },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+    const out = await fetchNhcCone.handler({ storm_id: 'AL092024' });
+    expect(out.source).toBe('live');
+    // Up to 4 priors.
+    expect(out.prior_cones.length).toBeGreaterThan(0);
+    expect(out.prior_cones.length).toBeLessThanOrEqual(4);
+    // Sorted desc by advisory_number, all strictly less than current 23.
+    const advs = out.prior_cones.map((p) => p.advisory_number);
+    expect(advs).toEqual([...advs].sort((a, b) => b - a));
+    for (const a of advs) expect(a).toBeLessThan(23);
+  });
+
+  test('live path tolerates 404s on individual priors (Task P2.22)', async () => {
+    delete process.env.FORGE_TOOLS_MODE;
+    let callIndex = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      callIndex++;
+      // First call (latest) succeeds; alternate priors 404 to exercise the
+      // skip-on-failure path. Result: latest + 2 priors (the even-indexed
+      // prior fetches), not 4.
+      if (callIndex === 1) {
+        return new Response(
+          JSON.stringify({
+            features: [
+              {
+                properties: { ADVISNUM: '23', MAXWIND: 130 },
+                geometry: { type: 'Polygon', coordinates: [[[0, 0]]] },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      // Odd-numbered subsequent calls (prior 1, prior 3) → 404.
+      if (callIndex % 2 === 0) {
+        return new Response('not found', { status: 404 });
+      }
+      return new Response(
+        JSON.stringify({
+          features: [
+            {
+              properties: { ADVISNUM: String(23 - (callIndex - 1)), MAXWIND: 110 },
+              geometry: { type: 'Polygon', coordinates: [[[callIndex, 0]]] },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+    const out = await fetchNhcCone.handler({ storm_id: 'AL092024' });
+    expect(out.source).toBe('live');
+    // Some priors must have come through, but fewer than 4 because half 404'd.
+    expect(out.prior_cones.length).toBeLessThan(4);
+    // And the response itself is still well-formed (regression guard).
+    expect(out.advisory_number).toBe('23');
+  });
+
+  test('live path returns empty prior_cones when ALL priors fail (Task P2.22)', async () => {
+    delete process.env.FORGE_TOOLS_MODE;
+    let callIndex = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      callIndex++;
+      if (callIndex === 1) {
+        return new Response(
+          JSON.stringify({
+            features: [
+              {
+                properties: { ADVISNUM: '23', MAXWIND: 130 },
+                geometry: { type: 'Polygon', coordinates: [[[0, 0]]] },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      // Every prior 404s — should still return a well-formed result with [].
+      return new Response('not found', { status: 404 });
+    });
+    const out = await fetchNhcCone.handler({ storm_id: 'AL092024' });
+    expect(out.source).toBe('live');
+    expect(out.prior_cones).toEqual([]);
+  });
 });
 
 describe('fetch_firms_fires', () => {
