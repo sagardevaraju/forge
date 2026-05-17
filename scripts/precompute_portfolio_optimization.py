@@ -256,7 +256,18 @@ def main() -> None:
     print(f"  Aggregate tail loss (p99):     ${expected_loss_p99:,.0f}")
 
     # Budgets calibrated to the synthetic FL/TX/LA/NC book.
-    capital_budget = expected_loss_p99 * 0.30   # tolerate 30% of book p99
+    #
+    # Task P2.7 update: bumped capital_budget multiplier 0.30 → 0.40 to
+    # accommodate the new honest ``cede_xs`` capital coefficient. Before
+    # P2.7, ``cede_xs`` zeroed its retained-tail capital (a mock-grade
+    # shortcut — see ``api_py.optimize_portfolio.solve()`` docstring),
+    # which left the 0.30 budget feasible only because XS was a "free"
+    # capital lever. P2.7 prices ``cede_xs`` at its real retained tail
+    # (~0.375 × loss_p99 with default treaty layers), so the minimum
+    # achievable book capital is ~0.32 × loss_p99 with the 0.15 non_renew
+    # cap. The 0.40 budget gives the solver a usable margin without
+    # forcing every cohort into ``non_renew``.
+    capital_budget = expected_loss_p99 * 0.40   # tolerate 40% of book p99
     max_nonrenew_pct = 0.15                     # may non-renew up to 15% of TIV
     cession_budget = total_premium * 0.10       # 10% of premium for cession
 
