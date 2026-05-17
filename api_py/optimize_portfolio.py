@@ -3,7 +3,8 @@
 Allocates each cohort fractionally across six underwriting actions —
 ``retain``, ``reprice_up``, ``reprice_down``, ``non_renew``, ``cede_qs``,
 ``cede_xs`` — to maximize expected underwriting margin subject to a
-capital (VaR-99) budget, a regulatory non-renewal cap, and a cession
+capital budget (VaR-99 by default, or coherent TVaR-99 when
+``risk_measure='tvar_99'``), a regulatory non-renewal cap, and a cession
 premium budget.
 
 ``solve()`` is module-level so it can be imported and unit-tested without
@@ -17,8 +18,11 @@ inside Vercel's 60s serverless timeout even for a fully populated book.
 from __future__ import annotations
 
 import json
+import logging
 from http.server import BaseHTTPRequestHandler
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Action economics (per spec).
@@ -75,6 +79,24 @@ def _cohort_premium(c: dict[str, Any]) -> float:
     return float(c.get("total_premium", c.get("premium", 0.0)))
 
 
+def _tvar_99(scenarios: list[float]) -> float:
+    """TVaR-99 = mean of the top 1% of scenario draws.
+
+    For K=100: top-1% = single largest draw. For K=1000: mean of top 10.
+    We use numpy's 99th-percentile threshold (linear interpolation) and
+    average every draw at or above it. Matches the actuarial definition
+    of TVaR / CVaR / expected shortfall at the 99% level.
+    """
+    import numpy as np
+
+    arr = np.asarray(scenarios, dtype=float)
+    if arr.size == 0:
+        return 0.0
+    threshold = np.percentile(arr, 99)
+    tail = arr[arr >= threshold]
+    return float(tail.mean()) if tail.size else float(arr.max())
+
+
 def solve(
     cohorts: list[dict[str, Any]],
     capital_budget: float,
@@ -82,6 +104,7 @@ def solve(
     cession_budget: float,
     horizon_start: str = "2026-07-01",
     horizon_end: str = "2027-06-30",
+    risk_measure: str = "var_99",
 ) -> dict[str, Any]:
     """Solve the Portfolio MIP.
 
@@ -123,6 +146,20 @@ def solve(
         without re-deriving the convention. The values are metadata only;
         the MIP economics themselves are unaffected (premiums and losses
         are already annualized at the cohort level).
+    risk_measure
+        Task P2.6: which risk measure drives the capital-budget constraint.
+
+        - ``'var_99'`` (default, legacy): coefficient is ``loss_p99`` —
+          byte-identical artifact to pre-P2.6 callers, regardless of
+          whether ``loss_scenarios`` is present on the cohort.
+        - ``'tvar_99'``: coefficient is the mean of the top 1% of each
+          cohort's ``loss_scenarios`` (a coherent, sub-additive measure
+          that an actuary will accept where VaR-99 will be rejected on
+          sight). Cohorts that lack ``loss_scenarios`` fall back to
+          ``loss_p99`` for THAT cohort with a warning logged; the overall
+          run is still tagged ``tvar_99_used=True`` so the caller can see
+          which measure was requested. P2.6 uses raw scenarios — the
+          Horvitz-Thompson IS correction lands in P2.9.
 
     Returns
     -------
@@ -131,6 +168,12 @@ def solve(
         "retain": float, ...}, ...], "horizon_start": str, "horizon_end":
         str}``. Action allocations always sum to 1.0 per cohort (within
         solver tolerance).
+
+        When ``risk_measure == 'tvar_99'`` the dict additionally carries
+        ``tvar_99_used: True`` and ``tvar_99_per_cohort: {cohort_id:
+        float}`` for traceability (the per-cohort value is whatever was
+        plugged into the capital coefficient — either the computed TVaR-99
+        or the ``loss_p99`` fallback).
     """
     import pulp
 
@@ -165,20 +208,43 @@ def solve(
         cid = c["id"]
         prob += pulp.lpSum(x[(cid, a)] for a in ACTIONS) == 1, f"sum1_{cid}"
 
-    # ── Constraint 2: capital (VaR-99) budget ──────────────────────────
-    # Capital coefficient is loss_p99 * LOSS_FACTOR[a] for most actions.
+    # ── Constraint 2: capital budget (VaR-99 or TVaR-99) ───────────────
+    # Capital coefficient is ``risk_coeff * LOSS_FACTOR[a]`` for most
+    # actions, where ``risk_coeff`` is either ``loss_p99`` (VaR-99 legacy)
+    # or ``mean(top 1% of loss_scenarios)`` (TVaR-99, P2.6). TVaR is the
+    # coherent, sub-additive measure an actuary will sign off on; VaR-99
+    # is the legacy path retained for byte-identical artifacts.
+    #
     # ``cede_xs`` is special: excess-of-loss reinsurance is by construction
-    # attached *below* the cohort's VaR-99 (that's the whole point of XS),
-    # so the insurer's retained tail exposure at the p99 level is ~0. This
-    # is what allows a near-zero capital budget to remain feasible by
-    # purchasing XS protection.
+    # attached *below* the cohort's tail (whether we measure it at p99 or
+    # by the top-1% mean), so the insurer's retained tail exposure under
+    # XS is ~0 in both regimes. P2.7 replaces this zeroing with a real
+    # per-scenario retained-tail computation via ``retained_xs``; until
+    # then the zero is defensible for both risk measures.
+    use_tvar = risk_measure == "tvar_99"
+    tvar_per_cohort: dict[str, float] = {}
     capital_terms = []
     for c in cohorts:
         cid = c["id"]
         loss99 = float(c["loss_p99"])
+        if use_tvar:
+            scenarios = c.get("loss_scenarios")
+            if scenarios is None or len(scenarios) == 0:
+                logger.warning(
+                    "cohort %s missing loss_scenarios under risk_measure="
+                    "'tvar_99'; falling back to loss_p99=%s for capital coef",
+                    cid,
+                    loss99,
+                )
+                risk_coeff = loss99
+            else:
+                risk_coeff = _tvar_99(scenarios)
+            tvar_per_cohort[cid] = risk_coeff
+        else:
+            risk_coeff = loss99
         for a in ACTIONS:
             retain_frac = 0.0 if a == "cede_xs" else LOSS_FACTOR[a]
-            capital_terms.append(loss99 * retain_frac * x[(cid, a)])
+            capital_terms.append(risk_coeff * retain_frac * x[(cid, a)])
     prob += pulp.lpSum(capital_terms) <= capital_budget, "capital_budget"
 
     # ── Constraint 3: non-renewal cap on book TIV ──────────────────────
@@ -222,13 +288,17 @@ def solve(
                 row[a] = max(0.0, min(1.0, float(v)))
         actions_out.append(row)
 
-    return {
+    result: dict[str, Any] = {
         "status": status,
         "objective": float(objective) if objective is not None else 0.0,
         "actions": actions_out,
         "horizon_start": horizon_start,
         "horizon_end": horizon_end,
     }
+    if use_tvar:
+        result["tvar_99_used"] = True
+        result["tvar_99_per_cohort"] = tvar_per_cohort
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +316,7 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel requires this ex
                 cession_budget=float(body.get("cession_budget", 5e6)),
                 horizon_start=str(body.get("horizon_start", "2026-07-01")),
                 horizon_end=str(body.get("horizon_end", "2027-06-30")),
+                risk_measure=str(body.get("risk_measure", "var_99")),
             )
             self.send_response(200)
         except Exception as e:  # pragma: no cover — defensive
