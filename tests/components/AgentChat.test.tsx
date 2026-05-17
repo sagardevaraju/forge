@@ -97,3 +97,42 @@ describe('AgentChat tool-call breadcrumb', () => {
     expect(screen.getByText(/query_book_exposure/)).toBeInTheDocument();
   });
 });
+
+describe('AgentChat iteration cap', () => {
+  test('status line surfaces "Iter N/6" while a tool call is in flight', async () => {
+    // Stream a tool_call event carrying iteration=1 and then pause indefinitely
+    // so the status line stays mounted long enough for assertions. We control
+    // the stream manually via a ReadableStream with an unresolved controller.
+    let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        controllerRef = c;
+      },
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(stream, { status: 200 }));
+
+    render(<AgentChat />);
+    fireEvent.change(screen.getByLabelText('agent-input'), {
+      target: { value: 'tampa exposure?' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    // Push a tool_call event with iteration 1.
+    const enc = new TextEncoder();
+    const ev = {
+      type: 'tool_call',
+      name: 'query_book_exposure',
+      arguments: {},
+      iteration: 1,
+    };
+    // Wait for the controller to be assigned, then enqueue.
+    await waitFor(() => expect(controllerRef).not.toBeNull());
+    controllerRef!.enqueue(enc.encode(JSON.stringify(ev) + '\n'));
+
+    const statusLine = await screen.findByTestId('agent-status-line');
+    await waitFor(() => expect(statusLine.textContent).toMatch(/iter 1\/6/i));
+
+    // Close the stream so the component finalizes (avoids hanging test).
+    controllerRef!.close();
+  });
+});

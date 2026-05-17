@@ -20,6 +20,7 @@
 import { createHash } from 'node:crypto';
 import type { ChatRequest } from '@/lib/llm/types';
 import { TOOLS, TOOL_MAP } from '@/lib/llm/tool-registry';
+import { MAX_TOOL_ITERATIONS } from '@/lib/chat-stream';
 import { getLlmFactory } from './_llm-factory';
 
 function shortHash(value: unknown): string {
@@ -31,8 +32,6 @@ function shortHash(value: unknown): string {
 }
 
 export const runtime = 'nodejs';
-
-const MAX_TOOL_ITERATIONS = 6;
 
 const SYSTEM_PROMPT =
   'You are FORGE, a catastrophe-operations co-pilot for a P&C insurance carrier. ' +
@@ -125,6 +124,7 @@ export async function POST(req: Request) {
           type: 'tool_call',
           name: tc.name,
           arguments: tc.arguments,
+          iteration: i + 1,
         });
         const tool = TOOL_MAP[tc.name];
         let result: unknown;

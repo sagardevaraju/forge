@@ -10,9 +10,14 @@
  * Task 21 — when the `final` event carries `citations`, render a
  * "Sources: tool@hash" breadcrumb under the assistant message so analysts
  * can trace which tool result each numeric claim came from.
+ *
+ * Task 22 — `tool_call` events carry an `iteration` counter from the route's
+ * tool-call loop. Surface "(Iter N/6)" in the status line so operators can
+ * see when the agent is approaching the hard cap and decide whether to
+ * tighten their question.
  */
 import { useState } from 'react';
-import { readChatStream, type Citation } from '@/lib/chat-stream';
+import { readChatStream, MAX_TOOL_ITERATIONS, type Citation } from '@/lib/chat-stream';
 
 interface Msg {
   role: 'user' | 'assistant';
@@ -44,7 +49,10 @@ export function AgentChat() {
       let citations: Citation[] | undefined;
       for await (const ev of readChatStream(r)) {
         if (ev.type === 'tool_call') {
-          setStatusLine(`Calling ${ev.name}…`);
+          const iterTag = ev.iteration
+            ? ` (Iter ${ev.iteration}/${MAX_TOOL_ITERATIONS})`
+            : '';
+          setStatusLine(`Calling ${ev.name}…${iterTag}`);
         } else if (ev.type === 'tool_result') {
           setStatusLine(
             ev.ok ? `${ev.name} → ${ev.summary}` : `${ev.name} failed`,
