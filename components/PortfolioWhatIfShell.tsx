@@ -33,10 +33,12 @@
  */
 
 import { useMemo, useRef, useState, useCallback } from 'react';
+import Link from 'next/link';
 import { PortfolioHeader } from '@/components/PortfolioHeader';
 import { WhatIfControl } from '@/components/grammar/WhatIfControl';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
 import type { PortfolioOptimization } from '@/lib/portfolio-actions';
+import { type Persona, getPersonaConfig } from '@/lib/persona/config';
 
 interface Budgets {
   capital_budget: number;
@@ -52,6 +54,25 @@ interface ServerResponse extends PortfolioOptimization {
 interface Props {
   initialOptimization: PortfolioOptimization;
   totalTiv: number;
+  /**
+   * Task P2.18 — persona lens. Selects which ExecCards are rendered (passed
+   * through to `PortfolioHeader`) and whether the what-if rail is shown.
+   * Only cat-ops surfaces the rail by default; other personas read the
+   * baseline solve without re-perturbation. Defaults to `cat-ops` so
+   * existing callers (server tests, the Phase 1 view) keep the rail.
+   */
+  persona?: Persona;
+  /**
+   * Task P2.18 — optional treaty layers for the Reinsurance persona's
+   * RoL-by-layer + retained-tail cards. Passed straight through.
+   */
+  rolLayers?: { type: string; rol: number; attachment?: number }[];
+  /** Task P2.18 — optional CRPS scalar for the Actuary persona. */
+  crps?: number;
+  /** Task P2.18 — optional SAA optimality gap for the Academic persona. */
+  saaGap?: number;
+  /** Task P2.18 — optional VRP demand scalar for the Field-ops persona. */
+  vrpDemand?: number;
 }
 
 /** Format a signed delta in $M. Returns null when |delta| < epsilon. */
@@ -69,8 +90,17 @@ function budgetsEqual(a: Budgets, b: Budgets): boolean {
   );
 }
 
-export function PortfolioWhatIfShell({ initialOptimization, totalTiv }: Props) {
+export function PortfolioWhatIfShell({
+  initialOptimization,
+  totalTiv,
+  persona = 'cat-ops',
+  rolLayers,
+  crps,
+  saaGap,
+  vrpDemand,
+}: Props) {
   const baseline = initialOptimization; // never mutated — keep as constant.
+  const personaConfig = getPersonaConfig(persona);
   const baselineBudgets: Budgets = useMemo(
     () => ({ ...initialOptimization.budgets }),
     [initialOptimization.budgets],
@@ -206,8 +236,32 @@ export function PortfolioWhatIfShell({ initialOptimization, totalTiv }: Props) {
           objectiveDelta={objectiveDelta}
           capitalUsedDelta={capitalUsedDelta}
           nonrenewUsedDelta={nonrenewUsedDelta}
+          persona={persona}
+          rolLayers={rolLayers}
+          crps={crps}
+          saaGap={saaGap}
+          vrpDemand={vrpDemand}
         />
+        {personaConfig.quickLinks.length > 0 && (
+          <div
+            data-testid="persona-quick-links"
+            className="flex flex-wrap gap-2 mt-2 text-xs"
+            aria-label="Persona quick-links"
+          >
+            <span className="text-zinc-500 uppercase tracking-wide">Drill-in:</span>
+            {personaConfig.quickLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="text-blue-700 hover:text-blue-900 underline"
+              >
+                {link.label}
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
+      {personaConfig.whatIfRail && (
       <aside
         data-testid="whatif-rail"
         className="w-full md:w-[280px] md:flex-none flex flex-col gap-2 md:sticky md:top-4 self-start"
@@ -303,6 +357,7 @@ export function PortfolioWhatIfShell({ initialOptimization, totalTiv }: Props) {
           deduplicates identical budget triples.
         </p>
       </aside>
+      )}
     </div>
   );
 }

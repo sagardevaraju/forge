@@ -2,41 +2,62 @@
 
 /**
  * Task 6 (Redesign Phase 1) — PersonaToggle grammar primitive.
+ * Task P2.18 (Phase 2) — URL-backed sibling `PersonaToggleUrl`.
  *
  * Segmented control surfaced on the sub-banner that lets the operator pin a
  * persona lens onto the page: cat-ops (default), actuary, reinsurance,
- * field-ops, or academic. Phase 1 ships the primitive only — it renders the
- * five buttons and emits `onChange` as a controlled component. The actual
- * persona-driven content swaps land in Phase 2 (Task P2.18). The cat-ops
- * track is the only persona whose downstream content is wired live; the
- * other four labels are real but their content paths are stubbed until then.
+ * field-ops, or academic.
  *
- * This is the sole Phase 1 grammar primitive that is a client component:
- * `aria-pressed` + `onClick` need React's event system, so `'use client'` is
- * required.
+ * Two shapes are exported from this module:
+ *
+ *   - `PersonaToggle` is the controlled grammar primitive — it renders the
+ *     five buttons and emits `onChange`. Parents own the `value`. This is
+ *     the original Phase 1 API and remains unchanged so the sub-banner and
+ *     the existing test suite keep working.
+ *   - `PersonaToggleUrl` (Task P2.18) is the URL-backed wrapper. It reads
+ *     `?persona=<id>` via `useSearchParams`, writes back via `useRouter`,
+ *     and preserves the rest of the query string + the current `pathname`.
+ *     The URL is the single source of truth — refreshing or sharing the
+ *     link replays the same view. We intentionally don't mirror into
+ *     localStorage; persistence by URL is the value.
+ *
+ * Both components stay client-only (`'use client'`) because the toggle owns
+ * click handlers + URL writes that need React's event system.
+ *
+ * The `Persona` type is re-exported from `lib/persona/config.ts`, the
+ * single source of truth for the persona vocabulary + per-persona ExecCard
+ * config. Importing from here remains backwards compatible.
  */
 
-export type Persona = 'cat-ops' | 'actuary' | 'reinsurance' | 'field-ops' | 'academic';
+import { useCallback } from 'react';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
+import {
+  type Persona as PersonaT,
+  PERSONAS as PERSONA_META,
+  parsePersona,
+} from '@/lib/persona/config';
 
-const PERSONAS: { value: Persona; label: string }[] = [
-  { value: 'cat-ops', label: 'Cat-ops' },
-  { value: 'actuary', label: 'Actuary' },
-  { value: 'reinsurance', label: 'Reinsurance' },
-  { value: 'field-ops', label: 'Field-ops' },
-  { value: 'academic', label: 'Academic' },
-];
+export type Persona = PersonaT;
 
 interface PersonaToggleProps {
   value: Persona;
   onChange: (next: Persona) => void;
+  /** Optional class hook so callers can size / pad the segmented control. */
+  className?: string;
 }
 
-export function PersonaToggle({ value, onChange }: PersonaToggleProps) {
+export function PersonaToggle({ value, onChange, className }: PersonaToggleProps) {
+  const wrapperClass = [
+    'inline-flex border rounded overflow-hidden text-xs',
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
   return (
-    <div role="group" aria-label="persona-toggle" className="inline-flex border rounded overflow-hidden text-xs">
-      {PERSONAS.map((p) => {
+    <div role="group" aria-label="persona-toggle" className={wrapperClass}>
+      {PERSONA_META.map((p) => {
         const active = value === p.value;
-        const className = active
+        const buttonClass = active
           ? 'bg-zinc-900 text-white px-2 py-1'
           : 'bg-white text-zinc-700 hover:bg-zinc-100 px-2 py-1';
         return (
@@ -45,7 +66,8 @@ export function PersonaToggle({ value, onChange }: PersonaToggleProps) {
             type="button"
             aria-pressed={active}
             onClick={() => onChange(p.value)}
-            className={className}
+            className={buttonClass}
+            title={p.blurb}
           >
             {p.label}
           </button>
@@ -53,4 +75,45 @@ export function PersonaToggle({ value, onChange }: PersonaToggleProps) {
       })}
     </div>
   );
+}
+
+/**
+ * Task P2.18 — URL-backed PersonaToggle. Reads `?persona=` from the URL and
+ * writes back through Next's router so a shared link preserves the lens.
+ *
+ * Implementation notes:
+ *   - `parsePersona` falls back to `cat-ops` when the query is missing or
+ *     invalid — so the toggle always has a button marked active and the
+ *     view never blank-renders.
+ *   - We use `router.replace(...)` rather than `router.push(...)` so a
+ *     casual lens-flip doesn't bloat the history stack with five entries.
+ *   - `scroll: false` keeps the page from snapping to the top when the
+ *     operator switches lens mid-scroll.
+ */
+export function PersonaToggleUrl({ className }: { className?: string }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const current = parsePersona(searchParams?.get('persona'));
+
+  const onChange = useCallback(
+    (next: Persona) => {
+      // Clone the search params so we preserve other query keys (e.g.
+      // ?storm=X) the page might be using alongside ?persona=.
+      const params = new URLSearchParams(searchParams?.toString() ?? '');
+      if (next === 'cat-ops') {
+        // Cat-ops is the default; clear the param rather than persisting it
+        // so the URL stays clean for the canonical view.
+        params.delete('persona');
+      } else {
+        params.set('persona', next);
+      }
+      const qs = params.toString();
+      const href = qs ? `${pathname}?${qs}` : pathname;
+      router.replace(href, { scroll: false });
+    },
+    [router, pathname, searchParams],
+  );
+
+  return <PersonaToggle value={current} onChange={onChange} className={className} />;
 }

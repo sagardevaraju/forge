@@ -18,6 +18,7 @@
  * hoist the storm context up to the layout so only one banner is shown.
  */
 import { EventConsole } from '@/components/EventConsole';
+import { EventsPersonaScope } from '@/components/EventsPersonaScope';
 import { ThreatBanner } from '@/components/grammar/ThreatBanner';
 import { fetchNhcCone } from '@/app/api/agent/tools/fetch_nhc_cone';
 import { fetchFirmsFires } from '@/app/api/agent/tools/fetch_firms_fires';
@@ -73,6 +74,13 @@ export default async function EventsPage() {
           coneRefreshedAt={coneRefreshedAt}
         />
       )}
+      {/*
+        Task P2.18 — Persona toggle + quick-links band above the console.
+        Lens state is URL-backed (`?persona=<id>`) so a shared link with
+        `?persona=reinsurance` lands a treaty lead on this view with the
+        /treaty drill-in already one click away.
+      */}
+      <EventsPersonaScope />
       <EventConsole cone={cone} fires={fires} cohorts={cohorts} />
     </>
   );
