@@ -55,7 +55,7 @@ function mockResponse(storm_id: string): FetchNhcConeResult {
   return {
     cone,
     advisory_number: '14A',
-    peak_wind: 115,
+    peak_wind: 142,
     prior_peak_wind: 135,
     source: 'mock',
   };
