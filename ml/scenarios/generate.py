@@ -10,22 +10,25 @@ west coast.  Each scenario carries:
     * a per-ZIP3 surge depth grid in metres
     * an equal probability weight (1/n)
 
-Real NHC ATCF ensemble ingest is deferred to live-demo runs — see the
-module-level note below.
+Task P2.38 — the generator now accepts an optional ``ensemble`` argument
+holding the real GEFS ensemble members served by ``fetch_nhc_cone``.
+When provided, each scenario is seeded from one ensemble member
+(resampled uniformly to reach the requested ``n``), so the output
+distribution reflects the real forecast uncertainty rather than a
+parametric Gaussian assumption.  When ``ensemble`` is None or empty,
+the historical parametric path runs unchanged — existing callers see
+bit-exactly the same draws.
 
-Real-path data source (deferred)
---------------------------------
-NHC publishes GEFS ensemble track files publicly via NCEP NOMADS::
+Real-path data source
+---------------------
+NHC publishes the GEFS ensemble publicly via the AIDS a-deck:
 
-    https://nomads.ncep.noaa.gov/pub/data/nccf/com/atmos/prod/
-        gefs.YYYYMMDD/HH/atmos/
+    https://ftp.nhc.noaa.gov/atcf/aid_public/a<basin><NN><YYYY>.dat
 
-The ATCF "adeck/bdeck" file format (e.g. ``aal092024.dat``) is the
-canonical hurricane track representation.  Live fetching is only
-meaningful during an active storm, so this module ships with a
-built-in demo seed track approximating a typical Florida-bound Cat-4
-landfall.  When wired up for a real event, ``seed_track`` is the only
-parameter that needs to change.
+``fetch_nhc_cone`` (TypeScript) parses the ATCF rows and filters to
+GEFS ensemble tech codes (AC01..AC20, AP01..AP20). The TS handler then
+calls into this generator's ``/api/scenarios`` endpoint with the parsed
+members so ``ensemble=...`` is exercised end-to-end in the live demo.
 """
 
 from __future__ import annotations
@@ -176,11 +179,83 @@ def _storm_seed(storm_id: str) -> int:
 # ── public API ─────────────────────────────────────────────────────────────
 
 
+def _scenarios_from_ensemble(
+    storm_id: str,
+    n: int,
+    ensemble: list[dict],
+    regime: dict | None,
+) -> list[dict]:
+    """Build ``n`` scenarios by resampling the GEFS ensemble members.
+
+    Each output scenario is seeded from one member's forecast track,
+    translated into the canonical scenario schema (``path`` uses
+    ``lon``/``hours_from_now``, while the input ensemble uses
+    ``lng``/``t_hours`` per the TS tool contract).  We sample members
+    deterministically (round-robin starting from a storm-seeded offset)
+    so the resampling is reproducible without drawing from numpy's RNG —
+    that keeps the parametric path's RNG sequence intact.
+
+    Task P2.38.
+    """
+    rng = np.random.default_rng(_storm_seed(storm_id))
+    # Round-robin assignment with a storm-seeded jitter so two storms
+    # with the same N pick different starting members; within one storm
+    # the assignment is reproducible.
+    offset = int(rng.integers(0, max(1, len(ensemble))))
+    scenarios: list[dict] = []
+    prob = 1.0 / n
+    for i in range(n):
+        member = ensemble[(offset + i) % len(ensemble)]
+        member_id = str(member.get("member_id", f"M{(offset + i) % len(ensemble):02d}"))
+        raw_track = member.get("track") or []
+        # Normalise track schema: the TS tool emits {lat, lng, t_hours,
+        # peak_wind}; downstream we expose {lat, lon, hours_from_now}.
+        path: list[dict[str, float]] = []
+        member_peak = 0.0
+        for pt in raw_track:
+            lat = float(pt.get("lat", 0.0))
+            lon = float(pt.get("lon", pt.get("lng", 0.0)))
+            t_h = int(pt.get("hours_from_now", pt.get("t_hours", 0)))
+            pw = float(pt.get("peak_wind", 0.0))
+            if pw > member_peak:
+                member_peak = pw
+            path.append({"lat": round(lat, 4), "lon": round(lon, 4), "hours_from_now": t_h})
+        # Empty member track ⇒ defensive: synthesize a single point at
+        # the FL demo start so the scenario shape is still well-formed.
+        if not path:
+            path.append({"lat": 24.0, "lon": -83.0, "hours_from_now": 0})
+            member_peak = 130.0
+        peak_wind = round(max(35.0, min(215.0, member_peak)), 1)
+        # Per-ZIP3 surge grid identical to the parametric path's model.
+        surge_grid: dict[str, float] = {}
+        for zip3, meta in _COASTAL_ZIP3S.items():
+            dist_km = _min_distance_to_track_km(meta["lat"], meta["lon"], path)
+            surge_grid[zip3] = _surge_depth(dist_km, peak_wind, meta["elev_m"])
+        scenario: dict = {
+            "id": f"{storm_id}_{i + 1:04d}",
+            "path": path,
+            "peak_wind": peak_wind,
+            "surge_grid": surge_grid,
+            "prob": prob,
+            "member_id": member_id,
+        }
+        if regime is not None:
+            scenario["regime"] = regime
+        scenarios.append(scenario)
+    # Normalise (handles n where 1/n isn't exactly representable in float).
+    total = sum(s["prob"] for s in scenarios)
+    if total > 0 and abs(total - 1.0) > 1e-9:
+        for s in scenarios:
+            s["prob"] = s["prob"] / total
+    return scenarios
+
+
 def generate_scenarios(
     storm_id: str,
     n: int = 1000,
     seed_track: list[dict] | None = None,
     regime: dict | None = None,
+    ensemble: list[dict] | None = None,
 ) -> list[dict]:
     """Generate ``n`` Monte-Carlo scenarios for ``storm_id``.
 
@@ -202,14 +277,31 @@ def generate_scenarios(
         attached to every scenario as metadata so downstream consumers
         can see the conditioning context.  P2.4+ will use this to bias
         the scenario draws; for now it is pass-through.
+    ensemble:
+        Optional list of GEFS ensemble member dicts as returned by the
+        ``fetch_nhc_cone`` TS tool.  Each member must shape as
+        ``{"member_id": str, "track": [{"lat", "lng", "t_hours",
+        "peak_wind"}, …]}``.  When provided and non-empty, scenarios
+        are resampled from these members (one member per scenario,
+        round-robin to reach ``n``) rather than drawn from the
+        parametric Gaussian perturbation.  ``None`` or ``[]`` falls
+        back to the parametric path so existing callers are unaffected.
+        Task P2.38.
 
     Returns
     -------
     list[dict]
-        ``n`` scenario dicts.  Probability weights sum to 1.
+        ``n`` scenario dicts.  Probability weights sum to 1.  When the
+        ensemble path is used each scenario additionally carries a
+        ``member_id`` key identifying its source ensemble member.
     """
     if n <= 0:
         return []
+
+    # Task P2.38 — when a non-empty ensemble is supplied, resample from
+    # it.  Empty / None ⇒ parametric path (backward compat).
+    if ensemble:
+        return _scenarios_from_ensemble(storm_id, n, list(ensemble), regime)
 
     track = seed_track if seed_track is not None else _DEMO_TRACK_FL
     if len(track) < 2:

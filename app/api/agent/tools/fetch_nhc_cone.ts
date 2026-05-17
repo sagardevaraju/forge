@@ -15,6 +15,17 @@
  * single cone with no regression. The live path fetches each prior URL
  * independently and tolerates individual 404s — one missing advisory does
  * not block the rest of the response.
+ *
+ * Task P2.38 — the result also carries the GEFS ensemble forecast members
+ * as `gefs_ensemble`. The live path scrapes the ATCF a-deck under
+ *   https://ftp.nhc.noaa.gov/atcf/aid_public/a<basin><NN><YYYY>.dat
+ * and filters to GEFS ensemble member tech codes (AC01..AC20, AP01..AP20).
+ * Mock fallback returns 5 deterministic members (perturbed east/west of
+ * the demo seed track) so the offline path still exercises the ensemble
+ * code path through ml.scenarios.generate. The field is additive and
+ * collapses to null when the upstream feed is empty or unreachable —
+ * downstream code (the scenario generator) then falls back to the
+ * parametric perturbation path.
  */
 
 export interface FetchNhcConeArgs {
@@ -32,6 +43,38 @@ export interface PriorCone {
   advisory_number: number;
   issued_at: string;
   cone: unknown;
+}
+
+/**
+ * A single GEFS ensemble forecast track point. Distances are in degrees,
+ * `t_hours` is hours from the advisory issue time, and `peak_wind` is in
+ * knots (kt) per the ATCF a-deck convention. Task P2.38.
+ */
+export interface GefsEnsembleTrackPoint {
+  lat: number;
+  lng: number;
+  t_hours: number;
+  peak_wind: number;
+}
+
+/**
+ * One member of the GEFS ensemble. `member_id` is the ATCF technique
+ * code (e.g. "AC01"..."AC20" for the GEFS control/perturbation members,
+ * "AP01"..."AP20" for the GEFS Parallel branch). Task P2.38.
+ */
+export interface GefsEnsembleMember {
+  member_id: string;
+  track: GefsEnsembleTrackPoint[];
+}
+
+/**
+ * The full GEFS ensemble forecast for the current advisory. Null when
+ * the upstream feed is empty or unreachable — downstream consumers
+ * (notably the Python scenario generator) fall back to the parametric
+ * perturbation path on null. Task P2.38.
+ */
+export interface GefsEnsemble {
+  members: GefsEnsembleMember[];
 }
 
 export interface FetchNhcConeResult {
@@ -52,6 +95,12 @@ export interface FetchNhcConeResult {
    * outline ribbon under the current cone.
    */
   prior_cones: PriorCone[];
+  /**
+   * GEFS ensemble forecast members for the current advisory. Null when
+   * the upstream ATCF a-deck is empty or unreachable, in which case the
+   * scenario generator falls back to its parametric path. Task P2.38.
+   */
+  gefs_ensemble: GefsEnsemble | null;
   source: 'live' | 'mock';
 }
 
@@ -100,6 +149,45 @@ function mockPriorCone(
   return { advisory_number, issued_at, cone };
 }
 
+/**
+ * Build a deterministic 5-member GEFS ensemble for the mock / offline
+ * path. Each member is a 5-point track at 0/24/48/72/96h, shifted from
+ * the canonical mock cone centerline by a fixed lat/lon offset and a
+ * small per-member intensity jitter. This is the cheapest thing that
+ * still exercises the Python ensemble code path in scenarios.generate.
+ *
+ * The shifts are deliberately deterministic (no RNG) so the test
+ * fixtures stay byte-stable across runs.
+ */
+function mockGefsEnsemble(): GefsEnsemble {
+  const baseLat = 24.0; // Cat-4 Gulf approach
+  const baseLng = -83.0;
+  // Each member: [memberId, lat offset (deg), lng offset (deg), wind jitter (kt)].
+  // Offsets are unique per member so the resulting tracks are
+  // distinguishable point-by-point (tests pin this).
+  const memberSpecs: Array<[string, number, number, number]> = [
+    ['AC01', 0.0, 0.2, 5], // east
+    ['AC02', 0.0, -0.2, -5], // west
+    ['AC03', 0.2, 0.05, 3], // NE-ish
+    ['AC04', -0.2, -0.05, -3], // SW-ish
+    ['AC05', 0.1, 0.1, 1], // NNE
+  ];
+  const members: GefsEnsembleMember[] = memberSpecs.map(
+    ([member_id, latOff, lngOff, windOff]) => {
+      // 5-point track at 0/24/48/72/96h tracking NNE toward FL.
+      const track: GefsEnsembleTrackPoint[] = [0, 24, 48, 72, 96].map((t) => ({
+        lat: Number((baseLat + latOff + (t / 96) * 5).toFixed(4)),
+        lng: Number((baseLng + lngOff + (t / 96) * 2).toFixed(4)),
+        t_hours: t,
+        // 110 kt baseline, ramping to 130 kt at landfall, plus per-member jitter.
+        peak_wind: 110 + Math.round((t / 96) * 20) + windOff,
+      }));
+      return { member_id, track };
+    },
+  );
+  return { members };
+}
+
 function mockResponse(storm_id: string): FetchNhcConeResult {
   // A plausible Florida-gulf cone polygon (a fat ellipse-ish ring).
   const cone = {
@@ -143,6 +231,9 @@ function mockResponse(storm_id: string): FetchNhcConeResult {
     peak_wind: 142,
     prior_peak_wind: 135,
     prior_cones,
+    // Task P2.38 — 5-member deterministic GEFS ensemble. Offline / no-key
+    // demos still exercise the ensemble path through ml.scenarios.generate.
+    gefs_ensemble: mockGefsEnsemble(),
     source: 'mock',
   };
 }
@@ -196,6 +287,117 @@ async function tryLivePrior(
   }
 }
 
+/**
+ * Parse an ATCF-formatted lat token (e.g. "240N", "240S", "0N") to a
+ * signed decimal degree. The third character is the hemisphere; the
+ * leading digits are tenths of a degree.
+ */
+function parseAtcfLat(token: string): number | null {
+  const m = token.trim().match(/^(-?\d+)([NS])$/i);
+  if (!m) return null;
+  const tenths = Number(m[1]);
+  if (!Number.isFinite(tenths)) return null;
+  const sign = m[2]!.toUpperCase() === 'S' ? -1 : 1;
+  return (sign * tenths) / 10;
+}
+
+/**
+ * Parse an ATCF-formatted lon token (e.g. "830W", "0E"). Western
+ * longitudes are negative.
+ */
+function parseAtcfLon(token: string): number | null {
+  const m = token.trim().match(/^(-?\d+)([EW])$/i);
+  if (!m) return null;
+  const tenths = Number(m[1]);
+  if (!Number.isFinite(tenths)) return null;
+  const sign = m[2]!.toUpperCase() === 'W' ? -1 : 1;
+  return (sign * tenths) / 10;
+}
+
+/**
+ * GEFS ensemble technique codes published by NHC under the a-deck. We
+ * match both the perturbation branch (AC01..AC20) and the parallel
+ * branch (AP01..AP20). The control members (AC00 / AP00) are also
+ * included as legitimate ensemble seeds.
+ */
+function isGefsEnsembleTech(tech: string): boolean {
+  const t = tech.trim().toUpperCase();
+  return /^A[CP](?:0\d|1\d|20)$/.test(t);
+}
+
+/**
+ * Parse the ATCF a-deck text body served by NHC's AIDS feed into a
+ * GefsEnsemble. Each non-empty line is a comma-separated record; the
+ * column order is fixed by the ATCF spec (BASIN, CY, YYYYMMDDHH,
+ * TECHNUM, TECH, TAU, LatN, LonW, VMAX, MSLP, TY, …). We filter to
+ * GEFS ensemble tech codes only and surface (lat, lng, t_hours,
+ * peak_wind) per forecast row. Returns null when no GEFS rows are
+ * present (caller collapses to null for the downstream consumer).
+ */
+function parseGefsAtcf(body: string): GefsEnsemble | null {
+  const memberMap = new Map<string, GefsEnsembleTrackPoint[]>();
+  for (const rawLine of body.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const cols = line.split(',').map((c) => c.trim());
+    if (cols.length < 9) continue;
+    const tech = cols[4] ?? '';
+    if (!isGefsEnsembleTech(tech)) continue;
+    const tau = Number(cols[5]);
+    const lat = parseAtcfLat(cols[6] ?? '');
+    const lng = parseAtcfLon(cols[7] ?? '');
+    const vmax = Number(cols[8]);
+    if (!Number.isFinite(tau) || lat === null || lng === null || !Number.isFinite(vmax)) {
+      continue;
+    }
+    const memberId = tech.toUpperCase();
+    const arr = memberMap.get(memberId) ?? [];
+    arr.push({ lat, lng, t_hours: tau, peak_wind: vmax });
+    memberMap.set(memberId, arr);
+  }
+  if (memberMap.size === 0) return null;
+  const members: GefsEnsembleMember[] = Array.from(memberMap.entries())
+    .map(([member_id, track]) => ({
+      member_id,
+      track: track.slice().sort((a, b) => a.t_hours - b.t_hours),
+    }))
+    .sort((a, b) => a.member_id.localeCompare(b.member_id));
+  return { members };
+}
+
+/**
+ * Build the NHC AIDS a-deck URL for the given storm id. ``AL092024`` →
+ * ``https://ftp.nhc.noaa.gov/atcf/aid_public/aal092024.dat``. Returns
+ * null when the storm_id does not match the BASIN+NN+YYYY shape.
+ */
+function atcfUrl(storm_id: string): string | null {
+  const m = storm_id.trim().toUpperCase().match(/^([A-Z]{2})(\d{2})(\d{4})$/);
+  if (!m) return null;
+  const basin = m[1]!.toLowerCase();
+  const num = m[2];
+  const year = m[3];
+  return `https://ftp.nhc.noaa.gov/atcf/aid_public/a${basin}${num}${year}.dat`;
+}
+
+/**
+ * Fetch the GEFS ensemble for a storm from NHC's AIDS a-deck. Returns
+ * null on any failure (404, parse error, no GEFS rows). Callers
+ * propagate the null through the response so downstream code can fall
+ * back to the parametric scenario generator. Task P2.38.
+ */
+async function tryLiveGefsEnsemble(storm_id: string): Promise<GefsEnsemble | null> {
+  const url = atcfUrl(storm_id);
+  if (!url) return null;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const body = await r.text();
+    return parseGefsAtcf(body);
+  } catch {
+    return null;
+  }
+}
+
 async function tryLive(storm_id: string): Promise<FetchNhcConeResult | null> {
   const url = `https://www.nhc.noaa.gov/storm_graphics/api/${encodeURIComponent(
     storm_id,
@@ -223,6 +425,9 @@ async function tryLive(storm_id: string): Promise<FetchNhcConeResult | null> {
   }
   // Most recent first — desc by advisory_number.
   prior_cones.sort((a, b) => b.advisory_number - a.advisory_number);
+  // Task P2.38 — pull the GEFS ensemble from NHC AIDS. Failures collapse
+  // to null so the Python scenario generator falls back to parametric.
+  const gefs_ensemble = await tryLiveGefsEnsemble(storm_id);
   // Task 23: the NHC archive layout for a prior advisory varies by storm and
   // does not expose a stable, side-effect-free "latest minus one" endpoint
   // from this CONE_latest.json payload alone. Defer the live-path lookup —
@@ -234,6 +439,7 @@ async function tryLive(storm_id: string): Promise<FetchNhcConeResult | null> {
     peak_wind: Number(feat.properties?.MAXWIND ?? 0),
     prior_peak_wind: null,
     prior_cones,
+    gefs_ensemble,
     source: 'live',
   };
 }
@@ -241,7 +447,7 @@ async function tryLive(storm_id: string): Promise<FetchNhcConeResult | null> {
 export const fetchNhcCone = {
   name: 'fetch_nhc_cone',
   description:
-    'Fetch the latest National Hurricane Center forecast cone polygon (GeoJSON) plus advisory number and peak sustained wind (kt) for a given storm id (e.g., AL092024). Also returns up to 4 prior advisories as a `prior_cones` ribbon (most recent first) for trend visualisation.',
+    'Fetch the latest National Hurricane Center forecast cone polygon (GeoJSON) plus advisory number and peak sustained wind (kt) for a given storm id (e.g., AL092024). Also returns up to 4 prior advisories as a `prior_cones` ribbon (most recent first) for trend visualisation, and (when available) the GEFS ensemble forecast members as `gefs_ensemble` for use as a scenario-generator input distribution.',
   parameters: {
     type: 'object' as const,
     properties: {
