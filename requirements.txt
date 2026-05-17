@@ -1,6 +1,7 @@
 numpy>=1.26
 pytest>=8.0
 requests>=2.31
+scipy>=1.11  # Task P2.1: continuous CRPS (PchipInterpolator + quad)
 
 # Task 10-11: loss synthesis + XGBoost quantile training
 pandas>=2.0
