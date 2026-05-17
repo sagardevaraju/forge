@@ -92,3 +92,32 @@ describe('GET /api/cron/refresh', () => {
     expect(json.summary[2]).toBe('ok');
   });
 });
+
+describe('cron refresh route — advisory-delta tracking', () => {
+  test('returns advisory_changed=true on the first call, false on the repeat', async () => {
+    // Task 25: module-level lastAdvisoryNumber persists across calls within a
+    // single instance. Reset the module registry + unmock the NHC tool so the
+    // real handler runs (FORGE_TOOLS_MODE=mock makes it return a deterministic
+    // advisory_number we can assert against).
+    vi.resetModules();
+    vi.doUnmock('@/app/api/agent/tools/fetch_nhc_cone');
+    vi.doUnmock('@/app/api/agent/tools/fetch_firms_fires');
+    vi.doUnmock('@/app/api/agent/tools/fetch_fema_declarations');
+    vi.stubEnv('FORGE_TOOLS_MODE', 'mock');
+    delete process.env.CRON_SECRET;
+
+    const mod = await import('@/app/api/cron/refresh/route');
+
+    const request = new Request('http://localhost/api/cron/refresh');
+    const res1 = await mod.GET(request);
+    expect(res1.status).toBe(200);
+    const body1 = await res1.json();
+    expect(body1.advisory_changed).toBe(true);
+    expect(body1).toHaveProperty('advisory_number');
+    const res2 = await mod.GET(request);
+    const body2 = await res2.json();
+    expect(body2.advisory_changed).toBe(false);
+
+    vi.unstubAllEnvs();
+  });
+});
