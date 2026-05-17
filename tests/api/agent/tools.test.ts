@@ -73,6 +73,12 @@ describe('fetch_nhc_cone', () => {
       fetchNhcCone.handler({ storm_id: '' } as { storm_id: string }),
     ).rejects.toThrow(/storm_id required/);
   });
+
+  test('returns prior_peak_wind in mock fallback (Task 23 delta)', async () => {
+    process.env.FORGE_TOOLS_MODE = 'mock';
+    const out = await fetchNhcCone.handler({ storm_id: 'AL092024' });
+    expect(out.prior_peak_wind).toBe(135);
+  });
 });
 
 describe('fetch_firms_fires', () => {

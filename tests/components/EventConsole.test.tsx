@@ -36,6 +36,7 @@ function makeCone(): FetchNhcConeResult {
     cone: { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] } },
     advisory_number: '14A',
     peak_wind: 115,
+    prior_peak_wind: 108,
     source: 'mock',
   };
 }

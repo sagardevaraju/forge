@@ -16,6 +16,13 @@ export interface FetchNhcConeResult {
   cone: unknown;
   advisory_number: string;
   peak_wind: number;
+  /**
+   * Peak wind (mph) reported on the immediately-preceding advisory. The
+   * ThreatBanner (Task 5) uses this to compute the delta-since-prior chip
+   * surfaced in Task 23. Null when no prior advisory is available (first
+   * advisory, archive miss, or the live path is unable to resolve it).
+   */
+  prior_peak_wind: number | null;
   source: 'live' | 'mock';
 }
 
@@ -42,7 +49,16 @@ function mockResponse(storm_id: string): FetchNhcConeResult {
       ],
     },
   };
-  return { cone, advisory_number: '14A', peak_wind: 115, source: 'mock' };
+  // Task 23: prior advisory's peak wind seeds the delta chip. The demo's
+  // current peak_wind of 142 (set when the cone refreshes against a fresh
+  // advisory) renders a +7 mph swing against this 135 mph baseline.
+  return {
+    cone,
+    advisory_number: '14A',
+    peak_wind: 115,
+    prior_peak_wind: 135,
+    source: 'mock',
+  };
 }
 
 async function tryLive(storm_id: string): Promise<FetchNhcConeResult | null> {
@@ -59,10 +75,16 @@ async function tryLive(storm_id: string): Promise<FetchNhcConeResult | null> {
   };
   const feat = data.features?.[0];
   if (!feat) return null;
+  // Task 23: the NHC archive layout for a prior advisory varies by storm and
+  // does not expose a stable, side-effect-free "latest minus one" endpoint
+  // from this CONE_latest.json payload alone. Defer the live-path lookup —
+  // the mock fallback covers the demo and the banner copes with `null` by
+  // suppressing the delta chip.
   return {
     cone: feat,
     advisory_number: String(feat.properties?.ADVISNUM ?? ''),
     peak_wind: Number(feat.properties?.MAXWIND ?? 0),
+    prior_peak_wind: null,
     source: 'live',
   };
 }
