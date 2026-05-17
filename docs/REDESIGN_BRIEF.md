@@ -188,7 +188,7 @@ A phased redesign plan that:
 3. **Closes the gap inventory** — every line in §4 gets either an in-scope plan or an explicit "deferred to v2, here's the migration path" note.
 4. **Sequences the work** — at least three phases (quick wins · structural · production-readiness) with the credibility lift per phase.
 5. **Anticipates panel questions** — one paragraph per audience archetype (§1) with the rehearsed defense.
-6. **Calls out the trade-offs** — every "we should do X" is paired with what we lose (build time, complexity, performance) so the user can override.
+6. **Calls out the trade-offs** — every "we should do X" is paired with what we lose (complexity, performance, model interpretability, fidelity vs. reproducibility) so the user can override.
 
 `/ultrathink` should be exhaustive, not curated. Bias toward listing every option and explicitly rejecting the ones that don't fit, rather than silently filtering.
 
@@ -196,7 +196,6 @@ A phased redesign plan that:
 
 ## 6. Constraints to respect
 
-- **Solo build, week-scale timeline** for the redesign — favor changes that compound (a unified trust-tier component lifts every view at once) over per-view polish.
 - **Vercel deployment** — Next.js 16 on Node + Python 3.12 runtimes. Don't propose a new runtime tier.
 - **Local DB fallback** must keep working — `forge-local.db` is the dev story.
 - **`api_py/` modules must remain importable for tests** as well as wrappable by Vercel handlers. No splitting into a separate service.
