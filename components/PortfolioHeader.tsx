@@ -147,15 +147,17 @@ function renderCard(kind: PersonaCardKind, p: Props) {
         />
       );
     case 'tvar_99':
-      // The portfolio artifact ships `book_totals.loss_p99` (VaR-99) rather
-      // than a proper TVaR-99. Per the P2.18 spec we surface it under the
-      // TVaR-99 label for the Actuary lens until P2.10 supplies the real
-      // tail expectation — the trust tier stays MODEL_OUTPUT because the
-      // number IS the model's output, just a different tail statistic.
+      // The portfolio artifact still ships `book_totals.loss_p99` (VaR-99)
+      // rather than a proper TVaR-99 — the P2.10 swap (mean of top 1% of
+      // scenarios) lives on the Python-track branch that hasn't merged into
+      // this branch yet. We surface VaR-99 here under a "(proxy)" label so
+      // the Actuary lens isn't lying about which tail statistic this is.
+      // Once P2.10 merges, this case can be relabeled "TVaR-99" and read
+      // from `book_totals.tvar_99` instead.
       return (
         <ExecCard
           key={kind}
-          label="TVaR-99"
+          label="VaR-99 (proxy)"
           value={$M(p.capitalUsed)}
           tier="MODEL_OUTPUT"
         />

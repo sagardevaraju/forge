@@ -223,11 +223,11 @@ describe('PortfolioPersonaScope — per-persona content', () => {
     expect(within(header).getByText('Cession spend / budget')).toBeInTheDocument();
   });
 
-  test('?persona=actuary swaps margin → TVaR-99 + adds CRPS + shows /calibration', () => {
+  test('?persona=actuary swaps margin → VaR-99 proxy + adds CRPS + shows /calibration', () => {
     renderScope('persona=actuary');
     const header = screen.getByTestId('portfolio-header');
     expect(header.getAttribute('data-persona')).toBe('actuary');
-    expect(within(header).getByText('TVaR-99')).toBeInTheDocument();
+    expect(within(header).getByText('VaR-99 (proxy)')).toBeInTheDocument();
     expect(within(header).queryByText('Expected margin')).toBeNull();
     expect(within(header).getByText('CRPS')).toBeInTheDocument();
     // Quick-links band carries the /calibration link.
