@@ -3,6 +3,14 @@
  * Task 22 — Claims Pre-Brief table.
  * Task 19 — Group rows by ZIP3 → county header rows.
  * Task 20 — Statutory non-renewal notice-period column.
+ * Task P2.27 — Loss column reads cohort `loss_p50` from the Portfolio MIP
+ *               artifact (not the LOSS_FACTOR heuristic). The column header
+ *               now carries a `MODEL_OUTPUT` trust-tier badge to reflect
+ *               that move; the rest of the page is still seeded synthetic
+ *               policy data so the page-level badge stays SYNTHETIC_SCAFFOLD.
+ *               Policies whose (zip3, build_type, quintile) cohort isn't in
+ *               the artifact display "—" rather than a zero (so the table
+ *               doesn't lie when the cohort is missing).
  *
  * Renders pre-flagged policies returned by the server component, with a
  * severity tier filter and a one-click CSV export. The export builds the
@@ -24,6 +32,7 @@
 import { useState, useMemo, Fragment } from 'react';
 import { zip3ToCounty } from '@/lib/regulatory/zip3_to_county';
 import { noticeWindowForZip3 } from '@/lib/regulatory/notice_periods';
+import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
 
 export interface PreflagPolicy {
   policy_id: number;
@@ -32,7 +41,13 @@ export interface PreflagPolicy {
   build_type: string;
   flood_zone: string;
   severity: 'low' | 'medium' | 'high';
-  expected_loss: number;
+  /**
+   * Task P2.27 — proportional split of the cohort's `loss_p50` based on
+   * this policy's TIV share inside the cohort. `null` when the cohort
+   * isn't present in the optimization artifact; the row renders "—" in
+   * that case instead of faking a zero.
+   */
+  expected_loss: number | null;
 }
 
 interface Props {
@@ -98,7 +113,7 @@ export function ClaimsTable({ policies }: Props) {
     const rows = filtered
       .map(
         (p) =>
-          `${p.policy_id},${p.zip3},${p.tiv},${p.build_type},${p.flood_zone},${p.severity},${p.expected_loss.toFixed(0)},${noticeWindowForZip3(p.zip3)}`,
+          `${p.policy_id},${p.zip3},${p.tiv},${p.build_type},${p.flood_zone},${p.severity},${p.expected_loss == null ? '' : p.expected_loss.toFixed(0)},${noticeWindowForZip3(p.zip3)}`,
       )
       .join('\n');
     const blob = new Blob([header + rows], { type: 'text/csv' });
@@ -144,7 +159,12 @@ export function ClaimsTable({ policies }: Props) {
             <th className="text-left p-2">Flood zone</th>
             <th className="text-left p-2">Severity</th>
             <th className="text-right p-2">Notice (days)</th>
-            <th className="text-right p-2">Expected loss</th>
+            <th className="text-right p-2">
+              <span className="inline-flex items-center gap-1.5" data-testid="loss-trust-tier">
+                Expected loss
+                <TrustTierBadge tier="MODEL_OUTPUT" />
+              </span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -189,7 +209,9 @@ export function ClaimsTable({ policies }: Props) {
                     {noticeWindowForZip3(p.zip3)}
                   </td>
                   <td className="p-2 text-right">
-                    ${p.expected_loss.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    {p.expected_loss == null
+                      ? '—'
+                      : `$${p.expected_loss.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
                   </td>
                 </tr>
               ))}
