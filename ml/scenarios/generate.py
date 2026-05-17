@@ -26,9 +26,11 @@ NHC publishes the GEFS ensemble publicly via the AIDS a-deck:
     https://ftp.nhc.noaa.gov/atcf/aid_public/a<basin><NN><YYYY>.dat
 
 ``fetch_nhc_cone`` (TypeScript) parses the ATCF rows and filters to
-GEFS ensemble tech codes (AC01..AC20, AP01..AP20). The TS handler then
-calls into this generator's ``/api/scenarios`` endpoint with the parsed
-members so ``ensemble=...`` is exercised end-to-end in the live demo.
+GEFS ensemble tech codes (AC01..AC20, AP01..AP20). The ``ensemble=``
+kwarg is currently a library-only API — the ``/api/scenarios`` HTTP
+route does not yet forward ensemble members from the TS proxy, so
+end-to-end live wiring is a follow-up. Unit + ensemble-path tests
+cover the library contract.
 """
 
 from __future__ import annotations
