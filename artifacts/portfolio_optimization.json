@@ -2,6 +2,8 @@
   "schema_version": 2,
   "status": "Optimal",
   "objective": 44483580.87969141,
+  "horizon_start": "2026-07-01",
+  "horizon_end": "2027-06-30",
   "budgets": {
     "capital_budget": 23520237.038749304,
     "max_nonrenew_pct": 0.15,

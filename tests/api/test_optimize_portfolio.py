@@ -75,6 +75,54 @@ def test_mip_capital_constraint_binds() -> None:
     assert de_risked > 0.5
 
 
+def test_solve_accepts_horizon_metadata() -> None:
+    """Task 24: solve() echoes horizon_start/horizon_end into the output dict."""
+    cohorts = [
+        {
+            "id": "c1",
+            "tiv": 1e6,
+            "total_tiv": 1e6,
+            "total_premium": 20000,
+            "loss_p50": 5_000,
+            "loss_p99": 20_000,
+            "zip3": "330",
+        }
+    ]
+    out = solve(
+        cohorts=cohorts,
+        capital_budget=1e8,
+        max_nonrenew_pct=0.1,
+        cession_budget=5e6,
+        horizon_start="2026-07-01",
+        horizon_end="2027-06-30",
+    )
+    assert out["horizon_start"] == "2026-07-01"
+    assert out["horizon_end"] == "2027-06-30"
+
+
+def test_solve_horizon_defaults_to_treaty_year() -> None:
+    """Defaults are the industry cat treaty cycle (Jul 1 → Jun 30)."""
+    cohorts = [
+        {
+            "id": "c1",
+            "tiv": 1e6,
+            "total_tiv": 1e6,
+            "total_premium": 20000,
+            "loss_p50": 5_000,
+            "loss_p99": 20_000,
+            "zip3": "330",
+        }
+    ]
+    out = solve(
+        cohorts=cohorts,
+        capital_budget=1e8,
+        max_nonrenew_pct=0.1,
+        cession_budget=5e6,
+    )
+    assert out["horizon_start"] == "2026-07-01"
+    assert out["horizon_end"] == "2027-06-30"
+
+
 def test_full_book_solves_under_5_seconds() -> None:
     """Realism check: a 300-cohort problem solves quickly."""
     random.seed(0)

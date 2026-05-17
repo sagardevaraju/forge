@@ -40,6 +40,13 @@ export interface OptimizedCohort {
 export interface PortfolioOptimization {
   status: string;
   objective: number;
+  /**
+   * Task 24 — treaty-year horizon (ISO ``YYYY-MM-DD``). Defaults to the
+   * industry cat treaty cycle (Jul 1 → Jun 30). Optional so older cached
+   * artifacts without the field still parse.
+   */
+  horizon_start?: string;
+  horizon_end?: string;
   budgets: {
     capital_budget: number;
     max_nonrenew_pct: number;

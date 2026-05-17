@@ -41,6 +41,8 @@ export default async function PortfolioPage() {
         nonrenewCapTiv={totalTiv * (optimization?.budgets.max_nonrenew_pct ?? 0.1)}
         cessionSpend={0}
         cessionBudget={optimization?.budgets.cession_budget ?? 5e6}
+        horizonStart={optimization?.horizon_start}
+        horizonEnd={optimization?.horizon_end}
       />
       <div className="h-[60vh] border rounded">
         <PortfolioMap cohorts={cohorts} optimization={optimization} />

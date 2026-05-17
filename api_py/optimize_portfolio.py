@@ -80,6 +80,8 @@ def solve(
     capital_budget: float,
     max_nonrenew_pct: float,
     cession_budget: float,
+    horizon_start: str = "2026-07-01",
+    horizon_end: str = "2027-06-30",
 ) -> dict[str, Any]:
     """Solve the Portfolio MIP.
 
@@ -96,13 +98,23 @@ def solve(
         regulatory + customer-continuity cap).
     cession_budget
         Maximum aggregate cession premium spend.
+    horizon_start, horizon_end
+        ISO-date strings (``YYYY-MM-DD``) describing the treaty-year window
+        this solve targets. Defaults match the industry cat treaty cycle
+        (Jul 1 → Jun 30) — the implicit horizon for renewals priced against
+        a wind-season-aligned reinsurance program. Pass through to the
+        output dict so downstream artifacts/UIs can label the recommendation
+        without re-deriving the convention. The values are metadata only;
+        the MIP economics themselves are unaffected (premiums and losses
+        are already annualized at the cohort level).
 
     Returns
     -------
     dict
         ``{"status": str, "objective": float, "actions": [{"cohort_id": ...,
-        "retain": float, ...}, ...]}``. Action allocations always sum to 1.0
-        per cohort (within solver tolerance).
+        "retain": float, ...}, ...], "horizon_start": str, "horizon_end":
+        str}``. Action allocations always sum to 1.0 per cohort (within
+        solver tolerance).
     """
     import pulp
 
@@ -198,6 +210,8 @@ def solve(
         "status": status,
         "objective": float(objective) if objective is not None else 0.0,
         "actions": actions_out,
+        "horizon_start": horizon_start,
+        "horizon_end": horizon_end,
     }
 
 
@@ -214,6 +228,8 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel requires this ex
                 capital_budget=float(body.get("capital_budget", 1e8)),
                 max_nonrenew_pct=float(body.get("max_nonrenew_pct", 0.10)),
                 cession_budget=float(body.get("cession_budget", 5e6)),
+                horizon_start=str(body.get("horizon_start", "2026-07-01")),
+                horizon_end=str(body.get("horizon_end", "2027-06-30")),
             )
             self.send_response(200)
         except Exception as e:  # pragma: no cover — defensive

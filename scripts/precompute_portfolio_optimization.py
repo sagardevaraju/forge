@@ -29,6 +29,12 @@ sys.path.insert(0, str(ROOT))
 
 from api_py.optimize_portfolio import solve  # noqa: E402
 
+# Task 24: industry-standard cat treaty cycle (Jul 1 → Jun 30). Persist in the
+# artifact so the Portfolio UI can label the recommendation with its horizon
+# without hard-coding the convention on the client side.
+HORIZON_START = "2026-07-01"
+HORIZON_END = "2027-06-30"
+
 
 # ---------------------------------------------------------------------------
 # HAZUS-derived annual loss prior. Values calibrated so that the worst
@@ -191,6 +197,8 @@ def main() -> None:
         capital_budget=capital_budget,
         max_nonrenew_pct=max_nonrenew_pct,
         cession_budget=cession_budget,
+        horizon_start=HORIZON_START,
+        horizon_end=HORIZON_END,
     )
     print(f"MIP status: {result['status']}  objective: ${result['objective']:,.0f}")
 
@@ -223,6 +231,8 @@ def main() -> None:
         "schema_version": 2,
         "status": result["status"],
         "objective": result["objective"],
+        "horizon_start": result["horizon_start"],
+        "horizon_end": result["horizon_end"],
         "budgets": {
             "capital_budget": capital_budget,
             "max_nonrenew_pct": max_nonrenew_pct,
