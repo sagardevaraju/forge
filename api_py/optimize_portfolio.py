@@ -22,6 +22,8 @@ import logging
 from http.server import BaseHTTPRequestHandler
 from typing import Any
 
+from api_py.treaty import retained_xs
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -79,6 +81,26 @@ def _cohort_premium(c: dict[str, Any]) -> float:
     return float(c.get("total_premium", c.get("premium", 0.0)))
 
 
+def _tvar_99_tail(scenarios: list[float]) -> tuple[float, "np.ndarray"]:  # type: ignore[name-defined]  # noqa: F821
+    """Return ``(tvar_99_mean, tail_array)`` for a list of scenarios.
+
+    Factored out so the capital-constraint assembly can reuse the same
+    99th-percentile threshold for both the TVaR-99 risk coefficient and
+    the per-scenario ``retained_xs`` integration on ``cede_xs`` — without
+    paying ``np.percentile`` twice on the same array.
+    """
+    import numpy as np
+
+    arr = np.asarray(scenarios, dtype=float)
+    if arr.size == 0:
+        return 0.0, arr
+    threshold = np.percentile(arr, 99)
+    tail = arr[arr >= threshold]
+    if tail.size == 0:
+        return float(arr.max()), arr[arr == arr.max()]
+    return float(tail.mean()), tail
+
+
 def _tvar_99(scenarios: list[float]) -> float:
     """TVaR-99 = mean of the top 1% of scenario draws.
 
@@ -87,14 +109,7 @@ def _tvar_99(scenarios: list[float]) -> float:
     average every draw at or above it. Matches the actuarial definition
     of TVaR / CVaR / expected shortfall at the 99% level.
     """
-    import numpy as np
-
-    arr = np.asarray(scenarios, dtype=float)
-    if arr.size == 0:
-        return 0.0
-    threshold = np.percentile(arr, 99)
-    tail = arr[arr >= threshold]
-    return float(tail.mean()) if tail.size else float(arr.max())
+    return _tvar_99_tail(scenarios)[0]
 
 
 def solve(
@@ -149,9 +164,9 @@ def solve(
     risk_measure
         Task P2.6: which risk measure drives the capital-budget constraint.
 
-        - ``'var_99'`` (default, legacy): coefficient is ``loss_p99`` —
-          byte-identical artifact to pre-P2.6 callers, regardless of
-          whether ``loss_scenarios`` is present on the cohort.
+        - ``'var_99'`` (default, legacy): coefficient is ``loss_p99``.
+          Note: P2.7 broke byte-identity with pre-P2.7 artifacts because
+          the ``cede_xs`` zeroing trick is gone (see below).
         - ``'tvar_99'``: coefficient is the mean of the top 1% of each
           cohort's ``loss_scenarios`` (a coherent, sub-additive measure
           that an actuary will accept where VaR-99 will be rejected on
@@ -160,6 +175,45 @@ def solve(
           run is still tagged ``tvar_99_used=True`` so the caller can see
           which measure was requested. P2.6 uses raw scenarios — the
           Horvitz-Thompson IS correction lands in P2.9.
+
+        Task P2.7: the ``cede_xs`` action no longer zeros its retained
+        tail. Instead the capital coefficient is
+        ``retained_xs(L, attachment, exhaustion)`` evaluated against the
+        cohort's representative loss (``loss_p99`` under ``var_99``,
+        ``mean(retained_xs(L_s, att, exh) for L_s in top_1%_of_scenarios)``
+        under ``tvar_99``). The XS treaty layer
+        ``(attachment, exhaustion)`` may be supplied per cohort under a
+        ``treaty: {attachment, exhaustion}`` key; absent that, defaults
+        are derived from the cohort scalars:
+
+            attachment = loss_p50 × 1.5   (≈ 0.375 × loss_p99 for p99=4×p50)
+            exhaustion = loss_p99 × 2     (covers well into the TVaR tail)
+
+        Defensibility: a real XS treaty attaches in the *working layer*
+        — above expected losses (where premium covers normal volatility)
+        but below the cedant's tail tolerance. For the FL/TX coastal
+        book the working layer typically begins ~1.5× expected loss
+        (the point where a bad-but-not-catastrophic year stops being
+        covered by premium) and exhausts at ~2× p99 (deep enough that
+        only true cat events bust the layer). With p99 = 4 × p50 these
+        defaults give:
+
+          retained_xs(p99) = 1.5 × p50 = 0.375 × p99   (var_99 coeff)
+          retained_xs(tail_scenario_with_5×_p99) ≈ 1.5×p50 + 3×p99
+                                                  ≈ 3.4 × p99 (tvar_99)
+
+        So XS provides a meaningful capital reduction at the VaR-99
+        level (~63% off retain) but the *retained-tail blow-through*
+        kicks in hard under TVaR-99 — capturing the "horizon-event"
+        risk a coherent measure exposes. P2.17 will surface a per-cohort
+        configurator for these values.
+
+        ``LOSS_FACTOR['cede_xs'] = 0.3`` is preserved as documentation
+        but is no longer consulted by the capital constraint (replaced
+        by the ``retained_xs`` math). It remains in the objective for
+        the loss term (expected-loss accounting under the chosen
+        action — the XS treaty doesn't make the loss disappear, it
+        only redistributes the tail).
 
     Returns
     -------
@@ -209,24 +263,45 @@ def solve(
         prob += pulp.lpSum(x[(cid, a)] for a in ACTIONS) == 1, f"sum1_{cid}"
 
     # ── Constraint 2: capital budget (VaR-99 or TVaR-99) ───────────────
-    # Capital coefficient is ``risk_coeff * LOSS_FACTOR[a]`` for most
-    # actions, where ``risk_coeff`` is either ``loss_p99`` (VaR-99 legacy)
-    # or ``mean(top 1% of loss_scenarios)`` (TVaR-99, P2.6). TVaR is the
-    # coherent, sub-additive measure an actuary will sign off on; VaR-99
-    # is the legacy path retained for byte-identical artifacts.
+    # Capital coefficient is ``risk_coeff * LOSS_FACTOR[a]`` for non-XS
+    # actions, where ``risk_coeff`` is either ``loss_p99`` (VaR-99
+    # legacy) or ``mean(top 1% of loss_scenarios)`` (TVaR-99, P2.6).
+    # TVaR is the coherent, sub-additive measure an actuary will sign
+    # off on; VaR-99 is the legacy path.
     #
-    # ``cede_xs`` is special: excess-of-loss reinsurance is by construction
-    # attached *below* the cohort's tail (whether we measure it at p99 or
-    # by the top-1% mean), so the insurer's retained tail exposure under
-    # XS is ~0 in both regimes. P2.7 replaces this zeroing with a real
-    # per-scenario retained-tail computation via ``retained_xs``; until
-    # then the zero is defensible for both risk measures.
+    # ``cede_xs`` (P2.7): before P2.7 this action zeroed its retained
+    # tail on the assumption that excess-of-loss reinsurance attaches
+    # below the tail. That was a mock-grade shortcut — the same XS
+    # treaty actually leaves the cedant exposed *below the attachment*
+    # AND *above the exhaustion*. P2.7 replaces the zero with
+    # ``retained_xs(L, attachment, exhaustion)`` evaluated at the
+    # cohort's representative loss:
+    #   - var_99: L = loss_p99 (single value)
+    #   - tvar_99: L is integrated as ``mean(retained_xs(L_s, ...) for
+    #     L_s in top_1%_of_scenarios)``
+    # The integration over scenarios happens at constraint-assembly
+    # time, so the coefficient is still a scalar multiplying
+    # ``x[(c, cede_xs)]`` — the MIP stays MIP-shaped.
+    #
+    # Treaty layer defaults (until P2.17 surfaces a configurator):
+    #   attachment = loss_p50 × 1.5  (≈ 0.375 × p99 for p99 = 4×p50)
+    #   exhaustion = loss_p99 × 2    (covers well into the TVaR tail)
+    # Both can be overridden per cohort via a ``treaty`` field.
     use_tvar = risk_measure == "tvar_99"
     tvar_per_cohort: dict[str, float] = {}
     capital_terms = []
     for c in cohorts:
         cid = c["id"]
+        loss50 = float(c["loss_p50"])
         loss99 = float(c["loss_p99"])
+        # Derive (attachment, exhaustion) for this cohort's XS layer.
+        treaty = c.get("treaty") or {}
+        attachment = float(treaty.get("attachment", loss50 * 1.5))
+        exhaustion = float(treaty.get("exhaustion", loss99 * 2.0))
+        # Guard pathological inversions — clamp to a degenerate layer.
+        if exhaustion < attachment:
+            exhaustion = attachment
+
         if use_tvar:
             scenarios = c.get("loss_scenarios")
             if scenarios is None or len(scenarios) == 0:
@@ -237,14 +312,40 @@ def solve(
                     loss99,
                 )
                 risk_coeff = loss99
+                # cede_xs retained tail: single-value retained_xs on p99.
+                cede_xs_coeff = retained_xs(loss99, attachment, exhaustion)
             else:
-                risk_coeff = _tvar_99(scenarios)
+                # Compute the TVaR-99 mean and its top-1% tail in one
+                # pass — both the risk coefficient and the cede_xs
+                # retained-tail integration reuse the same tail set,
+                # avoiding a duplicate ``np.percentile`` call.
+                import numpy as np
+
+                risk_coeff, tail = _tvar_99_tail(scenarios)
+                # cede_xs retained tail: mean of retained_xs over top 1%
+                # of scenarios (the same tail set TVaR-99 itself uses).
+                cede_xs_coeff = float(
+                    np.mean(
+                        [
+                            retained_xs(float(L), attachment, exhaustion)
+                            for L in tail
+                        ]
+                    )
+                )
             tvar_per_cohort[cid] = risk_coeff
         else:
             risk_coeff = loss99
+            # var_99 path: evaluate retained_xs at loss_p99 directly.
+            cede_xs_coeff = retained_xs(loss99, attachment, exhaustion)
+
         for a in ACTIONS:
-            retain_frac = 0.0 if a == "cede_xs" else LOSS_FACTOR[a]
-            capital_terms.append(risk_coeff * retain_frac * x[(cid, a)])
+            if a == "cede_xs":
+                # P2.7: real retained-tail math instead of a flat zero.
+                capital_terms.append(cede_xs_coeff * x[(cid, a)])
+            else:
+                capital_terms.append(
+                    risk_coeff * LOSS_FACTOR[a] * x[(cid, a)]
+                )
     prob += pulp.lpSum(capital_terms) <= capital_budget, "capital_budget"
 
     # ── Constraint 3: non-renewal cap on book TIV ──────────────────────

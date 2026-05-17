@@ -51,7 +51,20 @@ def test_mip_toy_problem() -> None:
 
 
 def test_mip_capital_constraint_binds() -> None:
-    """With near-zero capital, even low-loss cohorts must cede."""
+    """With tight capital, even low-loss cohorts must cede.
+
+    Task P2.7 update: ``cede_xs`` no longer zeros its capital coefficient
+    (the pre-P2.7 ``free escape hatch`` is gone — see ``api_py.treaty``).
+    Under the new honest model with defaults ``att = loss_p50 × 1.5``
+    (= 75k here) and ``exh = loss_p99 × 2.0`` (= 400k), full retention
+    costs ``loss_p99`` (200k), ``cede_qs`` costs ``0.5 × loss_p99``
+    (100k), and ``cede_xs`` costs ``retained_xs(200k, 75k, 400k) = 75k``
+    (the below-attachment slice; nothing above exhaustion since p99 sits
+    well under the 400k cap). ``non_renew`` is the only zero-capital
+    action. So a capital budget of 60k binds: the solver must blend
+    non_renew + cede_xs/cede_qs to avoid breaching.
+    ``de_risked = non_renew + cede_qs + cede_xs`` should still dominate.
+    """
     cohorts = [
         {
             "id": "c1",
@@ -65,7 +78,7 @@ def test_mip_capital_constraint_binds() -> None:
     ]
     result = solve(
         cohorts,
-        capital_budget=10_000,
+        capital_budget=60_000,
         max_nonrenew_pct=0.5,
         cession_budget=1e6,
     )
@@ -420,6 +433,13 @@ def test_solve_tvar_99_changes_solution_on_extreme_tail_cohort() -> None:
     is ~1_000_000. With a tight capital budget, the VaR-99 solver only sees
     the 100k coefficient and can retain; the TVaR-99 solver sees ~1M and
     must cede.
+
+    Task P2.7 update: ``cede_xs`` no longer zeros capital (per-scenario
+    retained tail is now real), so the budget had to be loosened from
+    200k → 300k. Under P2.7 + TVaR-99 the retained_xs(1M, 15k, 200k)
+    coefficient on cede_xs is ~815k, so the solver must mix non_renew
+    (0 cost) with cede_qs (~500k) to land under budget. Under VaR-99
+    the retain coefficient (100k) still fits comfortably.
     """
     base_cohort = {
         "id": "c1",
@@ -431,7 +451,7 @@ def test_solve_tvar_99_changes_solution_on_extreme_tail_cohort() -> None:
         "loss_scenarios": [1_000] * 99 + [1_000_000],
     }
     common = dict(
-        capital_budget=200_000,
+        capital_budget=300_000,
         max_nonrenew_pct=0.5,
         cession_budget=1e6,
     )
@@ -498,3 +518,129 @@ def test_solve_tvar_99_emits_per_cohort_traceability() -> None:
     assert per_cohort["extreme"] == 100_000.0
     # Calm cohort: top-1% mean = 6_000.
     assert per_cohort["calm"] == 6_000.0
+
+
+# ---------------------------------------------------------------------------
+# Task P2.7 — per-cohort per-scenario retained tail (kill ``cede_xs`` zeroing).
+#
+# Before P2.7, the capital constraint zeroed out ``cede_xs`` from the VaR/TVaR
+# retention with the comment "XS attaches below p99 so retained tail is ~0".
+# That's a mock-grade shortcut — it makes ``cede_xs`` a free capital-zeroing
+# action which is exactly the kind of sleight-of-hand a reinsurance reviewer
+# will flag on sight. P2.7 replaces the zero with
+# ``mean(retained_xs(L, att, exh) for L in scenarios)``: still linear in
+# ``x[(c, a)]`` (the integration is over scenarios, not decisions) so the MIP
+# stays MIP-shaped.
+#
+# Default attachment/exhaustion derivation (until P2.17 lets the user
+# configure per-cohort treaties):
+#   attachment = loss_p50 × 1.5   (treaty kicks in modestly above expected loss)
+#   exhaustion = loss_p99 × 2.0   (layer caps out at 2× the cohort's p99)
+# ---------------------------------------------------------------------------
+def test_solve_cede_xs_no_longer_zeros_capital_var_99() -> None:
+    """P2.7: with default attachment/exhaustion, ``cede_xs`` carries a
+    positive retained-tail capital cost rather than a free zero.
+
+    Construction: a single cohort with ``loss_p50=10_000`` and
+    ``loss_p99=50_000`` (so default attachment=1.5×p50=15k,
+    exhaustion=2×p99=100k). Under the pre-P2.7 zeroing trick,
+    ``cede_xs`` would contribute 0 to the capital constraint; under
+    P2.7 the retained tail at loss_p99 is
+    ``retained_xs(50_000, 15_000, 100_000) = 15_000`` (the 15k below
+    attachment; nothing above exhaustion since 50k < 100k).
+
+    With a tight capital budget that forces ``cede_xs`` to be the dominant
+    action, the constraint must reflect that positive retained tail —
+    otherwise the solver could pick ``cede_xs`` "for free" and over-spend.
+    """
+    from api_py.treaty import retained_xs
+
+    cohort = {
+        "id": "c1",
+        "total_tiv": 1e6,
+        "total_premium": 200_000,
+        "loss_p50": 10_000,
+        "loss_p99": 50_000,
+        # No loss_scenarios — exercises the var_99 path (uses loss_p99
+        # directly through retained_xs).
+    }
+    # Default treaty: attachment=1.5×p50=15_000, exhaustion=2×p99=100_000.
+    # retained_xs(50_000, 15_000, 100_000) = min(50k, 15k) + max(0, -50k)
+    # = 15k + 0 = 15k.
+    expected_retained = retained_xs(50_000, 15_000, 100_000)
+    assert expected_retained == 15_000
+    assert expected_retained > 0, "default treaty should leave positive retained tail"
+
+    # Capital budget set just below the expected retained tail × cede_xs
+    # share so that pure cede_xs is infeasible — proves the constraint
+    # actually counts the retained tail.
+    out = solve(
+        cohorts=[cohort],
+        capital_budget=expected_retained * 0.5,
+        max_nonrenew_pct=0.5,
+        cession_budget=1e6,
+    )
+    assert out["status"] == "Optimal"
+    a = out["actions"][0]
+    # cede_xs alone would consume the full retained tail (15k) > budget
+    # (7.5k), so the solver must blend in non_renew or cede_qs to bring
+    # capital usage down. Pre-P2.7 (with cede_xs=0 capital), cede_xs
+    # alone would be feasible — that's the bug this test guards.
+    assert a["cede_xs"] < 1.0 - 1e-6, (
+        f"Under P2.7, cede_xs cannot zero capital — solver should blend "
+        f"with non_renew/cede_qs to satisfy the tight budget. Got {a}"
+    )
+
+
+def test_solve_tvar_99_cede_xs_uses_per_scenario_retained_tail() -> None:
+    """P2.7 + P2.6 interaction: under TVaR-99 with ``cede_xs``, the capital
+    coefficient is ``mean(retained_xs(L_s, att, exh) for L_s in top_1%)``.
+
+    Construction: a cohort with ``loss_p50=10_000`` (default
+    attachment = 1.5×p50 = 15k) and ``loss_p99=100_000`` (default
+    exhaustion = 2×p99 = 200k). Scenarios: 99 small draws + a single
+    500_000 outlier. Under TVaR-99 the top 1% = just the 500k draw, so
+    the per-scenario retained tail =
+    ``retained_xs(500k, 15k, 200k) = 15k below + 300k above = 315k``.
+
+    The pre-P2.7 path would zero this; P2.7 must surface 315k in the
+    capital constraint. Verify by showing the solver de-risks under a
+    budget tight against 315k.
+    """
+    from api_py.treaty import retained_xs
+
+    scenarios = [1_000.0] * 99 + [500_000.0]
+    cohort = {
+        "id": "c1",
+        "total_tiv": 1e6,
+        "total_premium": 200_000,
+        "loss_p50": 10_000,
+        "loss_p99": 100_000,
+        "loss_scenarios": scenarios,
+    }
+    # Default treaty: attachment=1.5×p50=15_000, exhaustion=2×p99=200_000.
+    # top-1% of scenarios = single 500_000 draw.
+    # retained_xs(500_000, 15_000, 200_000)
+    #   = min(500k, 15k) + max(0, 500k - 200k)
+    #   = 15_000 + 300_000 = 315_000.
+    expected = retained_xs(500_000.0, 15_000.0, 200_000.0)
+    assert expected == 315_000.0
+
+    # Set capital budget below the expected retained tail × 1.0 so a
+    # pure cede_xs allocation must overshoot the budget — forcing the
+    # solver to mix in non_renew/cede_qs. If the constraint still zeroed
+    # cede_xs, the solver would happily pick cede_xs=1.0.
+    out = solve(
+        cohorts=[cohort],
+        capital_budget=expected * 0.5,  # 157.5k vs 315k retained tail
+        max_nonrenew_pct=0.5,
+        cession_budget=1e6,
+        risk_measure="tvar_99",
+    )
+    assert out["status"] == "Optimal"
+    assert out["tvar_99_used"] is True
+    a = out["actions"][0]
+    assert a["cede_xs"] < 1.0 - 1e-6, (
+        f"Under TVaR-99 + P2.7, the cede_xs retained tail (315k) exceeds "
+        f"the 157.5k budget — solver must blend. Got {a}"
+    )
