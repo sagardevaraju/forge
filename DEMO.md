@@ -33,6 +33,12 @@ pytest -q           # python tests — should pass
 
 ---
 
+## Grammar primitives (Phase 1 redesign)
+
+Every view now composes from a small set of shared primitives, and the panel will likely ask about them. **`ExecCard`** is the KPI tile used for the four landing-dashboard metrics and the portfolio header strip — one number, one label, an optional `TrustTierBadge`, and a freshness timestamp. **`TrustTierBadge`** renders one of five tiers (`LIVE_FEED`, `MODEL_OUTPUT`, `SYNTHETIC_SCAFFOLD`, `RECOMMENDATION`, `MANUAL_OVERRIDE`) so the reader can tell at a glance where a number came from. **`ProvenanceFootnote`** is the three-line source/method/confidence block sitting under every chart and panel. **`ThreatBanner`** is the top-of-page strip that names the active scenario set the views are coupled to. **`PersonaToggle`** is the layout-level switch between `cat-ops` (the only live persona in Phase 1) and the Phase 2 personas (`actuary`, `field-ops`, `executive`). Together they enforce the demo's central claim: every number on screen is labeled with what it is, where it came from, and how confident we are in it. Full defense at [`docs/methodology.md`](docs/methodology.md) and `/methodology` in-app.
+
+---
+
 ## Current state of the build
 
 What works today, what's stubbed:
