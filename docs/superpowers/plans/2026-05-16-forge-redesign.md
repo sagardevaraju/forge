@@ -29,6 +29,44 @@ Three concrete problems drove this plan:
 
 **Sub-plan spawning.** A handful of Phase 2 tasks (CV weak-label retraining, NHC ensemble swap, HURDAT2 ingestion) and Phase 3 tasks (multi-peril modules, column-gen prototype) require their own training runs / scenario-design discussions before execution. Those tasks include a "Design decision required before TDD" marker and a sub-plan handoff so the engineer knows to spawn a separate plan rather than guess.
 
+### Gap coverage matrix (brief §4 → tasks)
+
+Every line item in `docs/REDESIGN_BRIEF.md` §4 resolves to a task here, or carries an explicit deferral. A reviewer who opens the brief should be able to scan this table and confirm coverage in 60 seconds.
+
+| Brief item | Phase | Task(s) | Notes |
+|---|---|---|---|
+| §4.1 Real carrier book ingestion | 2 + 3 | P2.39 (wizard + lineage + PII deny-list), P3.28 (SOC 2 + DLP) | Phase 2 = mapping wizard with regex-based PII deny-list; Phase 3 = real PII classifier + SOC 2 audit. |
+| §4.1 Policy notice periods | 1 + 2 | Task 20 (column), P2.31 (filter in reconciler) | Phase 1 surfaces it; Phase 2 enforces it. |
+| §4.1 Treaty schema | 2 | P2.7, P2.17 (`/treaty` view), `lib/treaty/types.ts` | Attachment / exhaustion / RoL. Reinstatements deferred to P3.22. |
+| §4.1 Multi-peril | 3 | P3.13 (Peril ABC), P3.14–P3.17 (SCS/WF/EQ/Freeze) | Each peril carries a design-decision marker. |
+| §4.1 International (Caribbean / Canada) | 3 | P3.18 | Re-fit scenario gen on expanded basin. |
+| §4.1 OIR / state regulator coupling | 2 | P2.32 (territory caps) | Cites OIR/TDI filings publicly. |
+| §4.2 Coherent risk measure (TVaR) | 2 | P2.0 (prereq), P2.6 | TVaR-99 replaces VaR-99. |
+| §4.2 Loss correlation (joint scenarios) | 2 | P2.4 (`apply_common_factor`) | Cheapest defensible step away from independence. |
+| §4.2 Importance-sampled scenarios | 2 | P2.5 (Saffir-Simpson stratification) | Calibrated to NOAA Storm Events 1980–2024. |
+| §4.2 Repricing elasticity | 2 | P2.8 (price-elasticity MILP) | Discretized rate grid + binary per (cohort, bucket). |
+| §4.2 Calibration plots | 1 + 2 | Task 14 (methodology), P2.2 (reliability + PIT), P2.16 (`/calibration` view) | |
+| §4.2 Sensitivity analysis | 2 | P2.14 (±10% bars) | Auto-runs on every solve. |
+| §4.2 Stochastic-programming variant | 2 | P2.9 (SAA mode) | With optimality-gap envelope. |
+| §4.3 Versioned decisions | 3 | P3.4 | Inputs/output hashed per solve. |
+| §4.3 Two-person rule | 3 | P3.5 | Approver role required for non-renew at scale. |
+| §4.3 Operator override | 2 | P2.33 (pin mechanism) | Rationale captured with the pin. |
+| §4.3 Rollback | 3 | P3.6 | Warns if notices already sent. |
+| §4.3 Audit log | 2 + 3 | P2.36 (content-addressed), P3.7 (WORM) | Phase 2 logs; Phase 3 makes it tamper-evident. |
+| §4.3 Post-mortem | 3 | P3.9 (quarterly job) | Realized-outcome source flagged as design decision. |
+| §4.4 Auth / RBAC | 3 | P3.1, P3.2 | Clerk via Vercel Marketplace. |
+| §4.4 Multi-tenancy | 3 | P3.3 | Row-level scoping at client layer. |
+| §4.4 Performance at 10M policies | 3 | P3.11 (column generation) | Cohort-cluster decomposition. |
+| §4.4 Concurrent decisions | 3 | P3.12 (queue + locking) | |
+| §4.4 Real-time CV | 3 | P3.10 | CPU-only; GPU escalation flagged. |
+| §4.4 Reproducibility | 1 + 3 | Task 14 (methodology + seeds), P3.24 (Dockerfile), P3.25 (DOI dataset card) | |
+| §4.5 Source attribution per number | 1 | Task 2 (`ProvenanceFootnote`), Task 21 (chat citations), Trust-tier surface inventory below | |
+| §4.5 Trust-tier labels per surface | 1 | Task 1, Task 10/11/13 (apply per view), Trust-tier surface inventory below | |
+| §4.5 Persona-mode toggle | 1 + 2 | Task 6 (stub), P2.18 (five modes wired) | URL-state. |
+| §4.5 Decision narrative | 2 | P2.19 (LLM-generated 3-line) | Cached per state-hash. |
+| §4.5 Print / board-deck export | 2 | P2.30 (PDF route) | Playwright-aws-lambda. |
+| §4.5 Accessibility audit | 1 | Task 26 | WCAG AA contrast + keyboard nav. |
+
 ## File Map
 
 ### Created files
@@ -40,6 +78,12 @@ Three concrete problems drove this plan:
 | `components/grammar/ExecCard.tsx` | Headline scalar + delta + sparkline + footnote | 1 |
 | `components/grammar/ThreatBanner.tsx` | Global sticky strip: storm · advisory · delta · cone age | 1 |
 | `components/grammar/PersonaToggle.tsx` | Top-bar segmented control (stub in Phase 1) | 1 |
+| `components/grammar/LayoutSubBanner.tsx` | Sub-banner under ThreatBanner: nav links + persona toggle | 1 |
+| `components/PortfolioHeader.tsx` | Five-card strip above the map | 1 |
+| `lib/db/book_totals.ts` | `computeBookTotals()` for the landing dashboard | 1 |
+| `lib/portfolio/narrative.ts` | `renderRecommendation()` plain-English line | 1 |
+| `lib/portfolio/economics.ts` | TS mirror of MIP action constants for hover-source UI | 1 |
+| `lib/regulatory/zip3_to_county.ts` | Static demo lookup (38 coastal ZIP3s → county) | 1 |
 | `components/grammar/WhatIfControl.tsx` | Slider/numeric with baseline vs proposed | 2 |
 | `components/grammar/DecisionNarrative.tsx` | 3-line LLM-generated summary | 2 |
 | `components/grammar/SensitivityBars.tsx` | Auto ±10% bars next to action mix | 2 |
@@ -110,9 +154,40 @@ Three concrete problems drove this plan:
 | `eval/end_to_end.py` | Rename `tiv_decile` → `tiv_quintile`; mirror cohort changes | 1 |
 | `scripts/seed_policy_book.py` | Tag every policy `synthetic = true` | 1 |
 | `scripts/precompute_portfolio_optimization.py` | Persist horizon_start / horizon_end metadata | 1 |
-| `vercel.json` | Cron entry for `/api/cron/refresh` (advisory-cycle) | 1 |
+| `vercel.json` | Align chat-route runtime to `nodejs` (Task 7b); cron entry already present | 1 |
 | `app/globals.css` | Tailwind theme tokens for trust-tier colors | 1 |
 | `tailwind.config.ts` | Extend theme with trust-tier color tokens | 1 |
+
+### Trust-tier surface inventory
+
+Single contract for every number on every surface. The implementer of any task touching a view must reconcile against this table. New numbers get a new row, not an ad-hoc tier choice.
+
+| View | Surface / number | TrustTier | Source (feed / module) | Confidence |
+|---|---|---|---|---|
+| `/` (landing) | Book TIV | `SYNTHETIC_SCAFFOLD` | `lib/db/book_totals` over synthetic seed | n=10k policies, synthetic flag |
+| `/` | Policy count | `SYNTHETIC_SCAFFOLD` | same | same |
+| `/` | Cession spend YTD | `MODEL_OUTPUT` | (Phase 2) `api_py/treaty` | RoL × layer, see `/treaty` |
+| `/` | Open advisories | `LIVE_FEED` | `/api/cron/refresh` last poll | `formatRefreshAge` < SLA |
+| `/portfolio` | Total TIV | `SYNTHETIC_SCAFFOLD` | `aggregateCohorts` | sum over book |
+| `/portfolio` | Expected margin | `RECOMMENDATION` | `api_py/optimize_portfolio::solve` | MIP status + objective |
+| `/portfolio` | Capital used / budget | `MODEL_OUTPUT` | MIP capital constraint (VaR-99 Phase 1, TVaR-99 Phase 2) | per-scenario tail in Phase 2 |
+| `/portfolio` | Non-renew used / cap | `RECOMMENDATION` | MIP action allocation | bounded by `max_nonrenew_pct` |
+| `/portfolio` | Cession spend / budget | `MODEL_OUTPUT` | MIP cession term | magic-constant in Phase 1, RoL-based in Phase 2 |
+| `/portfolio` (drill-down) | Action fractions per cohort | `RECOMMENDATION` | `lib/portfolio/narrative::renderRecommendation` | hover-source on each fraction (Task 17) |
+| `/portfolio` (drill-down) | CV features | `MODEL_OUTPUT` | XGB cohort vector; 3 dims `unmodeled` in Phase 1 | per-dim MAE (Task 13) |
+| `/events` | NHC cone | `LIVE_FEED` (or `SYNTHETIC_SCAFFOLD` when mock) | `app/api/agent/tools/fetch_nhc_cone` | advisory # + `formatRefreshAge` |
+| `/events` | Δ-since-prior peak wind | `LIVE_FEED` | same tool, prior advisory | Task 23 |
+| `/events` | Cone uncertainty band | `MODEL_OUTPUT` | (Phase 2) `generate_scenarios` envelope | PIT histogram |
+| `/events` | SITREP fields | `RECOMMENDATION` | (Phase 2) `draft_sitrep` structured JSON | LLM iter cap N/6 |
+| `/events` | Agent tool-call breadcrumb | varies (per call's `source`) | each tool's `source: 'live' | 'mock'` | args_hash + result_hash |
+| `/claims` | Severity column | `SYNTHETIC_SCAFFOLD` (Phase 1) → `MODEL_OUTPUT` (Phase 2) | `severityFor` heuristic → cohort `loss_p50` | Task 11 → Task P2.27 |
+| `/claims` | Expected loss | same upgrade path | same | same |
+| `/claims` | Notice (days) | `MODEL_OUTPUT` | `lib/regulatory/notice_periods` | per state statute citation |
+| `/claims` | Adjuster-load rollup | `RECOMMENDATION` | (Phase 2) reconciler `demand_adjustments` | per ZIP3 |
+| `/calibration` (Phase 2) | Reliability diagrams, PIT histogram | `MODEL_OUTPUT` | `api_py/calibration` | CRPS via spline + quadrature |
+| `/treaty` (Phase 2) | Layer ladder, RoL, reinstatements | `MODEL_OUTPUT` | `api_py/treaty` | per-layer attachment / exhaustion |
+| `/methodology` | Doc content | `RECOMMENDATION` (process artifact) | `docs/methodology.md` | git-tracked |
+| `/audit` (Phase 3) | Decision ledger entries | `MODEL_OUTPUT` | `decisions` table | content-addressed hashes, WORM |
 
 ### Conventions (read once before executing tasks)
 
@@ -128,6 +203,14 @@ Three concrete problems drove this plan:
 ---
 
 ## Phase 1 — Quick Wins (UI grammar + labels first)
+
+**Track layout (4 tracks, 29 tasks including Task 7b):**
+- **Track A — Grammar primitives** (Tasks 1–6): the seven re-usable display contracts.
+- **Track B — View wiring** (Tasks 7, 7b, 8, 9, 10, 11, 18, 23): apply the grammar primitives to the three existing views + cross-cutting layout + runtime drift fix.
+- **Track C — Honesty fixes** (Tasks 12, 13, 14, 15, 16, 17, 24, 26): label every magic constant, document every cohort decision, push Task 14 (methodology + `cede_xs` rationale) early so the reinsurance leak is in the first sub-week.
+- **Track D — Cross-cutting** (Tasks 19, 20, 21, 22, 25, 28): claims grouping + notice periods, agent breadcrumb + iteration counter, cron delta tracking, e2e smoke.
+
+(The original track lettering A–G is preserved in the task-level headers below for continuity; only the high-level grouping is collapsed. Task 27 has been folded into Task 14 Step 6.)
 
 ### Track A: Component Grammar Primitives
 
@@ -185,75 +268,11 @@ describe('TrustTierBadge', () => {
 Run: `npx vitest tests/components/grammar/TrustTierBadge.test.tsx`
 Expected: FAIL — `TrustTierBadge` not exported.
 
-- [ ] **Step 3: Implement the trust-tier vocabulary**
+- [ ] **Step 3: Implement to spec**
 
-```typescript
-// lib/grammar/trust-tiers.ts
-export type TrustTier =
-  | 'LIVE_FEED'
-  | 'MODEL_OUTPUT'
-  | 'SYNTHETIC_SCAFFOLD'
-  | 'RECOMMENDATION'
-  | 'MANUAL_OVERRIDE';
+`lib/grammar/trust-tiers.ts` exports a literal-union `TrustTier` with five members (`LIVE_FEED | MODEL_OUTPUT | SYNTHETIC_SCAFFOLD | RECOMMENDATION | MANUAL_OVERRIDE`) and a `TRUST_TIER_META: Record<TrustTier, { label, className, tooltip }>` const map. Label vocabulary: `Live / Model / Demo / Recommend / Override`. Tailwind palette: green / blue / amber / violet / red (dashed border for override). Tooltip = one-sentence semantic gloss the test asserts against.
 
-export interface TrustTierMeta {
-  label: string;
-  className: string;
-  tooltip: string;
-}
-
-export const TRUST_TIER_META: Record<TrustTier, TrustTierMeta> = {
-  LIVE_FEED: {
-    label: 'Live',
-    className: 'bg-green-100 text-green-800 border-green-300',
-    tooltip: 'Live feed — external source refreshed within SLA.',
-  },
-  MODEL_OUTPUT: {
-    label: 'Model',
-    className: 'bg-blue-100 text-blue-800 border-blue-300',
-    tooltip: 'Model output — trained model produced this number; carries calibration metric.',
-  },
-  SYNTHETIC_SCAFFOLD: {
-    label: 'Demo',
-    className: 'bg-amber-100 text-amber-800 border-amber-300',
-    tooltip: 'Synthetic scaffold — heuristic stand-in for production data path.',
-  },
-  RECOMMENDATION: {
-    label: 'Recommend',
-    className: 'bg-violet-100 text-violet-800 border-violet-300',
-    tooltip: 'Recommendation — decision output from the optimizer or agent.',
-  },
-  MANUAL_OVERRIDE: {
-    label: 'Override',
-    className: 'bg-red-100 text-red-800 border-red-400 border-dashed',
-    tooltip: 'Manual override — operator disagreed with the recommendation.',
-  },
-};
-```
-
-```typescript
-// components/grammar/TrustTierBadge.tsx
-import type { TrustTier } from '@/lib/grammar/trust-tiers';
-import { TRUST_TIER_META } from '@/lib/grammar/trust-tiers';
-
-interface Props {
-  tier: TrustTier;
-  className?: string;
-}
-
-export function TrustTierBadge({ tier, className = '' }: Props) {
-  const meta = TRUST_TIER_META[tier];
-  return (
-    <span
-      data-testid="trust-tier-badge"
-      title={meta.tooltip}
-      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border ${meta.className} ${className}`}
-    >
-      {meta.label}
-    </span>
-  );
-}
-```
+`components/grammar/TrustTierBadge.tsx` is a pure `({ tier, className? }) => JSX` that looks up `TRUST_TIER_META[tier]` and renders a `<span data-testid="trust-tier-badge" title={meta.tooltip} className="inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium {meta.className} {className}">{meta.label}</span>`. No state, no client directive.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -313,28 +332,9 @@ describe('ProvenanceFootnote', () => {
 Run: `npx vitest tests/components/grammar/ProvenanceFootnote.test.tsx`
 Expected: FAIL — not exported.
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Implement to spec**
 
-```typescript
-// components/grammar/ProvenanceFootnote.tsx
-interface Props {
-  source: string;
-  method: string;
-  confidence?: string;
-}
-
-export function ProvenanceFootnote({ source, method, confidence }: Props) {
-  return (
-    <div data-testid="provenance-footnote" className="text-[10px] text-zinc-500 mt-2 leading-snug">
-      <div><span className="font-medium">Source:</span> {source}</div>
-      <div><span className="font-medium">Method:</span> {method}</div>
-      {confidence && (
-        <div><span className="font-medium">Confidence:</span> {confidence}</div>
-      )}
-    </div>
-  );
-}
-```
+Pure component `({ source, method, confidence? })`. Renders a `<div data-testid="provenance-footnote">` with three labeled lines (`Source:`, `Method:`, `Confidence:`) in `text-[10px] text-zinc-500`. The `confidence` line is omitted when the prop is undefined. No state.
 
 - [ ] **Step 4: Run test, verify it passes**
 
@@ -397,39 +397,9 @@ describe('ExecCard', () => {
 Run: `npx vitest tests/components/grammar/ExecCard.test.tsx`
 Expected: FAIL — not exported.
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Implement to spec**
 
-```typescript
-// components/grammar/ExecCard.tsx
-import type { TrustTier } from '@/lib/grammar/trust-tiers';
-import { TrustTierBadge } from './TrustTierBadge';
-
-interface Props {
-  label: string;
-  value: string;
-  delta?: string;
-  band?: string;
-  tier: TrustTier;
-  className?: string;
-}
-
-export function ExecCard({ label, value, delta, band, tier, className = '' }: Props) {
-  return (
-    <div
-      data-testid="exec-card"
-      className={`border rounded p-3 bg-white flex flex-col gap-1 ${className}`}
-    >
-      <div className="flex items-center justify-between">
-        <div className="text-xs text-zinc-600 uppercase tracking-wide">{label}</div>
-        <TrustTierBadge tier={tier} />
-      </div>
-      <div className="text-2xl font-semibold text-zinc-900">{value}</div>
-      {delta && <div className="text-xs text-zinc-700">{delta}</div>}
-      {band && <div className="text-[10px] text-zinc-500">{band}</div>}
-    </div>
-  );
-}
-```
+Props: `{ label, value, delta?, band?, tier: TrustTier, className? }`. Renders a bordered card (`data-testid="exec-card"`) with: top-row uppercase label + `TrustTierBadge` (right-aligned), big headline `value` (text-2xl), optional `delta` (text-xs), optional `band` (text-[10px], zinc-500). No state. Reuses `TrustTierBadge` from Task 1.
 
 - [ ] **Step 4: Run test, expect PASS**
 
@@ -490,25 +460,11 @@ describe('freshnessTier', () => {
 Run: `npx vitest tests/lib/grammar/freshness.test.ts`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Implement to spec**
 
-```typescript
-// lib/grammar/freshness.ts
-export function formatRefreshAge(then: Date, now: Date = new Date()): string {
-  const seconds = Math.max(0, Math.floor((now.getTime() - then.getTime()) / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-export function freshnessTier(ageSeconds: number, slaSeconds: number): 'LIVE' | 'STALE' {
-  return ageSeconds <= slaSeconds ? 'LIVE' : 'STALE';
-}
-```
+Two pure functions in `lib/grammar/freshness.ts`:
+- `formatRefreshAge(then: Date, now = new Date()): string` — returns `Ns / Nm / Nh / Nd ago` (largest unit that fits, floored, clamped at 0).
+- `freshnessTier(ageSeconds: number, slaSeconds: number): 'LIVE' | 'STALE'` — `'LIVE'` if `ageSeconds <= slaSeconds`, else `'STALE'`.
 
 - [ ] **Step 4: Run test, expect PASS**
 
@@ -586,52 +542,13 @@ describe('ThreatBanner', () => {
 Run: `npx vitest tests/components/grammar/ThreatBanner.test.tsx`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Implement to spec**
 
-```typescript
-// components/grammar/ThreatBanner.tsx
-import { formatRefreshAge } from '@/lib/grammar/freshness';
+Pure component. Props: `{ stormId: string | null, advisoryNumber?, peakWind?, deltaPeakWind?, coneRefreshedAt?: Date, exposureUnderConeTiv?: number, now?: Date }`. Two render branches:
+- `stormId == null` → dark zinc strip with copy `"No active named storm — Atlantic basin quiet."`.
+- `stormId != null` → red strip with: storm id (bold), `advisory {N}`, `peak {N} mph` + optional `({±N} mph vs prior)`, cone age via `formatRefreshAge`, book-under-cone TIV formatted as `$N.NM`.
 
-interface Props {
-  stormId: string | null;
-  advisoryNumber?: string;
-  peakWind?: number;
-  deltaPeakWind?: number;
-  coneRefreshedAt?: Date;
-  exposureUnderConeTiv?: number;
-  now?: Date;
-}
-
-function fmtMillions(n: number) {
-  return `$${(n / 1e6).toFixed(1)}M`;
-}
-
-export function ThreatBanner({
-  stormId, advisoryNumber, peakWind, deltaPeakWind, coneRefreshedAt, exposureUnderConeTiv,
-  now = new Date(),
-}: Props) {
-  if (!stormId) {
-    return (
-      <div data-testid="threat-banner" className="bg-zinc-900 text-zinc-300 text-xs px-4 py-2 flex gap-4">
-        No active named storm — Atlantic basin quiet.
-      </div>
-    );
-  }
-  return (
-    <div data-testid="threat-banner" className="bg-red-900 text-red-50 text-xs px-4 py-2 flex flex-wrap gap-4 items-center">
-      <span className="font-semibold">{stormId}</span>
-      {advisoryNumber && <span>advisory {advisoryNumber}</span>}
-      {typeof peakWind === 'number' && (
-        <span>peak {peakWind} mph{typeof deltaPeakWind === 'number' && deltaPeakWind !== 0 ? ` (${deltaPeakWind > 0 ? '+' : ''}${deltaPeakWind} mph vs prior)` : ''}</span>
-      )}
-      {coneRefreshedAt && <span>cone {formatRefreshAge(coneRefreshedAt, now)}</span>}
-      {typeof exposureUnderConeTiv === 'number' && (
-        <span>book under cone: {fmtMillions(exposureUnderConeTiv)}</span>
-      )}
-    </div>
-  );
-}
-```
+Both branches carry `data-testid="threat-banner"`. Reuses `formatRefreshAge` from Task 4.
 
 - [ ] **Step 4: Run test, expect PASS**
 
@@ -690,41 +607,9 @@ describe('PersonaToggle', () => {
 Run: `npx vitest tests/components/grammar/PersonaToggle.test.tsx`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Implement to spec**
 
-```typescript
-// components/grammar/PersonaToggle.tsx
-export type Persona = 'cat-ops' | 'actuary' | 'reinsurance' | 'field-ops' | 'academic';
-const PERSONAS: Array<{ value: Persona; label: string }> = [
-  { value: 'cat-ops', label: 'Cat-ops' },
-  { value: 'actuary', label: 'Actuary' },
-  { value: 'reinsurance', label: 'Reinsurance' },
-  { value: 'field-ops', label: 'Field-ops' },
-  { value: 'academic', label: 'Academic' },
-];
-
-interface Props {
-  value: Persona;
-  onChange: (next: Persona) => void;
-}
-
-export function PersonaToggle({ value, onChange }: Props) {
-  return (
-    <div role="group" aria-label="persona-toggle" className="inline-flex border rounded overflow-hidden text-xs">
-      {PERSONAS.map((p) => (
-        <button
-          key={p.value}
-          aria-pressed={value === p.value}
-          onClick={() => onChange(p.value)}
-          className={`px-2 py-1 ${value === p.value ? 'bg-zinc-900 text-white' : 'bg-white text-zinc-700 hover:bg-zinc-100'}`}
-        >
-          {p.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-```
+Export `type Persona = 'cat-ops' | 'actuary' | 'reinsurance' | 'field-ops' | 'academic'` and a const `PERSONAS` mapping each to its label (`Cat-ops`, `Actuary`, `Reinsurance`, `Field-ops`, `Academic`). Component props: `{ value: Persona, onChange: (next: Persona) => void }`. Renders a `<div role="group" aria-label="persona-toggle">` containing one `<button aria-pressed={...}>` per persona; the pressed button gets `bg-zinc-900 text-white`, the others get `bg-white text-zinc-700 hover:bg-zinc-100`. No client state of its own — parent owns `value`.
 
 - [ ] **Step 4: Run test, expect PASS**
 
@@ -834,6 +719,38 @@ Expected: PASS.
 ```bash
 git add app/layout.tsx components/grammar/LayoutSubBanner.tsx tests/components/layout.test.tsx
 git commit -m "feat(FORGE): three-region layout shell with ThreatBanner and PersonaToggle"
+```
+
+---
+
+#### Task 7b: Fix `vercel.json` runtime drift on the agent chat route
+
+**Files:**
+- Modify: `vercel.json` (the `functions["app/api/agent/chat/route.ts"].runtime` field)
+
+`vercel.json` declares `"runtime": "edge"` for the chat route, but the route file itself sets `runtime = 'nodejs'` (line 19), and `CLAUDE.md` explicitly states it was moved to Node because `@libsql/client` needs fs access. Today the drift is harmless in local dev but will silently break the first time Vercel takes the config at face value.
+
+- [ ] **Step 1: Edit `vercel.json`**
+
+Replace:
+```json
+"app/api/agent/chat/route.ts": { "runtime": "edge" }
+```
+with:
+```json
+"app/api/agent/chat/route.ts": { "runtime": "nodejs" }
+```
+
+- [ ] **Step 2: Verify**
+
+Run: `npx tsc --noEmit && npm run build`
+Expected: clean build; no warnings about runtime mismatch.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add vercel.json
+git commit -m "fix(FORGE): align vercel.json runtime with route file (edge → nodejs)"
 ```
 
 ---
@@ -1200,16 +1117,32 @@ git commit -m "feat(FORGE): claims page trust-tier badge + provenance footnote"
 #### Task 12: Rename `tiv_decile` → `tiv_quintile` (TS + Python in same commit)
 
 **Files:**
-- Modify: `lib/db/cohorts.ts` (search/replace identifier)
-- Modify: `eval/end_to_end.py` (the `build_cohorts` function and any helpers)
-- Modify: `lib/db/schema.sql` if the identifier appears there
-- Modify: `scripts/precompute_portfolio_optimization.py` if it appears
+- Modify: `lib/db/cohorts.ts` (lines 18, 34, 114, 134, 203 — docstring + interface + bucket struct + assignment + emission)
+- Modify: `lib/portfolio-actions.ts:30` (`tiv_decile` field on the `CohortAction` interface — easy to miss; downstream consumers depend on this name)
+- Modify: `eval/end_to_end.py` (lines 99, 130, 164 — docstring + bucket struct + emission)
+- Modify: `scripts/precompute_portfolio_optimization.py` (lines 116, 153 — bucket struct + emission)
+- Modify: `lib/db/schema.sql` if the identifier appears there (it currently doesn't, but verify)
+- Modify: `artifacts/portfolio_optimization.json` schema (bump `schema_version`, document the field rename)
 - Modify: Any tests referencing `tiv_decile`
 
 - [ ] **Step 1: Find every reference**
 
 Run: `git grep -n tiv_decile`
-Expected: a list of locations across TS and Python.
+Expected (verified 2026-05-17 against the live repo):
+```
+lib/db/cohorts.ts:18: *   The field name remains `tiv_decile` for downstream-API stability; the
+lib/db/cohorts.ts:34:  tiv_decile: number; // 0..4 (quintile-style TIV bucket)
+lib/db/cohorts.ts:114:    tiv_decile: number;
+lib/db/cohorts.ts:134:        tiv_decile: decile,
+lib/db/cohorts.ts:203:      tiv_decile: b.tiv_decile,
+lib/portfolio-actions.ts:30:  tiv_decile: number;
+eval/end_to_end.py:99:        Each cohort carries id, zip3, build_type, tiv_decile,
+eval/end_to_end.py:130:                "tiv_decile": int(decile),
+eval/end_to_end.py:164:            "tiv_decile": b["tiv_decile"],
+scripts/precompute_portfolio_optimization.py:116:                "tiv_decile": decile,
+scripts/precompute_portfolio_optimization.py:153:                "tiv_decile": b["tiv_decile"],
+```
+Note that the docstring at `lib/db/cohorts.ts:18` explicitly defends the old name as "downstream-API stability." This task overrides that decision — the brief calls the misnaming out as a credibility leak. Replace the docstring rationale with a pointer to the renamed identifier and `docs/cohort-card.md` (Task 14).
 
 - [ ] **Step 2: Add a failing test for the new identifier**
 
@@ -1252,6 +1185,10 @@ Expected: `artifacts/portfolio_optimization.json` updates with new cohort ids.
 
 Run: `npx vitest && pytest`
 Expected: PASS.
+
+- [ ] **Step 5b: Bump artifact schema version**
+
+Edit `artifacts/portfolio_optimization.json` to add `"schema_version": 2`. Document the cache invalidation in the commit body so anyone holding a v1 artifact knows to re-run `python -m scripts.precompute_portfolio_optimization`.
 
 - [ ] **Step 7: Commit**
 
@@ -1328,6 +1265,8 @@ git commit -m "feat(FORGE): typed CvFeatures with unmodeled-dim transparency"
 
 #### Task 14: Methodology + data + cohort cards
 
+> **Recommended execution order:** land this task immediately after the grammar primitives (Tasks 1–6), before Track B view-wiring starts. The methodology page contains the `cede_xs` rationale (`api_py/optimize_portfolio.py:147-153` zeros XS retention from VaR-99 — a 30-second-to-spot credibility leak for any reinsurance reviewer). Shipping the documented rationale in the first sub-week buys credibility while Phase 2 builds the real fix (Task P2.7). Markdown position is preserved for traceability; commit ordering is what matters.
+
 **Files:**
 - Create: `docs/cohort-card.md`
 - Create: `docs/data-card-book.md`
@@ -1389,6 +1328,8 @@ Cover, in order:
 
 - [ ] **Step 4: Create `app/methodology/page.tsx`**
 
+**Trade-off:** Phase 1 ships with `<pre>{md}</pre>` to avoid adding a markdown dependency in the first week. That looks raw on a page whose entire job is defending against academic critique. Phase 2 swaps to `react-markdown` (~15kB gzipped) when `/calibration` needs MathJax for the CRPS formula; the swap is one commit. Document the deferral in the commit body so a reviewer doesn't take the raw rendering as final.
+
 ```typescript
 // app/methodology/page.tsx
 import fs from 'node:fs';
@@ -1414,11 +1355,15 @@ export default function Methodology() {
 Run: `npm run dev` and open `/methodology`.
 Expected: the document renders.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Update README + DEMO**
+
+Add a "Trust tiers" paragraph to `README.md` (≤6 lines) explaining the five tiers and pointing at `docs/methodology.md`. Update `DEMO.md` with a one-paragraph note on the new grammar primitives (ExecCard / TrustTierBadge / ProvenanceFootnote / ThreatBanner / PersonaToggle) so demo-runners know what the panel is looking at. This folds in the work that was formerly Task 27.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add docs/cohort-card.md docs/data-card-book.md docs/methodology.md app/methodology/page.tsx
-git commit -m "docs(FORGE): cohort card, book data card, methodology + /methodology route"
+git add docs/cohort-card.md docs/data-card-book.md docs/methodology.md app/methodology/page.tsx README.md DEMO.md
+git commit -m "docs(FORGE): cohort card, book data card, methodology + /methodology route + README/DEMO updates"
 ```
 
 ---
@@ -1980,31 +1925,33 @@ git commit -m "feat(FORGE): treaty-year horizon parameterization on MIP solve"
 
 ---
 
-#### Task 25: Cron skeleton for advisory-cycle refresh
+#### Task 25: Extend existing cron route to detect advisory deltas
 
 **Files:**
-- Create: `app/api/cron/refresh/route.ts`
-- Modify: `vercel.json` (add cron schedule)
+- Modify: `app/api/cron/refresh/route.ts` (already exists — 48 lines; polls NHC + FIRMS + FEMA via `Promise.allSettled`. Need to add advisory-delta tracking)
 - Test: `tests/api/cron/refresh.test.ts`
 
-The cron polls NHC; if the advisory number changed, re-trigger the precompute. In Phase 1 the route just records the refresh attempt; full push-notification wiring is Phase 2.
+The cron route + the `*/15 * * * *` schedule already exist (`vercel.json` has the entry, and the route polls three feeds with mock fallback + CRON_SECRET auth). The missing piece is advisory-delta detection: today the route fires every 15 minutes and silently rewrites the same payload. Phase 1 adds a module-level `lastAdvisoryNumber` so the route returns `advisory_changed: true` exactly when the NHC advisory bumps. Full push-notification wiring is Phase 2.
 
 - [ ] **Step 1: Write failing test**
 
 ```typescript
 // tests/api/cron/refresh.test.ts
 // @vitest-environment node
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, vi } from 'vitest';
 import { GET } from '@/app/api/cron/refresh/route';
 
-describe('cron refresh route', () => {
-  test('returns 200 with refresh summary', async () => {
+describe('cron refresh route — advisory-delta tracking', () => {
+  test('returns advisory_changed=true on the first call, false on the repeat', async () => {
     const req = new Request('http://localhost/api/cron/refresh');
-    const res = await GET(req as any);
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body).toHaveProperty('ts');
-    expect(body).toHaveProperty('advisory_changed');
+    const res1 = await GET(req);
+    expect(res1.status).toBe(200);
+    const body1 = await res1.json();
+    expect(body1.advisory_changed).toBe(true);
+    expect(body1).toHaveProperty('advisory_number');
+    const res2 = await GET(req);
+    const body2 = await res2.json();
+    expect(body2.advisory_changed).toBe(false);
   });
 });
 ```
@@ -2013,45 +1960,24 @@ describe('cron refresh route', () => {
 
 Run: `npx vitest tests/api/cron/refresh.test.ts`
 
-- [ ] **Step 3: Implement**
+- [ ] **Step 3: Extend the existing route**
+
+Edit `app/api/cron/refresh/route.ts`. Add at module scope:
 
 ```typescript
-// app/api/cron/refresh/route.ts
-import { fetchNhcCone } from '@/app/api/agent/tools/fetch_nhc_cone';
-
-export const runtime = 'nodejs';
-
-const DEMO_STORM_ID = 'AL092024';
-
 let lastAdvisoryNumber: string | null = null;
-
-export async function GET(_req: Request) {
-  const cone = await fetchNhcCone.handler({ storm_id: DEMO_STORM_ID }).catch(() => null);
-  const advisory_changed = cone?.advisory_number != null && cone.advisory_number !== lastAdvisoryNumber;
-  if (advisory_changed) lastAdvisoryNumber = cone!.advisory_number;
-  return new Response(JSON.stringify({
-    ts: new Date().toISOString(),
-    advisory_changed,
-    advisory_number: cone?.advisory_number ?? null,
-    source: cone?.source ?? null,
-  }), { headers: { 'content-type': 'application/json' } });
-}
 ```
 
-- [ ] **Step 4: Add cron entry to `vercel.json`**
+In the response handler, inspect the NHC tool result inside `results[0]`, extract `advisory_number`, compare against `lastAdvisoryNumber`, set `advisory_changed`, and emit it on the JSON. Preserve the existing `summary` field and CRON_SECRET check. Do NOT recreate the file.
 
-```json
-{
-  "crons": [
-    { "path": "/api/cron/refresh", "schedule": "*/15 * * * *" }
-  ]
-}
-```
+- [ ] **Step 4: No vercel.json change needed**
+
+The `crons` entry is already in `vercel.json:6`. Skip this step.
 
 - [ ] **Step 5: Run test, expect PASS, commit**
 
 ```bash
-git commit -m "feat(FORGE): cron skeleton for advisory-cycle refresh"
+git commit -m "feat(FORGE): advisory-delta tracking on existing /api/cron/refresh"
 ```
 
 ---
@@ -2106,27 +2032,29 @@ git commit -m "feat(FORGE): WCAG AA contrast pass + keyboard focus on portfolio 
 
 ---
 
-#### Task 27: README + ONBOARDING
+#### Task 27: _Folded into Task 14_
 
-**Files:**
-- Modify: `README.md` (add a "Trust tiers" section)
-- Modify: `DEMO.md` (note the new grammar)
-
-This task is pure docs. Verification: markdown lint + smoke read.
-
-- [ ] **Step 1: Update README with a 1-paragraph trust-tiers section**
-- [ ] **Step 2: Commit**
-
-```bash
-git commit -m "docs(FORGE): README updates for grammar + trust tiers"
-```
+README + DEMO updates now ship in Task 14 Step 6 alongside the methodology page (one commit, one PR review surface for "trust tiers as a contract"). Task number preserved for traceability against the original plan.
 
 ---
 
 #### Task 28: Phase 1 end-to-end smoke test
 
 **Files:**
+- Modify: `package.json` (add `@playwright/test` devDep + `e2e` script)
 - Create: `tests/e2e/phase1.spec.ts` (Playwright)
+- Create: `playwright.config.ts`
+
+Playwright is not currently installed (`package.json` devDeps lists only Vitest + jsdom). Tasks P2.40 and P3.27 reuse the same install; they back-reference this step rather than repeating it.
+
+- [ ] **Step 0: Install Playwright**
+
+```bash
+npm i -D @playwright/test
+npx playwright install --with-deps chromium
+```
+
+Add to `package.json` scripts: `"e2e": "playwright test"`. Create a minimal `playwright.config.ts` pointing `testDir` at `tests/e2e/` and `webServer` at `npm run dev` on port 3000.
 
 - [ ] **Step 1: Write the smoke spec**
 
@@ -2170,7 +2098,24 @@ Phase 2 is the credibility-defining work. Three interleaved tracks: **model rigo
 
 ### Track P2-A: Model rigor (Python)
 
+**Prereq — cohort-level scenario arrays (blocks P2.6 / P2.7 / P2.8).**
+The TVaR-99 swap, the per-scenario retained tail, and the elasticity MILP all consume a `loss_scenarios: list[float]` field per cohort. That field doesn't exist today: `_cohort_loss_quantiles()` at `scripts/precompute_portfolio_optimization.py:51` returns only `(loss_p50, loss_p99)` derived from a HAZUS-style lognormal prior, and `solve()` in `api_py/optimize_portfolio.py:85` only consumes those two scalars.
+
+Before touching P2.6, land a small precursor commit (call it **Task P2.0**) that:
+
+1. Extends `_cohort_loss_quantiles()` to also emit `loss_scenarios: list[float]` of length K = 1000 drawn from the same lognormal posterior. Seed the draw with `hash((zip3, build_type, q))` so the artifact is reproducible.
+2. Updates `artifacts/portfolio_optimization.json` to carry the K arrays per cohort, and bumps `schema_version` to 3 (Task 12 took it to 2).
+3. Extends `solve()` signature to accept `scenarios: list[list[float]] | None = None`. When None, falls back to the legacy `(p50, p99)` path so existing callers keep working through the migration.
+
+Trade-off: artifact size grows by ~570 × 1000 × 8 bytes ≈ 4.5 MB. Acceptable because the precompute runs nightly and the artifact is read once per page load. **Don't** stream the scenarios to the browser — keep the full arrays server-side, expose only summary statistics on the wire.
+
+Acceptance: `python -m scripts.precompute_portfolio_optimization` writes the new fields; `pytest tests/api/test_optimize_portfolio.py` passes against both the new (scenarios) and legacy (p50/p99) calling shapes.
+
+---
+
 #### Task P2.1: True continuous CRPS
+
+**Trade-off:** spline + quadrature CRPS costs ~10ms per cohort vs ~10μs for the 3-point pinball proxy; on a 570-cohort book that's ~6s extra in the nightly recompute. Trivial cost for the calibration metric an actuary will actually accept.
 
 **Files:**
 - Create: `api_py/calibration.py`
@@ -2317,6 +2262,8 @@ git commit -m "feat(FORGE): AMO/ENSO regime labels for scenario conditioning"
 
 #### Task P2.4: Common-factor loss correlation `ε_event`
 
+**Trade-off:** a single-factor common shock is cheap and defensible but understates tail correlation when storms differ structurally (e.g., a slow-moving Cat 4 vs a fast Cat 2 produce different correlation structures). A full Gaussian copula on the cohort vector is the textbook answer; that's the Phase 3 upgrade if a reviewer presses. Phase 2 ships single-factor because it moves the credibility needle the most for the least code.
+
 **Files:**
 - Create: `api_py/correlation.py`
 - Modify: `ml/scenarios/generate.py` (apply shared event-residual)
@@ -2388,6 +2335,8 @@ git commit -m "feat(FORGE): stratified importance sampling on Saffir-Simpson buc
 
 #### Task P2.6: TVaR-99 swap in MIP capital constraint
 
+**Trade-off:** TVaR-99 (mean of top 1%) needs per-cohort scenario arrays (delivered by P2.0 prereq above) — the constraint coefficient stops being a single number and becomes a `mean(scenarios[top_1pct])`. Solver runtime is unchanged (still LP-coefficient land), but the precompute carries 4.5 MB more data. We get a coherent, sub-additive risk measure in exchange — VaR-99 isn't either and an actuary will reject it on sight.
+
 **Files:**
 - Modify: `api_py/optimize_portfolio.py:140-154` (replace VaR-99 with TVaR-99)
 - Test: `tests/api/test_optimize_portfolio.py`
@@ -2419,6 +2368,8 @@ git commit -m "feat(FORGE): TVaR-99 capital constraint replacing VaR-99"
 ---
 
 #### Task P2.7: Per-cohort per-scenario retained tail (kill `cede_xs` zeroing)
+
+**Trade-off:** the current capital constraint is a closed-form linear coefficient (`loss99 × LOSS_FACTOR[a]`); replacing with `mean(retained_xs(L, att, exh) for L in scenarios)` keeps it linear in `x[(c,a)]` (the integration is over scenarios, not over decisions) so the MIP stays MIP-shaped. Cost is ~5× the capital-term assembly time; benefit is killing the single most-mocked sleight-of-hand a reinsurance reviewer will find.
 
 **Files:**
 - Create: `api_py/treaty.py` (RoL/attachment/exhaustion math)
@@ -2456,6 +2407,8 @@ git commit -m "feat(FORGE): per-scenario retained tail for cede_xs (real attachm
 
 #### Task P2.8: Price-elasticity MILP — discretized rate grid
 
+**Trade-off:** moves from ~570 LP variables to ~4000 binaries — solver runtime climbs from ~3s to ~15s under CBC's 30s timeLimit; some books may hit the limit and fall back to LP-relaxed dual prices. The expressive gain is the ability to defend repricing magnitudes against a pricing actuary — "1.15" was indefensible.
+
 **Files:**
 - Modify: `api_py/optimize_portfolio.py` (add rate-grid decision variables)
 - Test: `tests/api/test_optimize_portfolio.py`
@@ -2474,6 +2427,8 @@ git commit -m "feat(FORGE): price-elasticity MILP replacing reprice_up/down cons
 ---
 
 #### Task P2.9: SAA mode with optimality-gap envelope
+
+**Trade-off:** K=1000 SAA solves take ~3 minutes wall-clock vs ~15s for a single deterministic solve; we run nightly, not on-request. The gap envelope is what an academic panel will want when they ask "how do you know your scenario approximation is tight?"
 
 **Files:**
 - Create: `api_py/saa.py`
@@ -2623,6 +2578,8 @@ git commit -m "feat(FORGE): /treaty view with layer ladder"
 
 #### Task P2.18: Persona toggle modes wired
 
+**Trade-off:** five modes means five sets of `ExecCard`s to keep in sync; the implementation routes through one prop (`persona`) rather than five route trees, but the test surface grows ~5×. We pay it to give each archetype a view tuned to what they care about rather than one compromise view.
+
 **Files:**
 - Modify: `components/grammar/PersonaToggle.tsx`
 - Modify: `app/portfolio/page.tsx`, `app/events/page.tsx`
@@ -2738,6 +2695,8 @@ git commit -m "feat(FORGE): structured SITREP with 6 named fields"
 ---
 
 #### Task P2.25: Procedure-mode chat (7 runbooks)
+
+**Trade-off:** procedure mode constrains the chat to a fixed tool-call sequence per runbook — that's the whole point (cat-ops VPs want runbooks, not vibes) but it forecloses the assistant from creative escalation. Free-mode is preserved as a sibling; the toggle is per-message, not per-session.
 
 **Files:**
 - Create: `lib/runbooks/index.ts` (the 7 named runbooks)
@@ -2899,6 +2858,8 @@ git commit -m "feat(FORGE): agent-channel notification emit for non-renewed coho
 
 #### Task P2.35: Prompt-injection delimiters
 
+**Trade-off:** delimiter-based defense is the minimum credible bar (it's what an evaluator will recognize as "you tried") but not airtight — a sufficiently determined injection inside an NHC advisory could still trick a weak model. The real defense (RAG-style retrieval grounding + structured tool outputs) is Phase 3+. We ship delimiters because they raise the floor cheaply.
+
 **Files:**
 - Modify: `app/api/agent/chat/route.ts` (wrap tool results in `<tool_result name=…>...</tool_result>`)
 - Modify: the system prompt (instruct model to ignore instructions inside delimiters)
@@ -2977,10 +2938,14 @@ git commit -m "feat(FORGE): NHC GEFS ensemble as scenario generator input"
 
 User uploads a CSV → wizard suggests mappings from carrier columns → FORGE columns → on accept, every row tags `lineage: { src_file, src_row, mapped_at }`.
 
+**v3 deferral:** SOC 2 audit trail + PII column auto-scrubbing per brief §4.1 are explicitly out of Phase 2 scope (touches infra, legal, and a third-party DLP vendor). Phase 2 ships the mapping wizard + lineage tags only. As a guardrail, the wizard refuses any column whose name matches the PII deny-list `/(ssn|dob|phone|email|name|address)/i` and logs the refusal in the lineage record so an auditor can trace what was rejected and when. A dedicated Task P3.28 (new — track P3-G) covers full SOC 2 ingestion.
+
+**Trade-off:** the deny-list is a regex, not a model — it will false-positive on benign columns like `business_name` and false-negative on cryptic ones like `cust_ssn_hash`. Phase 3's swap is to a real PII classifier (Presidio or equivalent).
+
 - [ ] **Step 1-5: TDD.**
 
 ```bash
-git commit -m "feat(FORGE): /load wizard with column-mapping + lineage tagging"
+git commit -m "feat(FORGE): /load wizard with column-mapping + lineage tagging + PII deny-list"
 ```
 
 ---
@@ -2989,6 +2954,8 @@ git commit -m "feat(FORGE): /load wizard with column-mapping + lineage tagging"
 
 **Files:**
 - Create: `tests/e2e/phase2.spec.ts`
+
+Prereq: Playwright already installed (Task 28 Step 0). If skipped, run that step first.
 
 - [ ] **Step 1-5: Smoke covering** what-if commit on /portfolio, persona switch through all five modes, /calibration renders, /treaty renders, procedure-mode chat, claims push-mock.
 
@@ -3009,6 +2976,8 @@ Phase 3 items are TDD-detailed where the design is fixed, and explicitly marked 
 ### Track P3-A: Auth + RBAC + Multi-tenancy
 
 #### Task P3.1: Clerk auth via Vercel Marketplace
+
+**Trade-off:** Clerk is vendor lock-in (monthly per-MAU pricing; egress is a migration). Build-your-own auth would avoid that but multiplies the security surface and removes the SOC 2 inheritance Marketplace integration provides. For a regulated-customer roadmap, that inheritance is worth more than the lock-in.
 
 **Files:**
 - Create: `lib/auth/clerk.ts`
@@ -3036,7 +3005,7 @@ git commit -m "feat(FORGE): Clerk auth via Vercel Marketplace"
 
 Three roles: `viewer`, `analyst`, `approver`. Non-renew actions require approver. Pin overrides require analyst+.
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** every gated route returns 403 for `viewer`; only `approver` can execute non-renew solves; pinning requires `analyst+`. Test matrix covers all three roles × three routes.
 
 ```bash
 git commit -m "feat(FORGE): RBAC roles for viewer/analyst/approver"
@@ -3051,7 +3020,7 @@ git commit -m "feat(FORGE): RBAC roles for viewer/analyst/approver"
 - Modify: `lib/db/client.ts` (scope queries by current tenant from Clerk session)
 - Test: `tests/lib/db/tenancy.test.ts`
 
-- [ ] **Step 1-5: TDD.** Row-level scoping at the client layer; verify cross-tenant queries fail.
+**Acceptance:** every query through `db.execute()` carries `WHERE tenant_id = ?` (enforced at the client wrapper); cross-tenant SELECT returns zero rows; test seeds two tenants and verifies isolation.
 
 ```bash
 git commit -m "feat(FORGE): tenant_id row-level scoping across schema"
@@ -3071,7 +3040,7 @@ git commit -m "feat(FORGE): tenant_id row-level scoping across schema"
 
 Schema: `decisions(id, solve_ts, operator, inputs_hash, output_hash, executed_at, reversed_at)`.
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** every call to `/api/optimize/portfolio` writes one row; hashes are reproducible given the same inputs; `inputs_hash` collisions never overwrite — they UNION.
 
 ```bash
 git commit -m "feat(FORGE): versioned decision ledger"
@@ -3088,7 +3057,7 @@ git commit -m "feat(FORGE): versioned decision ledger"
 
 Solver emits a proposal; a second approver must endorse before `executed_at` is set.
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** approval endpoint requires `approver` role AND `approver_id != proposer_id`; `executed_at` stays NULL until both rows present; UI surfaces the queue of pending approvals.
 
 ```bash
 git commit -m "feat(FORGE): two-person rule for non-renew at scale"
@@ -3105,7 +3074,7 @@ git commit -m "feat(FORGE): two-person rule for non-renew at scale"
 
 If notices already sent, surface as a warning + manual reversal flow.
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** rollback writes `reversed_at` + `reversed_by`; when `notices_sent_at IS NOT NULL`, response includes `manual_reversal_required: true` with the customer-list payload the operator needs to issue rescissions.
 
 ```bash
 git commit -m "feat(FORGE): decision rollback with notice-sent warning"
@@ -3115,13 +3084,15 @@ git commit -m "feat(FORGE): decision rollback with notice-sent warning"
 
 #### Task P3.7: WORM enforcement
 
+**Trade-off:** app-layer WORM is defense-in-depth only — anyone with direct DB access can still mutate the audit tables. Real WORM requires either an external append-only store (S3 Object Lock, immudb) or DB-level triggers. Phase 3 ships the app-layer guard plus a "wire to S3 Object Lock" follow-up; the cheap version unblocks the regulator-readability story.
+
 **Files:**
 - Modify: `lib/db/client.ts` (deny UPDATE / DELETE on `decisions` and `chat_audit`)
 - Test: `tests/lib/db/worm.test.ts`
 
 App-layer WORM (SQLite doesn't have native WORM; libSQL similar). Defense in depth: trigger-based enforcement as a follow-up.
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** any attempt to `UPDATE` or `DELETE` on `decisions` or `chat_audit` throws; INSERT still works; test exercises both attempted-mutation paths.
 
 ```bash
 git commit -m "feat(FORGE): app-layer WORM enforcement on audit tables"
@@ -3138,7 +3109,7 @@ git commit -m "feat(FORGE): app-layer WORM enforcement on audit tables"
 
 Lists every solve + chat turn with diff vs previous. Filterable by operator, ts range, action type.
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** page renders the ledger paginated; diff view shows action-level adds/removes between consecutive solves; filters reduce row count visibly.
 
 ```bash
 git commit -m "feat(FORGE): /audit view for versioned decision ledger"
@@ -3155,7 +3126,7 @@ git commit -m "feat(FORGE): /audit view for versioned decision ledger"
 
 > **Design decision required before TDD:** what's the "realized outcome" source? FEMA + carrier-reported NAIC loss runs? Engineer should pick before locking metrics.
 
-- [ ] **Step 1-5: TDD on a synthetic outcome.**
+**Acceptance:** quarterly cron emits a per-decision `realized_minus_proposed` score; the score lands in the next sprint's calibration data; report renders as a single page diff.
 
 ```bash
 git commit -m "feat(FORGE): quarterly post-mortem job (decision vs realized)"
@@ -3173,7 +3144,7 @@ git commit -m "feat(FORGE): quarterly post-mortem job (decision vs realized)"
 
 > **Design decision required before TDD:** Vercel function or external GPU? Default in this plan: Vercel Python function with CPU-only inference (slow but tenable for a few-per-day rate). Engineer should escalate to a GPU-backed service if volume exceeds ~100/day.
 
-- [ ] **Step 1-5: TDD with a small Prithvi stub.**
+**Acceptance:** endpoint returns a CV feature vector for a single chip in <60s on Vercel CPU; reproduces the cached vector when given the same chip; metrics emit p50/p99 latency.
 
 ```bash
 git commit -m "feat(FORGE): real-time CV inference endpoint (CPU)"
@@ -3183,13 +3154,15 @@ git commit -m "feat(FORGE): real-time CV inference endpoint (CPU)"
 
 #### Task P3.11: Column-generation prototype
 
+**Trade-off:** column generation is the textbook answer at carrier scale (10M policies → ~50k cohorts) but adds operator-visible complexity (master/sub interfaces, optimality-gap reporting, restart semantics). At demo scale (570 cohorts) CBC is fine; this task is a credibility artifact for the academic panel, not a hot path.
+
 **Files:**
 - Create: `api_py/column_gen.py`
 - Test: `tests/api/test_column_gen.py`
 
 > **Design decision required before TDD:** master/subproblem decomposition strategy. Default in this plan: cohort-cluster subproblems by ZIP3, master allocates per-zip3 budgets. Cite Birge & Louveaux Ch. 6. Engineer should validate the decomposition matches the elasticity-MILP constraint structure.
 
-- [ ] **Step 1-5: TDD on the toy 10-cohort case; show solve-time vs CBC.**
+**Acceptance:** toy 10-cohort case solves to within 1% of monolithic CBC objective; solve-time table in PR body shows scaling vs CBC at N ∈ {10, 50, 100, 570}.
 
 ```bash
 git commit -m "feat(FORGE): column-generation prototype for cohort-cluster decomposition"
@@ -3206,7 +3179,7 @@ git commit -m "feat(FORGE): column-generation prototype for cohort-cluster decom
 
 Row-level lock on `decisions(state)`. Surface a "solve queue" UI when locked.
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** two concurrent solves race-test: one acquires the lock, the second queues; UI shows queue depth; lock auto-expires after solver timeLimit + 5s grace.
 
 ```bash
 git commit -m "feat(FORGE): concurrent decision queue + row-level lock"
@@ -3219,6 +3192,8 @@ git commit -m "feat(FORGE): concurrent decision queue + row-level lock"
 For each peril module, the pattern is identical: damage curve + scenario generator + integration with the existing optimizer. The plan documents the pattern once and notes per-peril deviations.
 
 #### Task P3.13: Peril plug-in interface
+
+**Trade-off:** an ABC forces every peril to fit a single shape, which is right for SCS/hurricane/freeze (all carry hazard intensity + damage curve) and wrong for cyber/liability (no hazard map). Phase 3 ships the ABC scoped to property cat perils; non-property is a different abstraction.
 
 **Files:**
 - Create: `ml/perils/base.py` (the `Peril` ABC)
@@ -3233,7 +3208,7 @@ class Peril(ABC):
     def scenarios(self, n: int, regime: dict) -> list[dict]: ...
 ```
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** at least one concrete subclass (`HurricanePeril`) passes the ABC's contract test; existing hurricane scenario gen rewires through the ABC without behavior change.
 
 ```bash
 git commit -m "feat(FORGE): peril plug-in ABC for multi-peril support"
@@ -3248,7 +3223,7 @@ git commit -m "feat(FORGE): peril plug-in ABC for multi-peril support"
 
 > **Design decision required before TDD:** damage curve source. Suggested: SAMHI hail damage curve (Smith & Katz 2013).
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** SCS subclass passes ABC contract; damage curve reproduces Smith & Katz Fig. 3 ±10%.
 
 ```bash
 git commit -m "feat(FORGE): SCS peril module"
@@ -3263,7 +3238,7 @@ git commit -m "feat(FORGE): SCS peril module"
 
 > **Design decision required before TDD:** damage curve source. Suggested: Headwaters Economics wildfire damage curve + CA-DINS post-fire damage records.
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** wildfire subclass passes ABC contract; damage curve calibrates against CA-DINS post-fire damage holdout with MAE within 20% of mean structure loss.
 
 ```bash
 git commit -m "feat(FORGE): wildfire peril module"
@@ -3278,7 +3253,7 @@ git commit -m "feat(FORGE): wildfire peril module"
 
 > **Design decision required before TDD:** USGS ShakeMap + HAZUS-EQ damage functions.
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** EQ subclass passes ABC contract; damage curve matches HAZUS-EQ reference outputs for a Bay Area scenario.
 
 ```bash
 git commit -m "feat(FORGE): EQ peril module"
@@ -3293,7 +3268,7 @@ git commit -m "feat(FORGE): EQ peril module"
 
 > **Design decision required before TDD:** damage curve source. Suggested: NOAA freeze-event reanalysis + TDI claims-historic for 2021 winter storm.
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** freeze subclass passes ABC contract; damage curve calibrates against TDI 2021 winter-storm aggregate within 25% of reported industry loss.
 
 ```bash
 git commit -m "feat(FORGE): freeze peril module"
@@ -3308,7 +3283,7 @@ git commit -m "feat(FORGE): freeze peril module"
 - Modify: `ml/scenarios/generate.py` (re-fit on expanded basin)
 - Test: existing tests
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** scenario gen accepts an expanded basin set; re-fit log-likelihood within ±10% of the US-Atlantic-only baseline on the same holdout.
 
 ```bash
 git commit -m "feat(FORGE): Caribbean + Atlantic Canada hurricane ingestion"
@@ -3325,7 +3300,7 @@ git commit -m "feat(FORGE): Caribbean + Atlantic Canada hurricane ingestion"
 - Modify: `app/treaty/page.tsx` (surface as toggle)
 - Test: `tests/api/test_treaty.py`
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** treaty layer ladder gains a `fronting` row; per-scenario retained-tail correctly excludes ceded portion; UI toggle hides/shows the row.
 
 ```bash
 git commit -m "feat(FORGE): fronting vehicle in treaty model"
@@ -3341,7 +3316,7 @@ git commit -m "feat(FORGE): fronting vehicle in treaty model"
 
 > **Design decision required before TDD:** how to model trapped capital (held in surplus account) vs free capital. Default in this plan: separate captive_surplus state variable.
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** trapped vs free capital split visible in `/treaty`; MIP capital constraint sees only free capital; test fixture exercises both states.
 
 ```bash
 git commit -m "feat(FORGE): captive vehicle in treaty model"
@@ -3357,7 +3332,7 @@ git commit -m "feat(FORGE): captive vehicle in treaty model"
 
 > **Design decision required before TDD:** which trigger (indemnity, industry-loss, parametric)? Default in this plan: indemnity for v1; basis-risk-adjusted industry-loss option for v2.
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** ILS subclass passes treaty contract; indemnity trigger reproduces per-scenario retained tail equivalent to an XS layer with the bond's attachment + exhaustion.
 
 ```bash
 git commit -m "feat(FORGE): ILS / cat-bond vehicle in treaty model"
@@ -3367,13 +3342,15 @@ git commit -m "feat(FORGE): ILS / cat-bond vehicle in treaty model"
 
 #### Task P3.22: Reinstatement modeling
 
+**Trade-off:** per-occurrence state turns the treaty model from a stateless transform into a path-dependent simulation; the MIP can't see "next occurrence" without losing convexity. The fix is to expose reinstatement-aware retained-tail estimates as inputs to the MIP rather than constraints, and to surface remaining capacity in the `/treaty` view rather than the optimizer.
+
 **Files:**
 - Modify: `api_py/treaty.py` (track per-occurrence remaining capacity)
 - Test: `tests/api/test_treaty.py`
 
 Each scenario that breaches the layer consumes one reinstatement (paid at reinstatement premium).
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** path-dependent simulation correctly decrements remaining capacity per occurrence; reinstatement premium accrues to cession spend; `/treaty` view surfaces remaining capacity per layer.
 
 ```bash
 git commit -m "feat(FORGE): reinstatement modeling per-occurrence"
@@ -3392,7 +3369,7 @@ git commit -m "feat(FORGE): reinstatement modeling per-occurrence"
 
 > **Design decision required before TDD:** which TopoJSON source? Default: US Census Bureau cartographic boundary files. Engineer should confirm license + size budget.
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** book with >100 ZIP3s renders as a TopoJSON choropleth in <3s on cold load; lazy-loaded tile cache keeps memory under 50 MB.
 
 ```bash
 git commit -m "feat(FORGE): TopoJSON choropleth for >100 ZIP3 books"
@@ -3407,7 +3384,7 @@ git commit -m "feat(FORGE): TopoJSON choropleth for >100 ZIP3 books"
 - Create: `.dockerignore`
 - Test: `tests/docker/test_image.sh` (build image, run smoke)
 
-- [ ] **Step 1-5: Build, smoke, commit.**
+**Acceptance:** image builds reproducibly (same SHA on rebuild); smoke runs `npm test && pytest` inside the container, all green.
 
 ```bash
 git commit -m "chore(FORGE): Dockerfile for reproducibility"
@@ -3422,7 +3399,7 @@ git commit -m "chore(FORGE): Dockerfile for reproducibility"
 
 > **Design decision required:** Zenodo or Figshare? Default: Zenodo. Manual step — engineer reserves the DOI before the artifact lands.
 
-- [ ] **Step 1-5: Docs only.**
+**Acceptance:** dataset card lists every file, license, and DOI; cross-references appear in `docs/methodology.md`.
 
 ```bash
 git commit -m "docs(FORGE): DOI'd dataset card scaffold"
@@ -3437,10 +3414,28 @@ git commit -m "docs(FORGE): DOI'd dataset card scaffold"
 
 > **Design decision required before TDD:** participant pool, within- vs between-subject design, primary outcome. Default in this plan: within-subject, 20 participants from cat-ops practitioner network, decision latency + accuracy on a fixed scenario set. Pre-register with OSF.
 
-- [ ] **Step 1-5: Protocol doc + IRB check.** This is a multi-month effort and is not part of the codebase.
+**Acceptance:** OSF pre-registration filed; IRB exemption letter obtained; protocol doc cross-linked from `/methodology`. (Multi-month, outside the codebase.)
 
 ```bash
 git commit -m "docs(FORGE): controlled user-study protocol"
+```
+
+---
+
+#### Task P3.28: SOC 2 ingestion + real PII classifier (deferred from P2.39)
+
+**Trade-off:** Presidio (or equivalent) adds a Python runtime dependency to the ingestion path (~100MB) and a per-row inference cost on upload; we eat that to replace the Phase-2 regex deny-list with a real classifier. SOC 2 audit-trail wiring is the bigger commitment — auth (P3.1) + audit log (P2.36 + P3.7) are prereqs; this task ties them together for the ingestion path.
+
+**Files:**
+- Modify: `lib/book/csv.ts` (replace regex deny-list with classifier call)
+- Create: `api_py/pii_classifier.py` (Presidio wrapper)
+- Modify: `lib/audit/decisions.ts` (write ingestion events)
+- Test: `tests/api/test_pii_classifier.py`, `tests/lib/book/csv.test.ts`
+
+**Acceptance:** every CSV upload writes one audit record per row referencing the classifier's per-column decision; the audit trail meets SOC 2 §CC7.2 evidentiary requirements (input → decision → output, immutable).
+
+```bash
+git commit -m "feat(FORGE): SOC 2 ingestion + Presidio-based PII classifier"
 ```
 
 ---
@@ -3450,9 +3445,11 @@ git commit -m "docs(FORGE): controlled user-study protocol"
 **Files:**
 - Create: `tests/e2e/phase3.spec.ts`
 
+Prereq: Playwright already installed (Task 28 Step 0).
+
 Smoke: login → portfolio (as analyst) → propose → second login (as approver) → approve → view in /audit → rollback → see warning. Multi-tenant smoke: two tenants, no cross-leakage.
 
-- [ ] **Step 1-5: TDD.**
+**Acceptance:** spec exits 0 with both flows green; multi-tenant scoping holds.
 
 ```bash
 git commit -m "test(FORGE): phase 3 e2e smoke"
@@ -3491,9 +3488,34 @@ If any panel shows a number without a trust badge or a provenance footnote, trea
 
 ---
 
+## Panel-defense narratives
+
+Rehearsed defenses for the four audience archetypes in `docs/REDESIGN_BRIEF.md` §1. Each pairs the opening attack with the view, the number, the provenance, and the rebuttal. Memorize the path; trust the trail.
+
+### A. Cat-ops VP — "Where would my book plug in? How does this audit?"
+
+Walk to `/portfolio`. Point at the five `ExecCard`s above the map. Total TIV reads `$3.1B` with a `SYNTHETIC_SCAFFOLD` (amber) badge — every policy in the seeded book carries `synthetic = 1` (Task 15) and the `/load` wizard (P2.39) is the production swap-in path, with a regex PII deny-list as Phase-2 guardrails and SOC 2 + a real PII classifier as the Phase-3 work (P3.28). The capital-used card carries a `MODEL_OUTPUT` (blue) badge: hover shows the MIP status + objective, click drills into the per-cohort action mix. Switch into procedure-mode chat (P2.25) and run the `pre_landfall_t72` runbook — every step is a named tool call, audit-logged via the content-addressed `chat_audit` table (P2.36, P3.7 WORM). Close at `/audit` (P3.8): every solve has inputs_hash, output_hash, operator, approver — that's the OIR answer when they ask why 1,200 FL policies were non-renewed.
+
+### B. Chief Actuary — "VaR-99 isn't coherent; HAZUS underestimates correlation; CRPS-proxy is fake."
+
+Walk to `/calibration`. Point at the reliability diagrams for p10/p50/p90 heads (P2.2) and the PIT histogram on the scenario generator. CRPS is computed via `crps_from_quantiles` (P2.1) — a PCHIP-interpolated CDF + numerical quadrature, not the 3-point pinball-average proxy. Switch persona to `Actuary` (P2.18): the margin card swaps to TVaR-99 sourced from `api_py/optimize_portfolio` with the per-cohort scenario arrays added in P2.0 — sub-additive, coherent, defensible. Loss correlation is no longer independent: P2.4's common-factor `ε_event` shared per scenario lifts portfolio-level pairwise correlation by ≥0.1 measured on a 100×50 synthetic; β fitted from NOAA Storm Events per-event residuals. Importance-sampled tail draws (P2.5) replace equal-weight scenarios. Hand them the model card at `/methodology` (Task 14) — every weak label, every seed, every calibration source is cited.
+
+### C. Reinsurance Treasurer — "QS/XS with magic constants is fiction; you zero `cede_xs` from p99."
+
+Open `/treaty` (P2.17). Layer ladder shows QS + each XS layer with explicit attachment, exhaustion, RoL, and reinstatements-remaining counter (P3.22 in Phase 3). Click the cession card on `/portfolio` — the value comes from `api_py/treaty::retained_xs` (P2.7), which computes `min(L, attachment) + max(0, L − exhaustion)` per scenario. The "zero `cede_xs` from VaR-99" sleight-of-hand from the original MIP is gone; the rationale and the migration are documented in `/methodology` (Task 14, intentionally landed in the first sub-week of Phase 1 so it's not a Phase-2-only fix). For "your repricing is a 1.15 magic number": switch persona to `Reinsurance`, point at the `/portfolio` drill-down — the rate-grid MILP (P2.8) selects one of seven Δrate buckets per cohort, retention adjusted by per-cohort elasticity η sourced from NAIC market-conduct studies cited in the methodology page. Fronting / captive / ILS vehicles are the Phase-3 P3.19–P3.21 track; the toggle is already wired.
+
+### D. IE/MEM Academic — "Deterministic MIP on a Monte Carlo set? Where's the column generation? Where's the user study?"
+
+Open `/calibration`'s SAA panel (P2.9): K ∈ {100, 500, 1000} solves with the optimality-gap envelope plotted — that's the formal statement of the scenario-approximation guarantee. Point at the bootstrap-CI'd ex-post P&L bars on the same view. For "where's the column generation": P3.11 names the master/subproblem decomposition (cohort-cluster by ZIP3, master allocates per-zip3 budgets), cites Birge & Louveaux Ch. 6, and ships a toy 10-cohort prototype with a solve-time table vs CBC. For VRP integrality: `/methodology` §4 walks the total-unimodularity argument on the assignment polytope (Birkhoff–von Neumann, 1946). Reproducibility: pinned seeds + `Dockerfile` (P3.24) + a DOI'd dataset card on Zenodo (P3.25). User study: pre-registered with OSF, within-subject, 20 participants from cat-ops practitioner network (P3.26 — multi-month, IRB-gated, called out as such). Sensitivity bars (P2.14) on every budget input are the answer to "how robust is the action mix to ±10% perturbations."
+
+---
+
 ## Self-review (per skill checklist)
 
-- **Spec coverage:** every §4 line item from the redesign brief maps to at least one Phase 1, 2, or 3 task. Every audience archetype in §1 has tasks targeted at their specific concerns.
-- **Placeholders:** every TDD task has concrete test code, exact paths, and exact commands. Three tasks (P2.10 HURDAT2, P2.37 CV weak labels, multiple P3 design-blocked items) carry an explicit **"Design decision required before TDD"** marker — these are not placeholders; they are honest scope flags with the design questions explicitly named.
-- **Type consistency:** `TrustTier` literal matches between `lib/grammar/trust-tiers.ts` and the badge component. `ChatEvent` extension is consistent across `lib/chat-stream.ts`, `app/api/agent/chat/route.ts`, and `components/AgentChat.tsx`. Cohort id format `${zip3}_${build_type}_q${N}` is consistent everywhere after Task 12. `PortfolioOptimization` shape carries `horizon_start`/`horizon_end` after Task 24.
+- **Spec coverage:** every §4 line item from the redesign brief maps to at least one Phase 1, 2, or 3 task — see the `### Gap coverage matrix` table inside Context. Every audience archetype in §1 has tasks targeted at their specific concerns, and a rehearsed defense paragraph in `## Panel-defense narratives`.
+- **Trust-tier surface contract:** every numbered surface across the seven views appears in the `### Trust-tier surface inventory` table inside File Map. Implementers of view-level tasks must reconcile against the table rather than invent tier labels ad hoc.
+- **Placeholders:** every TDD task has concrete test code, exact paths, and exact commands. Tasks carrying **"Design decision required before TDD"** markers (P2.10 HURDAT2, P2.37 CV weak labels, multiple P3 design-blocked items) are not placeholders — they are honest scope flags with the design questions explicitly named. Phase 3 boilerplate (`Step 1-5: TDD`) has been replaced with concrete **Acceptance** lines task-by-task.
+- **Trade-off tags:** Phase 2 and Phase 3 high-stakes tasks carry an explicit `**Trade-off:**` line stating what is lost in exchange for what is gained. Tasks not yet tagged are mechanical (table-stakes UI wires, doc updates) where the trade-off is self-evident.
+- **Type consistency:** `TrustTier` literal matches between `lib/grammar/trust-tiers.ts` and the badge component. `ChatEvent` extension is consistent across `lib/chat-stream.ts`, `app/api/agent/chat/route.ts`, and `components/AgentChat.tsx`. Cohort id format `${zip3}_${build_type}_q${N}` is consistent everywhere after Task 12 (the docstring at `lib/db/cohorts.ts:18` that defended the old name is being explicitly overridden). `PortfolioOptimization` shape carries `horizon_start`/`horizon_end` after Task 24, `scenarios` after Task P2.0, and `schema_version` bumps after Task 12 (v2) and P2.0 (v3).
+- **Repo-state alignment (post-refinement):** Task 25 targets the existing `app/api/cron/refresh/route.ts` rather than fabricating a new file; the `vercel.json` cron entry is already in place. Task 7b fixes the existing `vercel.json` edge→nodejs drift on the chat route. Task 28 carries an explicit Playwright install Step 0 (devDep is absent today). Task 12's rename list expands from 4 files to the 6 actually returned by `git grep tiv_decile`.
 - **Execution handoff:** subagent-driven-development is recommended for this plan due to the size; see plan header.
