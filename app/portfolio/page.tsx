@@ -12,12 +12,19 @@
  * advertises both its book-level scalars and the source/method/confidence
  * provenance the redesign brief demands.
  *
+ * Task P2.13 (Phase 2): the header is now wrapped by `PortfolioWhatIfShell`,
+ * which adds a sticky right-rail of three `WhatIfControl` sliders bound to
+ * the three MIP budgets. Commits POST to `/api/optimize/portfolio` and the
+ * ExecCard strip re-renders with the new objective + capital usage plus a
+ * delta vs the original solve. The server component still loads the initial
+ * artifact; the shell owns the interactive state.
+ *
  * Refresh the optimization with `python -m scripts.precompute_portfolio_optimization`.
  */
 import { aggregateCohorts } from '@/lib/db/cohorts';
 import { loadPortfolioOptimization } from '@/lib/db/portfolio_optimization';
 import { PortfolioMap } from '@/components/PortfolioMap';
-import { PortfolioHeader } from '@/components/PortfolioHeader';
+import { PortfolioWhatIfShell } from '@/components/PortfolioWhatIfShell';
 import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
 
 export const dynamic = 'force-dynamic';
@@ -44,22 +51,17 @@ export default async function PortfolioPage() {
       }
     : null;
   const totalTiv = cohorts.reduce((s, c) => s + c.total_tiv, 0);
-  const nonrenewUsedTiv = optimization?.action_summary?.non_renew?.tiv ?? 0;
   return (
     <div className="p-6">
       <h1 className="text-2xl font-bold mb-4">Portfolio Map</h1>
-      <PortfolioHeader
-        totalTiv={totalTiv}
-        objective={optimization?.objective ?? 0}
-        capitalUsed={optimization?.book_totals.loss_p99 ?? 0}
-        capitalBudget={optimization?.budgets.capital_budget ?? 1e8}
-        nonrenewUsedTiv={nonrenewUsedTiv}
-        nonrenewCapTiv={totalTiv * (optimization?.budgets.max_nonrenew_pct ?? 0.1)}
-        cessionSpend={0}
-        cessionBudget={optimization?.budgets.cession_budget ?? 5e6}
-        horizonStart={optimization?.horizon_start}
-        horizonEnd={optimization?.horizon_end}
-      />
+      {optimization ? (
+        <PortfolioWhatIfShell initialOptimization={optimization} totalTiv={totalTiv} />
+      ) : (
+        <p className="text-sm text-zinc-600 mb-4">
+          Portfolio optimization artifact missing — run{' '}
+          <code>python -m scripts.precompute_portfolio_optimization</code>.
+        </p>
+      )}
       <div className="h-[60vh] border rounded">
         <PortfolioMap cohorts={cohorts} optimization={optimization} />
       </div>

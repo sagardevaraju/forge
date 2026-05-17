@@ -12,6 +12,12 @@
  * from `aggregateCohorts()` + `loadPortfolioOptimization()` and passes
  * fully-formed numbers in. Formatting is done here so the strip stays
  * consistent across callers.
+ *
+ * Task P2.13 (Phase 2) — three optional `*Delta` props let the what-if
+ * shell render a `+$3.3M vs baseline`-style sub-line under the headline
+ * scalars after the user re-solves the MIP with perturbed budgets. The
+ * shell is responsible for computing the deltas; this component stays
+ * formatting-only.
  */
 import { ExecCard } from '@/components/grammar/ExecCard';
 
@@ -32,6 +38,15 @@ interface Props {
    */
   horizonStart?: string;
   horizonEnd?: string;
+  /**
+   * Task P2.13 — optional delta strings rendered under the headline scalar.
+   * Provided by the what-if shell when the user has re-solved the MIP with a
+   * different budget triple; undefined when we're on the original solve, so
+   * the strip looks identical to its Phase 1 baseline.
+   */
+  objectiveDelta?: string;
+  capitalUsedDelta?: string;
+  nonrenewUsedDelta?: string;
 }
 
 const $M = (n: number) => `$${(n / 1e6).toFixed(1)}M`;
@@ -69,15 +84,22 @@ export function PortfolioHeader(p: Props) {
       )}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <ExecCard label="Total TIV" value={$B(p.totalTiv)} tier="SYNTHETIC_SCAFFOLD" />
-        <ExecCard label="Expected margin" value={$M(p.objective)} tier="RECOMMENDATION" />
+        <ExecCard
+          label="Expected margin"
+          value={$M(p.objective)}
+          delta={p.objectiveDelta}
+          tier="RECOMMENDATION"
+        />
         <ExecCard
           label="Capital used / budget"
           value={`${$M(p.capitalUsed)} / ${$M(p.capitalBudget)}`}
+          delta={p.capitalUsedDelta}
           tier="MODEL_OUTPUT"
         />
         <ExecCard
           label="Non-renew used / cap"
           value={`${$M(p.nonrenewUsedTiv)} / ${$M(p.nonrenewCapTiv)}`}
+          delta={p.nonrenewUsedDelta}
           tier="RECOMMENDATION"
         />
         <ExecCard
