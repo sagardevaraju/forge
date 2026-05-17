@@ -36,12 +36,12 @@ describe('pins DB layer', () => {
   test('setPin then getPin returns the round-tripped pin', async () => {
     const created = await setPin({
       policy_id: 1001,
-      action: 'reprice_up',
+      action: 'reprice_p10',
       operator: 'demo_operator',
       rationale: 'manual override — exposure too high in 330',
     });
     expect(created.policy_id).toBe(1001);
-    expect(created.action).toBe('reprice_up');
+    expect(created.action).toBe('reprice_p10');
     expect(created.operator).toBe('demo_operator');
     expect(created.rationale).toMatch(/exposure too high/);
     // ts is server-assigned and is a non-empty ISO-8601 string.
@@ -85,14 +85,14 @@ describe('pins DB layer', () => {
     });
     const updated = await setPin({
       policy_id: 42,
-      action: 'reprice_up',
+      action: 'reprice_p15',
       operator: 'bob',
       rationale: 'updated — bump price 15%',
     });
 
     const all = await listPins();
     expect(all).toHaveLength(1);
-    expect(updated.action).toBe('reprice_up');
+    expect(updated.action).toBe('reprice_p15');
     expect(updated.operator).toBe('bob');
     expect(updated.rationale).toMatch(/bump price 15%/);
   });

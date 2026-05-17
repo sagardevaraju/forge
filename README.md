@@ -14,7 +14,7 @@ One decision, three coupled levers, all driven from the same live forecast distr
 
 | Lever | Action options | Horizon | Solver |
 |---|---|---|---|
-| **Portfolio** | retain · reprice_up/down · non_renew · cede_qs · cede_xs | 30–90 days | PuLP + CBC MIP |
+| **Portfolio** | retain · 7-bucket reprice rate grid (−20% … +20%) · non_renew · cede_qs · cede_xs | 30–90 days | PuLP + CBC MIP |
 | **Operations** | adjuster → staging zone × day assignment | 24–72h pre-landfall | PuLP + CBC LP |
 | **Claims pre-flag** | tier policies inside the cone by severity | 24–72h pre-landfall | Heuristic |
 
@@ -44,7 +44,7 @@ Full design lives in [`docs/superpowers/specs/2026-05-15-forge-design.md`](docs/
 
 ## Trust tiers
 
-Every numbered surface in FORGE mounts a `TrustTierBadge` so the reader knows where a value came from. The five tiers are **LIVE_FEED** (this-minute API pull), **MODEL_OUTPUT** (calibrated model), **SYNTHETIC_SCAFFOLD** (placeholder distribution standing in for a real feed), **RECOMMENDATION** (optimizer output), and **MANUAL_OVERRIDE** (human-pinned). The grammar contract, magic-constant calibration plan, and `cede_xs` / VaR-99 / VRP-integrality defenses live in [`docs/methodology.md`](docs/methodology.md) and at `/methodology` in the running app.
+Every numbered surface in FORGE mounts a `TrustTierBadge` so the reader knows where a value came from. The five tiers are **LIVE_FEED** (this-minute API pull), **MODEL_OUTPUT** (calibrated model), **SYNTHETIC_SCAFFOLD** (placeholder distribution standing in for a real feed), **RECOMMENDATION** (optimizer output), and **MANUAL_OVERRIDE** (human-pinned). The grammar contract, magic-constant calibration plan, and `cede_xs` / TVaR-99 / VRP-integrality defenses live in [`docs/methodology.md`](docs/methodology.md) and at `/methodology` in the running app.
 
 ---
 

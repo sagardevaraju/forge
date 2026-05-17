@@ -83,7 +83,7 @@ Click **Portfolio Map**.
 - Click a hot ZIP3 (Florida coast) → drill-down panel shows action fractions per cohort and the dominant recommendation.
 
 Talk-track:
-> *"570 cohorts. The MIP recommends repricing 197 cohorts up and ceding 373 cohorts via excess-of-loss reinsurance. It chose this allocation to maximize expected margin subject to a capital VaR-99 cap, a 15% non-renew cap, and a $5.3M cession premium budget. All four constraints came from the carrier's policy team — none are baked into the model."*
+> *"570 cohorts. The MIP recommends repricing 197 cohorts up the rate grid and ceding 373 cohorts via excess-of-loss reinsurance. It chose this allocation to maximize expected margin subject to a capital TVaR-99 cap (mean of the top 1% of scenarios), a 15% non-renew cap, and a $5.3M cession premium budget. All four constraints came from the carrier's policy team — none are baked into the model."*
 
 ### 3. Event Console + Agent (90s)
 
@@ -157,7 +157,7 @@ Note: the headline number depends on the synthetic book; in slide commentary fra
 - **~570** cohorts after `(zip3, build_type, TIV quintile)` aggregation
 - **$3.19B** total TIV in the book · **$52.7M** annual premium
 - **$44.5M** MIP objective at the current budgets
-- **6** portfolio actions: retain · reprice_up · reprice_down · non_renew · cede_qs · cede_xs
+- **11** portfolio actions: retain · 7-bucket reprice rate grid (`reprice_n20`…`reprice_p20`) · non_renew · cede_qs · cede_xs
 - **7** agent tools, each with a mock fallback
 - **1,000** Monte Carlo scenarios per active threat
 - **5** holdout events, **$372M mean** improvement vs naive baseline

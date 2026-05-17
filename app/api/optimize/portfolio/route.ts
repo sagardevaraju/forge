@@ -37,24 +37,16 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { loadPortfolioOptimization } from '@/lib/db/portfolio_optimization';
 import { TTLCache } from '@/lib/cache/lru';
-import type {
-  ActionName,
-  OptimizedAction,
-  OptimizedCohort,
-  PortfolioOptimization,
+import {
+  ACTIONS,
+  type ActionName,
+  type OptimizedAction,
+  type OptimizedCohort,
+  type PortfolioOptimization,
 } from '@/lib/portfolio-actions';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
-
-const ACTIONS: ActionName[] = [
-  'retain',
-  'reprice_up',
-  'reprice_down',
-  'non_renew',
-  'cede_qs',
-  'cede_xs',
-];
 
 // 5-minute TTL, 64 entries — plenty for a single demo session's what-if
 // exploration (the slider yields a handful of unique budget triples).
@@ -130,15 +122,13 @@ function cacheKey(b: Budgets, cohortHash: string): string {
 interface SolverResponse {
   status: string;
   objective: number;
-  actions: Array<{
-    cohort_id: string;
-    retain: number;
-    reprice_up: number;
-    reprice_down: number;
-    non_renew: number;
-    cede_qs: number;
-    cede_xs: number;
-  }>;
+  /**
+   * Each action row carries one continuous share per ``ActionName`` (the
+   * 11-action set: ``retain`` + 7 ``reprice_*`` rate-grid buckets +
+   * ``non_renew`` + ``cede_qs`` + ``cede_xs``). The shape mirrors the
+   * Python solver's `_solve_stdin` output.
+   */
+  actions: Array<{ cohort_id: string } & Record<ActionName, number>>;
   horizon_start?: string;
   horizon_end?: string;
   error?: string;
@@ -206,7 +196,7 @@ function dominantAction(row: SolverResponse['actions'][number]): {
   let best: ActionName = 'retain';
   let bestVal = -Infinity;
   for (const a of ACTIONS) {
-    const v = row[a];
+    const v = row[a] ?? 0;
     if (v > bestVal) {
       bestVal = v;
       best = a;
@@ -220,15 +210,13 @@ function summarizeActions(
   cohorts: OptimizedCohort[],
 ): PortfolioOptimization['action_summary'] {
   const tivById = new Map(cohorts.map((c) => [c.id, c.total_tiv]));
-  const empty = (): { count: number; tiv: number } => ({ count: 0, tiv: 0 });
-  const summary: PortfolioOptimization['action_summary'] = {
-    retain: empty(),
-    reprice_up: empty(),
-    reprice_down: empty(),
-    non_renew: empty(),
-    cede_qs: empty(),
-    cede_xs: empty(),
-  };
+  const summary = ACTIONS.reduce(
+    (acc, a) => {
+      acc[a] = { count: 0, tiv: 0 };
+      return acc;
+    },
+    {} as PortfolioOptimization['action_summary'],
+  );
   for (const row of actions) {
     summary[row.dominant_action].count += 1;
     summary[row.dominant_action].tiv += tivById.get(row.cohort_id) ?? 0;
@@ -250,16 +238,23 @@ function buildResponse(
   budgets: Budgets,
 ): PortfolioOptimization {
   const cohorts = stripScenarios(base.cohorts);
-  const actions: OptimizedAction[] = solver.actions.map((row) => ({
-    cohort_id: row.cohort_id,
-    retain: row.retain,
-    reprice_up: row.reprice_up,
-    reprice_down: row.reprice_down,
-    non_renew: row.non_renew,
-    cede_qs: row.cede_qs,
-    cede_xs: row.cede_xs,
-    ...dominantAction(row),
-  }));
+  const actions: OptimizedAction[] = solver.actions.map((row) => {
+    // Build the action share map from the ACTIONS list — fills any missing
+    // bucket with 0 so the OptimizedAction shape (Record<ActionName, number>)
+    // is exhaustive even if the solver elided zeros.
+    const shares = ACTIONS.reduce(
+      (acc, a) => {
+        acc[a] = row[a] ?? 0;
+        return acc;
+      },
+      {} as Record<ActionName, number>,
+    );
+    return {
+      cohort_id: row.cohort_id,
+      ...shares,
+      ...dominantAction(row),
+    };
+  });
   return {
     status: solver.status,
     objective: solver.objective,
@@ -358,14 +353,13 @@ export async function POST(req: Request): Promise<Response> {
         horizon_end: artifact.horizon_end,
         budgets,
         book_totals: artifact.book_totals,
-        action_summary: {
-          retain: { count: 0, tiv: 0 },
-          reprice_up: { count: 0, tiv: 0 },
-          reprice_down: { count: 0, tiv: 0 },
-          non_renew: { count: 0, tiv: 0 },
-          cede_qs: { count: 0, tiv: 0 },
-          cede_xs: { count: 0, tiv: 0 },
-        },
+        action_summary: ACTIONS.reduce(
+          (acc, a) => {
+            acc[a] = { count: 0, tiv: 0 };
+            return acc;
+          },
+          {} as PortfolioOptimization['action_summary'],
+        ),
         cohorts: stripScenarios(artifact.cohorts),
         actions: [],
         relaxation_factor: RELAX,

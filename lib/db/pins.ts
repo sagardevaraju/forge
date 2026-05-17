@@ -27,16 +27,9 @@
  *     two-person rule).
  */
 import { db } from './client';
-import type { ActionName } from '@/lib/portfolio-actions';
+import { ACTIONS as ACTION_LIST, type ActionName } from '@/lib/portfolio-actions';
 
-const ACTIONS: ReadonlySet<ActionName> = new Set<ActionName>([
-  'retain',
-  'reprice_up',
-  'reprice_down',
-  'non_renew',
-  'cede_qs',
-  'cede_xs',
-]);
+const ACTIONS: ReadonlySet<ActionName> = new Set<ActionName>(ACTION_LIST);
 
 export interface Pin {
   policy_id: number;

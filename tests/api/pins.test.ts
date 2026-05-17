@@ -27,8 +27,13 @@ vi.mock('@/lib/db/pins', () => ({
   }) => {
     const ACTIONS = new Set([
       'retain',
-      'reprice_up',
-      'reprice_down',
+      'reprice_n20',
+      'reprice_n10',
+      'reprice_0',
+      'reprice_p5',
+      'reprice_p10',
+      'reprice_p15',
+      'reprice_p20',
       'non_renew',
       'cede_qs',
       'cede_xs',
@@ -79,7 +84,7 @@ describe('POST /api/pins', () => {
     const r = await POST(
       req('POST', {
         policy_id: 100,
-        action: 'reprice_up',
+        action: 'reprice_p10',
         operator: 'demo_operator',
         rationale: 'manual override — exposure too high in 330',
       }),
@@ -87,7 +92,7 @@ describe('POST /api/pins', () => {
     expect(r.status).toBe(200);
     const body = await r.json();
     expect(body.policy_id).toBe(100);
-    expect(body.action).toBe('reprice_up');
+    expect(body.action).toBe('reprice_p10');
     expect(body.operator).toBe('demo_operator');
     expect(typeof body.ts).toBe('string');
     expect(store.size).toBe(1);
@@ -148,7 +153,7 @@ describe('GET /api/pins', () => {
     await POST(
       req('POST', {
         policy_id: 3,
-        action: 'reprice_up',
+        action: 'reprice_p10',
         operator: 'op',
         rationale: 'second pin different cohort',
       }),
@@ -180,7 +185,7 @@ describe('GET /api/pins', () => {
     await POST(
       req('POST', {
         policy_id: 3,
-        action: 'reprice_up',
+        action: 'reprice_p10',
         operator: 'op',
         rationale: 'pin in 340 cohort',
       }),

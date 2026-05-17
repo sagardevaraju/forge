@@ -13,7 +13,7 @@
  *   3. Missing artifact → 503 with a clear error JSON.
  *   4. Empty cohort list does not crash; route still returns 200 PDF.
  *   5. Rendered PDF body mentions the artifact's schema_version + objective.
- *   6. Rendered PDF body lists the six action-set rows.
+ *   6. Rendered PDF body lists the action-set rows (P2.8: 11-action set).
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -45,8 +45,13 @@ const SAMPLE_OPT = {
   },
   action_summary: {
     retain: { count: 100, tiv: 500_000_000 },
-    reprice_up: { count: 197, tiv: 1_067_874_157.26 },
-    reprice_down: { count: 50, tiv: 200_000_000 },
+    reprice_n20: { count: 0, tiv: 0 },
+    reprice_n10: { count: 50, tiv: 200_000_000 },
+    reprice_0: { count: 0, tiv: 0 },
+    reprice_p5: { count: 80, tiv: 400_000_000 },
+    reprice_p10: { count: 80, tiv: 400_000_000 },
+    reprice_p15: { count: 37, tiv: 267_874_157.26 },
+    reprice_p20: { count: 0, tiv: 0 },
     non_renew: { count: 10, tiv: 50_000_000 },
     cede_qs: { count: 5, tiv: 25_000_000 },
     cede_xs: { count: 373, tiv: 2_117_991_657.20 },

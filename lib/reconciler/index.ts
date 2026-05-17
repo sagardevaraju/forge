@@ -56,7 +56,7 @@ import {
   applyTerritoryCaps,
   type TerritoryCapStamp,
 } from '@/lib/regulatory/territory_caps';
-import type { ActionName } from '@/lib/portfolio-actions';
+import { ACTIONS, type ActionName } from '@/lib/portfolio-actions';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -338,22 +338,17 @@ function addOneYear(d: Date): Date {
 
 /**
  * P2.33 — Dominant action for a continuous-share PortfolioAction. Used by the
- * pin pass to record the MIP's pre-pin vote on each ``PinStamp``.
+ * pin pass to record the MIP's pre-pin vote on each ``PinStamp``. Iterates the
+ * canonical ``ACTIONS`` array (P2.8 11-action set) so reprice rate-grid
+ * buckets are eligible to win.
  */
 function dominantOf(a: PortfolioAction): ActionName {
-  const ACTIONS: ActionName[] = [
-    'retain',
-    'reprice_up',
-    'reprice_down',
-    'non_renew',
-    'cede_qs',
-    'cede_xs',
-  ];
   let best: ActionName = 'retain';
   let bestVal = -Infinity;
   for (const k of ACTIONS) {
-    if (a[k] > bestVal) {
-      bestVal = a[k];
+    const v = a[k] ?? 0;
+    if (v > bestVal) {
+      bestVal = v;
       best = k;
     }
   }
@@ -362,15 +357,14 @@ function dominantOf(a: PortfolioAction): ActionName {
 
 /** P2.33 — One-hot PortfolioAction with all share on ``action``. */
 function oneHot(cohort_id: string, action: ActionName): PortfolioAction {
-  return {
-    cohort_id,
-    retain: action === 'retain' ? 1 : 0,
-    reprice_up: action === 'reprice_up' ? 1 : 0,
-    reprice_down: action === 'reprice_down' ? 1 : 0,
-    non_renew: action === 'non_renew' ? 1 : 0,
-    cede_qs: action === 'cede_qs' ? 1 : 0,
-    cede_xs: action === 'cede_xs' ? 1 : 0,
-  };
+  const shares = ACTIONS.reduce(
+    (acc, a) => {
+      acc[a] = a === action ? 1 : 0;
+      return acc;
+    },
+    {} as Record<ActionName, number>,
+  );
+  return { cohort_id, ...shares };
 }
 
 // ---------------------------------------------------------------------------
