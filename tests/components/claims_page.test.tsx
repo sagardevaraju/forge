@@ -308,3 +308,121 @@ describe('ClaimsPage — cohort loss_p50 replaces LOSS_FACTOR heuristic', () => 
     expect(labels).toContain('Model'); // MODEL_OUTPUT label
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────
+// Task P2.28 — Expected adjuster-load rollup
+// ────────────────────────────────────────────────────────────────────────
+//
+// The pre-brief surfaces a per-ZIP3 adjuster-load rollup above the table so
+// the cat-ops VP can see, at a glance, how many adjusters the operational
+// layer expects to need against a baseline staffing assumption. The rollup
+// is derived from the pre-flagged set's cohort `loss_p50` (already in the
+// MIP artifact) via a fixed adjusters-per-claim-$ ratio — documented in the
+// `AdjusterLoadRollup` component + the page's ProvenanceFootnote.
+//
+// Trust tier: MODEL_OUTPUT (numbers derive from the MIP cohort prior;
+// staffing baseline is a documented heuristic until a real VRP artifact
+// lands). The page-level SYNTHETIC_SCAFFOLD badge still applies because the
+// underlying book is seeded data.
+describe('ClaimsPage — adjuster-load rollup (P2.28)', () => {
+  test('renders adjuster-load rollup for flagged policies', async () => {
+    const book: FakeRow[] = [
+      { id: 1, zip3: '337', tiv: 1_000_000, build_type: 'masonry', flood_zone: 'AE' },
+      { id: 2, zip3: '342', tiv: 800_000, build_type: 'masonry', flood_zone: 'VE' },
+    ];
+    wireDb(book);
+    loadOptMock.mockResolvedValue(
+      fakeOpt([
+        { id: '337_masonry_q4', zip3: '337', build_type: 'masonry', tiv_quintile: 4, total_tiv: 1_000_000, loss_p50: 500_000 },
+        { id: '342_masonry_q3', zip3: '342', build_type: 'masonry', tiv_quintile: 3, total_tiv: 800_000, loss_p50: 250_000 },
+      ]),
+    );
+
+    const ui = await ClaimsPage();
+    render(ui);
+
+    // The rollup section is rendered and identifiable.
+    expect(screen.getByTestId('adjuster-load-rollup')).toBeInTheDocument();
+    // It surfaces a section heading recognizable to the operator.
+    expect(screen.getByText(/Expected adjuster.?load/i)).toBeInTheDocument();
+  });
+
+  test('rollup shows non-zero load per affected ZIP3', async () => {
+    // Two FL coastal ZIP3s each with one policy mapped to a cohort whose
+    // loss_p50 is large enough that the adjuster-per-$loss ratio yields
+    // at least one extra adjuster per ZIP3. With only two TIVs in the book,
+    // quintile cut-points place the 1M policy at q4 and the 800K policy at
+    // q0.
+    const book: FakeRow[] = [
+      { id: 1, zip3: '337', tiv: 1_000_000, build_type: 'masonry', flood_zone: 'AE' },
+      { id: 2, zip3: '342', tiv: 800_000, build_type: 'manufactured', flood_zone: 'VE' },
+    ];
+    wireDb(book);
+    loadOptMock.mockResolvedValue(
+      fakeOpt([
+        // Each cohort's loss_p50 is well above the per-adjuster threshold,
+        // so both ZIP3s should appear in the rollup with positive deltas.
+        { id: '337_masonry_q4', zip3: '337', build_type: 'masonry', tiv_quintile: 4, total_tiv: 1_000_000, loss_p50: 1_000_000 },
+        { id: '342_manufactured_q0', zip3: '342', build_type: 'manufactured', tiv_quintile: 0, total_tiv: 800_000, loss_p50: 750_000 },
+      ]),
+    );
+
+    const ui = await ClaimsPage();
+    render(ui);
+
+    // Both affected ZIP3s appear as rows in the rollup.
+    const rollup = screen.getByTestId('adjuster-load-rollup');
+    expect(within(rollup).getByTestId('rollup-row-337')).toBeInTheDocument();
+    expect(within(rollup).getByTestId('rollup-row-342')).toBeInTheDocument();
+
+    // Each row reports a positive "needed" delta (i.e. ">= +1"). We match
+    // the leading + sign without pinning the exact number — the formula is
+    // documented but exercised by the unit test on the helper module.
+    const row337 = within(rollup).getByTestId('rollup-row-337');
+    const row342 = within(rollup).getByTestId('rollup-row-342');
+    expect(row337.textContent).toMatch(/\+\s*[1-9]/);
+    expect(row342.textContent).toMatch(/\+\s*[1-9]/);
+  });
+
+  test('zero-flag state renders empty rollup gracefully', async () => {
+    // No FL-coastal AE/VE policies in the book → no flagged policies → no
+    // adjuster-load delta. The rollup component still mounts (so the layout
+    // doesn't jump on first paint) but shows an empty-state copy instead of
+    // a list of ZIP3s.
+    wireDb([
+      // A policy outside the FL coastal cone; the page's subset query
+      // filters it out, so flagged set is empty.
+      { id: 1, zip3: '275', tiv: 500_000, build_type: 'wood_frame', flood_zone: 'X' },
+    ]);
+    loadOptMock.mockResolvedValue(fakeOpt([]));
+
+    const ui = await ClaimsPage();
+    render(ui);
+
+    // The rollup mounts even with zero flags.
+    const rollup = screen.getByTestId('adjuster-load-rollup');
+    expect(rollup).toBeInTheDocument();
+    // Empty-state copy is visible; no per-ZIP3 rows render.
+    expect(rollup.textContent).toMatch(/no flagged|0 zip|nothing/i);
+    expect(within(rollup).queryByTestId(/rollup-row-/)).toBeNull();
+  });
+
+  test('rollup carries a MODEL_OUTPUT trust-tier badge', async () => {
+    wireDb([
+      { id: 1, zip3: '337', tiv: 1_000_000, build_type: 'masonry', flood_zone: 'AE' },
+    ]);
+    loadOptMock.mockResolvedValue(
+      fakeOpt([
+        { id: '337_masonry_q4', zip3: '337', build_type: 'masonry', tiv_quintile: 4, total_tiv: 1_000_000, loss_p50: 500_000 },
+      ]),
+    );
+
+    const ui = await ClaimsPage();
+    render(ui);
+
+    // The rollup's own trust-tier badge is present and reads "Model".
+    const rollup = screen.getByTestId('adjuster-load-rollup');
+    const badge = within(rollup).getByTestId('trust-tier-badge');
+    expect(badge).toHaveTextContent(/^Model$/);
+  });
+});

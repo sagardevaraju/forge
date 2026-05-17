@@ -3,6 +3,14 @@
  * Task P2.27 — Loss column now reads cohort `loss_p50` from the Portfolio
  *               MIP artifact (`artifacts/portfolio_optimization.json`)
  *               instead of the old `LOSS_FACTOR[severity] × tiv` heuristic.
+ * Task P2.28 — Expected adjuster-load rollup rendered above the table.
+ *               Derived from the pre-flag set's cohort `loss_p50` via a
+ *               documented adjusters-per-claim-$ ratio
+ *               (`lib/reconciler/adjuster_load.ts`). Surfaced under its own
+ *               `MODEL_OUTPUT` trust-tier badge because the Operational LP
+ *               does not yet expose a per-ZIP3 `demand_adjustments` field
+ *               for the claims pre-brief — the rollup currently derives
+ *               on-the-fly and is documented as such on the page footnote.
  *
  * Server component: derives a pre-flag list directly from the policy book
  * (still synthetic seed) — FL coastal ZIP3s × {AE, VE} flood zone — but the
@@ -23,6 +31,9 @@
  *   - The loss column carries its own `MODEL_OUTPUT` badge (in
  *     `components/ClaimsTable.tsx`) because the numbers in that column now
  *     come from the MIP cohort prior.
+ *   - The P2.28 adjuster-load rollup carries its own `MODEL_OUTPUT` badge
+ *     for the same reason (load is derived from the cohort prior; baseline
+ *     is a documented heuristic).
  *
  * Top 200 policies (by expected_loss, with nulls last) are surfaced so the
  * table stays readable on a single screen during a demo.
@@ -32,6 +43,8 @@ import { ClaimsTable, type PreflagPolicy } from '@/components/ClaimsTable';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
 import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
 import { loadPortfolioOptimization } from '@/lib/db/portfolio_optimization';
+import { AdjusterLoadRollup } from '@/components/AdjusterLoadRollup';
+import { computeAdjusterLoad } from '@/lib/reconciler/adjuster_load';
 
 export const dynamic = 'force-dynamic';
 
@@ -152,6 +165,12 @@ export default async function ClaimsPage() {
   const haveArtifact = optimization != null;
   const noticeCohortHits = top.filter((p) => p.expected_loss != null).length;
 
+  // Task P2.28 — roll the pre-flag set up to a per-ZIP3 adjuster-load delta.
+  // Pure helper, no I/O. Policies with null expected_loss are skipped inside
+  // the helper, so the rollup is naturally empty when the MIP artifact is
+  // missing or no cohort matches were found.
+  const adjusterLoad = computeAdjusterLoad(top);
+
   return (
     <div className="p-6">
       <div className="flex items-center gap-2 mb-4">
@@ -175,13 +194,14 @@ export default async function ClaimsPage() {
           </>
         )}
       </p>
+      <AdjusterLoadRollup rollup={adjusterLoad} />
       <ClaimsTable policies={top} />
       <ProvenanceFootnote
         source="policies table (synthetic seed) filtered by FL coastal ZIP3 × {AE, VE}; loss column from artifacts/portfolio_optimization.json"
-        method="Portfolio MIP cohort prior (HAZUS-derived loss_p50, proportional TIV split per policy); see docs/methodology.md"
+        method="Portfolio MIP cohort prior (HAZUS-derived loss_p50, proportional TIV split per policy); adjuster-load rollup derived via lib/reconciler/adjuster_load.ts (ceil(sum cohort loss / $250K)); see docs/methodology.md"
         confidence={
           haveArtifact
-            ? `MIP status ${optimization!.status} · ${noticeCohortHits}/${top.length} policies matched a cohort`
+            ? `MIP status ${optimization!.status} · ${noticeCohortHits}/${top.length} policies matched a cohort · adjuster-load: ${adjusterLoad.total_needed} needed across ${adjusterLoad.rows.length} ZIP3(s)`
             : 'optimization cache missing — loss column unavailable'
         }
       />
