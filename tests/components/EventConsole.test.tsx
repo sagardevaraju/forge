@@ -69,4 +69,10 @@ describe('EventConsole', () => {
     expect(screen.getByTestId('agent-chat')).toBeInTheDocument();
     expect(screen.getByTestId('sitrep-panel')).toBeInTheDocument();
   });
+
+  test('renders TrustTierBadge for source', () => {
+    const liveCone: FetchNhcConeResult = { ...makeCone(), source: 'live' };
+    render(<EventConsole cone={liveCone} fires={[]} />);
+    expect(screen.getByTestId('trust-tier-badge')).toBeInTheDocument();
+  });
 });

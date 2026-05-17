@@ -18,6 +18,7 @@ import { MapBase } from './MapBase';
 import { Source, Layer } from 'react-map-gl/maplibre';
 import { AgentChat } from './AgentChat';
 import { SitrepPanel } from './SitrepPanel';
+import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
 import type { FetchNhcConeResult } from '@/app/api/agent/tools/fetch_nhc_cone';
 import type { FireDetection } from '@/app/api/agent/tools/fetch_firms_fires';
 
@@ -92,20 +93,9 @@ export function EventConsole({ cone, fires }: Props) {
                 <div className="font-semibold">
                   Storm: {cone.advisory_number || 'N/A'}
                 </div>
-                <span
-                  className={
-                    cone.source === 'live'
-                      ? 'inline-flex items-center gap-1 rounded px-1.5 py-0.5 bg-green-100 text-green-800 text-[10px] font-medium'
-                      : 'inline-flex items-center gap-1 rounded px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-medium'
-                  }
-                  title={
-                    cone.source === 'live'
-                      ? 'Cone fetched live from NHC'
-                      : 'Mock scenario — NHC has no active advisory for this storm ID. Replace storm_id in app/events/page.tsx with a currently active system to fetch live data.'
-                  }
-                >
-                  {cone.source === 'live' ? '● Live NHC' : 'Demo scenario'}
-                </span>
+                <TrustTierBadge
+                  tier={cone.source === 'live' ? 'LIVE_FEED' : 'SYNTHETIC_SCAFFOLD'}
+                />
               </div>
               <div>Peak wind: {cone.peak_wind ?? 'N/A'} mph</div>
               <div>{(fires ?? []).length} active fires nearby</div>
