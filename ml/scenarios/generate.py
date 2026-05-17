@@ -181,6 +181,7 @@ def generate_scenarios(
     n: int = 1000,
     seed_track: list[dict] | None = None,
     regime: dict | None = None,
+    correlation: dict | None = None,
 ) -> list[dict]:
     """Generate ``n`` Monte-Carlo scenarios for ``storm_id``.
 
@@ -202,6 +203,13 @@ def generate_scenarios(
         attached to every scenario as metadata so downstream consumers
         can see the conditioning context.  P2.4+ will use this to bias
         the scenario draws; for now it is pass-through.
+    correlation:
+        Optional ``{"beta": float, "sigma": float}`` dict for the
+        common-factor event-residual loss correlation (Task P2.4).
+        Pass-through metadata only — the actual multiplication happens
+        downstream at loss-realization time via
+        :func:`api_py.correlation.apply_common_factor` (wired into the
+        per-cohort loss draw in P2.6 / P2.7).
 
     Returns
     -------
@@ -277,6 +285,12 @@ def generate_scenarios(
             # P2.3 plumbing — regime label rides along as scenario metadata.
             # P2.4+ will branch the draw math on this; for now it is opaque.
             scenario["regime"] = regime
+        if correlation is not None:
+            # P2.4 plumbing — common-factor (β, σ) ride along as metadata.
+            # The actual L'_{s,c} = L_{s,c}·(1 + β·ε_s) multiplication is
+            # applied downstream via api_py.correlation.apply_common_factor
+            # when per-cohort losses are materialized (P2.6 / P2.7).
+            scenario["correlation"] = correlation
         scenarios.append(scenario)
 
     # Normalise (handles n where 1/n isn't exactly representable in float).
