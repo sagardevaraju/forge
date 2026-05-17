@@ -59,10 +59,11 @@ CREATE INDEX IF NOT EXISTS idx_pins_operator ON pins(operator);
 CREATE INDEX IF NOT EXISTS idx_pins_ts ON pins(ts);
 
 -- Task P2.29 — Severity diff vs last refresh.
--- One row per policy_id; each /claims render upserts the current severity
--- (expected loss). The next render compares against this snapshot to render
--- a ↑/↓/= column. Last-write-wins per policy is sufficient for Phase 2; a
--- full audit trail would require a composite PK + retention policy (Phase 3).
+-- One row per policy_id, where each /claims render upserts the current
+-- severity (expected loss). The next render compares against this snapshot
+-- to render a ↑/↓/= column. Last-write-wins per policy is sufficient for
+-- Phase 2 — a full audit trail would require a composite PK plus a
+-- retention policy in Phase 3.
 CREATE TABLE IF NOT EXISTS claims_history (
   policy_id INTEGER PRIMARY KEY,
   severity REAL NOT NULL,
