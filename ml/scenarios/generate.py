@@ -186,6 +186,7 @@ def _scenarios_from_ensemble(
     n: int,
     ensemble: list[dict],
     regime: dict | None,
+    correlation: dict | None = None,
 ) -> list[dict]:
     """Build ``n`` scenarios by resampling the GEFS ensemble members.
 
@@ -243,6 +244,9 @@ def _scenarios_from_ensemble(
         }
         if regime is not None:
             scenario["regime"] = regime
+        if correlation is not None:
+            # P2.4 plumbing — common-factor (β, σ) ride along as metadata.
+            scenario["correlation"] = correlation
         scenarios.append(scenario)
     # Normalise (handles n where 1/n isn't exactly representable in float).
     total = sum(s["prob"] for s in scenarios)
@@ -258,6 +262,7 @@ def generate_scenarios(
     seed_track: list[dict] | None = None,
     regime: dict | None = None,
     ensemble: list[dict] | None = None,
+    correlation: dict | None = None,
 ) -> list[dict]:
     """Generate ``n`` Monte-Carlo scenarios for ``storm_id``.
 
@@ -289,6 +294,13 @@ def generate_scenarios(
         parametric Gaussian perturbation.  ``None`` or ``[]`` falls
         back to the parametric path so existing callers are unaffected.
         Task P2.38.
+    correlation:
+        Optional ``{"beta": float, "sigma": float}`` dict for the
+        common-factor event-residual loss correlation (Task P2.4).
+        Pass-through metadata only — the actual multiplication happens
+        downstream at loss-realization time via
+        :func:`api_py.correlation.apply_common_factor` (wired into the
+        per-cohort loss draw in P2.6 / P2.7).
 
     Returns
     -------
@@ -303,7 +315,7 @@ def generate_scenarios(
     # Task P2.38 — when a non-empty ensemble is supplied, resample from
     # it.  Empty / None ⇒ parametric path (backward compat).
     if ensemble:
-        return _scenarios_from_ensemble(storm_id, n, list(ensemble), regime)
+        return _scenarios_from_ensemble(storm_id, n, list(ensemble), regime, correlation)
 
     track = seed_track if seed_track is not None else _DEMO_TRACK_FL
     if len(track) < 2:
@@ -371,6 +383,12 @@ def generate_scenarios(
             # P2.3 plumbing — regime label rides along as scenario metadata.
             # P2.4+ will branch the draw math on this; for now it is opaque.
             scenario["regime"] = regime
+        if correlation is not None:
+            # P2.4 plumbing — common-factor (β, σ) ride along as metadata.
+            # The actual L'_{s,c} = L_{s,c}·(1 + β·ε_s) multiplication is
+            # applied downstream via api_py.correlation.apply_common_factor
+            # when per-cohort losses are materialized (P2.6 / P2.7).
+            scenario["correlation"] = correlation
         scenarios.append(scenario)
 
     # Normalise (handles n where 1/n isn't exactly representable in float).
