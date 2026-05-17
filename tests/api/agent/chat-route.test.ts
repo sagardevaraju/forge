@@ -103,7 +103,13 @@ describe('POST /api/agent/chat', () => {
     const r = await POST(req({ messages: [{ role: 'user', content: 'q' }] }));
     expect(r.status).toBe(200);
     const toolMsg = chat.mock.calls[1][0].messages.find((m: { role: string }) => m.role === 'tool');
-    expect(JSON.parse(toolMsg.content)).toMatchObject({ error: 'unknown tool: not_a_tool' });
+    // Task P2.35 — tool results are wrapped in <tool_result name="..."> tags.
+    // Strip the wrapper before JSON-parsing the body.
+    const stripped = toolMsg.content.replace(
+      /^<tool_result name="[^"]+">|<\/tool_result>$/g,
+      '',
+    );
+    expect(JSON.parse(stripped)).toMatchObject({ error: 'unknown tool: not_a_tool' });
   });
 
   test('hits the 6-iteration loop ceiling and returns 500', async () => {
