@@ -1,6 +1,11 @@
 /**
  * Task 21 — Event Console route.
  * Task 23 — Delta-since-last-advisory wired into ThreatBanner.
+ * Task P2.23 — Cone uncertainty band: page calls generate_scenarios in
+ * parallel with the NHC cone fetch and merges the resulting
+ * `cone_envelope` onto the cone payload so EventConsole renders the
+ * GEFS-perturbation band UNDER the official NHC cone. Both tools are
+ * best-effort — either one failing leaves the page renderable.
  *
  * Server component: pulls the demo storm's NHC cone and a recent FIRMS
  * snapshot directly via the agent tool handlers (no LLM round-trip for raw
@@ -22,9 +27,11 @@ import { EventsPersonaScope } from '@/components/EventsPersonaScope';
 import { ThreatBanner } from '@/components/grammar/ThreatBanner';
 import { fetchNhcCone } from '@/app/api/agent/tools/fetch_nhc_cone';
 import { fetchFirmsFires } from '@/app/api/agent/tools/fetch_firms_fires';
+import { generateScenarios } from '@/app/api/agent/tools/generate_scenarios';
 import { aggregateCohorts } from '@/lib/db/cohorts';
 import type { FetchNhcConeResult } from '@/app/api/agent/tools/fetch_nhc_cone';
 import type { FireDetection } from '@/app/api/agent/tools/fetch_firms_fires';
+import type { GenerateScenariosResult } from '@/app/api/agent/tools/generate_scenarios';
 import type { ConeExposureCohort } from '@/components/ConeExposureBars';
 
 export const dynamic = 'force-dynamic';
@@ -34,10 +41,11 @@ const DEMO_STORM_ID = 'AL092024';
 const FL_BBOX: [number, number, number, number] = [-88, 24, -76, 32];
 
 export default async function EventsPage() {
-  const [cone, fires, cohortsRaw]: [
+  const [cone, fires, cohortsRaw, scenarios]: [
     FetchNhcConeResult | null,
     FireDetection[],
     Awaited<ReturnType<typeof aggregateCohorts>>,
+    GenerateScenariosResult | null,
   ] = await Promise.all([
     fetchNhcCone.handler({ storm_id: DEMO_STORM_ID }).catch(() => null),
     fetchFirmsFires.handler({ bbox: FL_BBOX, hours: 24 }).catch(() => []),
@@ -47,6 +55,11 @@ export default async function EventsPage() {
     // (e.g. fresh clone without `npm run migrate`) degrades gracefully via
     // the mini-map's "no book loaded" placeholder.
     aggregateCohorts().catch(() => []),
+    // Task P2.23: GEFS-perturbation cone-uncertainty envelope. The tool
+    // has a deterministic mock fallback baked in, but we still catch here
+    // so a thrown error (bad storm_id, network) degrades to "no envelope"
+    // rather than failing the whole page render.
+    generateScenarios.handler({ storm_id: DEMO_STORM_ID, n: 100 }).catch(() => null),
   ]);
   const cohorts: ConeExposureCohort[] = cohortsRaw.map((c) => ({
     id: c.id,
@@ -54,6 +67,14 @@ export default async function EventsPage() {
     total_tiv: c.total_tiv,
     policy_count: c.policy_count,
   }));
+
+  // Task P2.23: merge the GEFS envelope onto the cone payload. EventConsole
+  // accepts the envelope as a peer field on `cone`; if either tool failed,
+  // we omit the envelope entirely (rather than passing `cone_envelope:
+  // null`) so the layer stack falls back cleanly.
+  const coneWithEnvelope = cone
+    ? { ...cone, cone_envelope: scenarios?.cone_envelope ?? null }
+    : null;
 
   // Delta is suppressed when either reading is null — the banner just hides
   // the chip rather than rendering a misleading "+NaN mph vs prior".
@@ -81,7 +102,7 @@ export default async function EventsPage() {
         /treaty drill-in already one click away.
       */}
       <EventsPersonaScope />
-      <EventConsole cone={cone} fires={fires} cohorts={cohorts} />
+      <EventConsole cone={coneWithEnvelope} fires={fires} cohorts={cohorts} />
     </>
   );
 }
