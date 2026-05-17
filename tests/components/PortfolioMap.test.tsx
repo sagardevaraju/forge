@@ -30,6 +30,85 @@ process.env.NEXT_PUBLIC_MAPBOX_TOKEN = 'pk.test.token';
 
 import { PortfolioMap } from '@/components/PortfolioMap';
 import { PortfolioDrillDown } from '@/components/PortfolioDrillDown';
+import type { PortfolioOptimization } from '@/lib/portfolio-actions';
+
+function makeOptimization(): PortfolioOptimization {
+  return {
+    status: 'Optimal',
+    objective: 12_500_000,
+    budgets: {
+      capital_budget: 50_000_000,
+      max_nonrenew_pct: 0.1,
+      cession_budget: 10_000_000,
+    },
+    book_totals: {
+      tiv: 4_000_000,
+      premium: 100_000,
+      loss_p50: 1_000_000,
+      loss_p99: 5_000_000,
+    },
+    action_summary: {
+      retain: { count: 2, tiv: 3_500_000 },
+      reprice_up: { count: 1, tiv: 500_000 },
+      reprice_down: { count: 0, tiv: 0 },
+      non_renew: { count: 0, tiv: 0 },
+      cede_qs: { count: 0, tiv: 0 },
+      cede_xs: { count: 0, tiv: 0 },
+    },
+    cohorts: [
+      {
+        id: '330_wood_frame_q0',
+        zip3: '330',
+        build_type: 'wood_frame',
+        tiv_quintile: 0,
+        policy_count: 5,
+        total_tiv: 3_500_000,
+        total_premium: 80_000,
+        modal_flood_zone: 'X',
+        avg_elevation_m: 3,
+        loss_p50: 800_000,
+        loss_p99: 3_500_000,
+      },
+      {
+        id: '770_wood_frame_q2',
+        zip3: '770',
+        build_type: 'wood_frame',
+        tiv_quintile: 2,
+        policy_count: 10,
+        total_tiv: 500_000,
+        total_premium: 20_000,
+        modal_flood_zone: 'X',
+        avg_elevation_m: 3,
+        loss_p50: 200_000,
+        loss_p99: 1_500_000,
+      },
+    ],
+    actions: [
+      {
+        cohort_id: '330_wood_frame_q0',
+        retain: 1,
+        reprice_up: 0,
+        reprice_down: 0,
+        non_renew: 0,
+        cede_qs: 0,
+        cede_xs: 0,
+        dominant_action: 'retain',
+        dominant_share: 1,
+      },
+      {
+        cohort_id: '770_wood_frame_q2',
+        retain: 0,
+        reprice_up: 1,
+        reprice_down: 0,
+        non_renew: 0,
+        cede_qs: 0,
+        cede_xs: 0,
+        dominant_action: 'reprice_up',
+        dominant_share: 1,
+      },
+    ],
+  };
+}
 
 function cohort(over: Partial<Cohort>): Cohort {
   return {
@@ -83,6 +162,31 @@ describe('PortfolioMap', () => {
     expect(screen.getByTestId('map-base-stub')).toBeInTheDocument();
     expect(screen.getByTestId('map-source')).toBeInTheDocument();
     expect(screen.getByTestId('map-layer')).toBeInTheDocument();
+  });
+
+  // Task 18 — legend semantic explanation of swatch colors.
+  test('legend explains color semantics', () => {
+    const cohorts: Cohort[] = [
+      cohort({ id: '330_wood_frame_q0', zip3: '330', total_tiv: 3_500_000, policy_count: 5 }),
+      cohort({ id: '770_wood_frame_q2', zip3: '770', total_tiv: 500_000, policy_count: 10 }),
+    ];
+    render(<PortfolioMap cohorts={cohorts} optimization={makeOptimization()} />);
+    expect(
+      screen.getByText(/MIP's dominant recommendation by TIV-weighted share/i),
+    ).toBeInTheDocument();
+  });
+
+  // Task 18 — ARIA on action color swatches for screen readers.
+  test('action swatches have aria-labels', () => {
+    const cohorts: Cohort[] = [
+      cohort({ id: '330_wood_frame_q0', zip3: '330', total_tiv: 3_500_000, policy_count: 5 }),
+      cohort({ id: '770_wood_frame_q2', zip3: '770', total_tiv: 500_000, policy_count: 10 }),
+    ];
+    render(<PortfolioMap cohorts={cohorts} optimization={makeOptimization()} />);
+    const swatches = screen.getAllByRole('img');
+    expect(
+      swatches.some((s) => s.getAttribute('aria-label')?.toLowerCase().includes('retain')),
+    ).toBe(true);
   });
 });
 

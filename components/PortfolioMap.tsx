@@ -239,6 +239,8 @@ export function PortfolioMap({ cohorts, optimization }: Props) {
                 .map(([action, v]) => (
                   <div key={action} style={{ display: 'contents' }}>
                     <span
+                      role="img"
+                      aria-label={ACTION_LABELS[action]}
                       style={{
                         width: 10,
                         height: 10,
@@ -254,6 +256,10 @@ export function PortfolioMap({ cohorts, optimization }: Props) {
                   </div>
                 ))}
             </div>
+            {/* Task 18 — explain what the swatch colors actually encode. */}
+            <p style={{ marginTop: 6, fontSize: 10, color: '#6b7280' }}>
+              Color = MIP&apos;s dominant recommendation by TIV-weighted share.
+            </p>
           </div>
         )}
         <div style={{ marginTop: 10, fontSize: 11, color: '#6b7280' }}>
