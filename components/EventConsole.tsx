@@ -49,7 +49,7 @@ export function EventConsole({ cone, fires }: Props) {
   };
 
   return (
-    <main className="min-h-screen p-6">
+    <div className="p-6">
       <h1 className="text-2xl font-bold mb-4">Event Console</h1>
       <div className="grid grid-cols-[1fr_360px] gap-4 h-[80vh]">
         <div className="border rounded relative">
@@ -121,6 +121,6 @@ export function EventConsole({ cone, fires }: Props) {
           />
         </div>
       </div>
-    </main>
+    </div>
   );
 }

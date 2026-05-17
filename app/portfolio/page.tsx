@@ -30,7 +30,7 @@ export default async function PortfolioPage() {
   const totalTiv = cohorts.reduce((s, c) => s + c.total_tiv, 0);
   const nonrenewUsedTiv = optimization?.action_summary?.non_renew?.tiv ?? 0;
   return (
-    <main className="min-h-screen p-6">
+    <div className="p-6">
       <h1 className="text-2xl font-bold mb-4">Portfolio Map</h1>
       <PortfolioHeader
         totalTiv={totalTiv}
@@ -54,6 +54,6 @@ export default async function PortfolioPage() {
             : 'optimization cache missing'
         }
       />
-    </main>
+    </div>
   );
 }

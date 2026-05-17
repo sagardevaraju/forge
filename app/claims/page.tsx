@@ -68,12 +68,12 @@ export default async function ClaimsPage() {
     .slice(0, 200);
 
   return (
-    <main className="min-h-screen p-6">
+    <div className="p-6">
       <h1 className="text-2xl font-bold mb-4">Claims Pre-Brief</h1>
       <p className="text-sm text-zinc-600 mb-4">
         {policies.length} policies pre-flagged inside the demo storm cone
       </p>
       <ClaimsTable policies={policies} />
-    </main>
+    </div>
   );
 }
