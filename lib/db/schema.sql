@@ -36,3 +36,18 @@ CREATE TABLE IF NOT EXISTS storm_events (
   event_type TEXT, peak_wind REAL,
   damage_property REAL, source TEXT
 );
+
+-- Task P2.33 — Operator pin mechanism.
+-- A human operator can override the MIP's recommended action for a specific
+-- policy. PRIMARY KEY (policy_id) gives UPSERT semantics: one pin per policy;
+-- DELETE to unpin. Pins persist across solves until removed.
+CREATE TABLE IF NOT EXISTS pins (
+  policy_id INTEGER NOT NULL,
+  action TEXT NOT NULL,
+  operator TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  rationale TEXT NOT NULL,
+  PRIMARY KEY (policy_id)
+);
+CREATE INDEX IF NOT EXISTS idx_pins_operator ON pins(operator);
+CREATE INDEX IF NOT EXISTS idx_pins_ts ON pins(ts);

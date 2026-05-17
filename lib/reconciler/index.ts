@@ -47,6 +47,7 @@ import {
   applyTerritoryCaps,
   type TerritoryCapStamp,
 } from '@/lib/regulatory/territory_caps';
+import type { ActionName } from '@/lib/portfolio-actions';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -106,6 +107,24 @@ export interface ReconcileInput {
    * to the bucket's own non-renew TIV; see ``applyTerritoryCaps``.
    */
   bucket_total_tiv?: Record<string, number>;
+  /**
+   * P2.33 — operator pin overrides. Each pin forces a specific cohort's
+   * recommended action regardless of the MIP's vote. Pins are stored
+   * per-policy (see ``lib/db/pins.ts``); the reconciler maps each pinned
+   * ``policy_id`` to its ``cohort_id`` via ``policy_to_cohort_map`` and
+   * rewrites that cohort's action one-hot. Pinned cohorts are NOT exempt
+   * from the P2.31 / P2.32 filters — a pin to ``non_renew`` can still be
+   * downgraded by insufficient notice or an over-cap bucket.
+   */
+  pins?: ReadonlyArray<{
+    policy_id: number;
+    action: ActionName;
+    operator: string;
+    ts: string;
+    rationale: string;
+  }>;
+  /** P2.33 — ``policy_id → cohort_id`` lookup for pin resolution. */
+  policy_to_cohort_map?: Record<number, string>;
 }
 
 export interface ReconcileConflict {
@@ -158,11 +177,46 @@ export interface TerritoryCapStampWithZip extends TerritoryCapStamp {
 }
 
 /**
- * P2.31 / P2.32 — Stamped reconciler artifact. Emitted alongside (not in
- * place of) the original ``PortfolioAction[]``: downstream consumers can
- * pick whichever matches their decision horizon.
+ * P2.33 — A stamped reconciler-side artifact for a cohort whose recommended
+ * action was forced by a human operator pin. The pin overrides the MIP's vote
+ * (the cohort's ``action_summary`` is rewritten one-hot to ``pinned_action``)
+ * and is surfaced separately from the P2.31 / P2.32 stamps so the UI / agent
+ * channel can attribute the override to its operator + rationale.
+ *
+ * A single cohort can carry both a ``PinStamp`` AND a follow-on P2.31 /
+ * P2.32 stamp — if the pin sets ``non_renew`` and the notice clock or
+ * territory cap binds, the downgrade still happens. Pins to non-non_renew
+ * actions (``retain``, ``reprice_*``, ``cede_*``) are immune to those
+ * downgrades because P2.31 / P2.32 only fire on ``non_renew``.
  */
-export type StampedAction = NoticePeriodStamp | TerritoryCapStampWithZip;
+export interface PinStamp {
+  cohort_id: string;
+  action: 'pin';
+  /** Policy whose pin forced the override. */
+  policy_id: number;
+  /** Action the operator pinned (one of the six MIP actions). */
+  pinned_action: ActionName;
+  /** Operator who set the pin (free-form string until Phase 3 auth). */
+  operator: string;
+  /** Operator's free-form justification (>=10 chars enforced upstream). */
+  rationale: string;
+  /** ISO-8601 timestamp the pin was last written. */
+  ts: string;
+  /** MIP's pre-pin dominant action — preserved so the audit trail is legible. */
+  original_action: ActionName;
+}
+
+/**
+ * P2.31 / P2.32 / P2.33 — Stamped reconciler artifact. Emitted alongside (not
+ * in place of) the original ``PortfolioAction[]``: downstream consumers can
+ * pick whichever matches their decision horizon.
+ *
+ * Precedence within a single ``reconcile()`` call:
+ *   1. P2.33 — pin override forces the cohort's action one-hot.
+ *   2. P2.31 — notice-period filter; downgrades a (possibly pinned) non_renew.
+ *   3. P2.32 — territory-cap filter; downgrades surviving non_renew cohorts.
+ */
+export type StampedAction = NoticePeriodStamp | TerritoryCapStampWithZip | PinStamp;
 
 export interface ReconcileOutput {
   /** Pass-through: portfolio decisions are not mutated. */
@@ -223,13 +277,49 @@ function addOneYear(d: Date): Date {
   return r;
 }
 
+/**
+ * P2.33 — Dominant action for a continuous-share PortfolioAction. Used by the
+ * pin pass to record the MIP's pre-pin vote on each ``PinStamp``.
+ */
+function dominantOf(a: PortfolioAction): ActionName {
+  const ACTIONS: ActionName[] = [
+    'retain',
+    'reprice_up',
+    'reprice_down',
+    'non_renew',
+    'cede_qs',
+    'cede_xs',
+  ];
+  let best: ActionName = 'retain';
+  let bestVal = -Infinity;
+  for (const k of ACTIONS) {
+    if (a[k] > bestVal) {
+      bestVal = a[k];
+      best = k;
+    }
+  }
+  return best;
+}
+
+/** P2.33 — One-hot PortfolioAction with all share on ``action``. */
+function oneHot(cohort_id: string, action: ActionName): PortfolioAction {
+  return {
+    cohort_id,
+    retain: action === 'retain' ? 1 : 0,
+    reprice_up: action === 'reprice_up' ? 1 : 0,
+    reprice_down: action === 'reprice_down' ? 1 : 0,
+    non_renew: action === 'non_renew' ? 1 : 0,
+    cede_qs: action === 'cede_qs' ? 1 : 0,
+    cede_xs: action === 'cede_xs' ? 1 : 0,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Reconciler
 // ---------------------------------------------------------------------------
 
 export function reconcile(input: ReconcileInput): ReconcileOutput {
   const {
-    portfolio,
     preflagged,
     vrp,
     cohort_zip3_map = {},
@@ -238,7 +328,52 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
     today = new Date(),
     cohort_tiv_map = {},
     bucket_total_tiv = {},
+    pins = [],
+    policy_to_cohort_map = {},
   } = input;
+
+  // ── 0. P2.33 — Apply operator pin overrides. ───────────────────────────
+  // Clone the input portfolio.actions so we never mutate the caller's
+  // object. Pins rewrite the cohort's action one-hot to ``pinned_action`` —
+  // the MIP's continuous shares are discarded for that cohort. A PinStamp
+  // is emitted per pin so consumers can attribute the override; the
+  // pre-pin dominant action is preserved on the stamp.
+  //
+  // The downstream filters (P2.31 / P2.32) read this cloned action list,
+  // so a pin to ``non_renew`` still flows through the notice-period and
+  // territory-cap passes — exactly the precedence the docstring above
+  // promises. A pin to ``retain`` (or any non-``non_renew`` action) is
+  // therefore implicitly immune to P2.31 / P2.32 because those filters
+  // only fire when ``non_renew > NON_RENEW_THRESHOLD``.
+  const clonedActions: PortfolioAction[] = input.portfolio.actions.map((a) => ({
+    ...a,
+  }));
+  const pinStamps: PinStamp[] = [];
+  if (pins.length > 0) {
+    const actionIndex = new Map<string, number>();
+    clonedActions.forEach((a, i) => actionIndex.set(a.cohort_id, i));
+    for (const pin of pins) {
+      const cohortId = policy_to_cohort_map[pin.policy_id];
+      if (!cohortId) continue; // unknown policy — skip, do not stamp
+      const idx = actionIndex.get(cohortId);
+      if (idx === undefined) continue; // unknown cohort — skip
+      const a = clonedActions[idx];
+      const originalAction = dominantOf(a);
+      const rewritten = oneHot(cohortId, pin.action);
+      clonedActions[idx] = rewritten;
+      pinStamps.push({
+        cohort_id: cohortId,
+        action: 'pin',
+        policy_id: pin.policy_id,
+        pinned_action: pin.action,
+        operator: pin.operator,
+        rationale: pin.rationale,
+        ts: pin.ts,
+        original_action: originalAction,
+      });
+    }
+  }
+  const portfolio = { actions: clonedActions };
 
   // ── 1. Build a quick lookup of cohort → action. ────────────────────────
   const actionByCohort = new Map<string, PortfolioAction>();
@@ -343,7 +478,9 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
   );
   const defaultRenewal = addDays(todayStart, 365);
 
-  const stampedActions: StampedAction[] = [];
+  // Seed the stamped-actions list with the pin overrides applied above.
+  // P2.31 / P2.32 will append their own entries below.
+  const stampedActions: StampedAction[] = [...pinStamps];
   const noticeDeferredIds = new Set<string>();
   for (const a of portfolio.actions) {
     if (a.non_renew <= NON_RENEW_THRESHOLD) continue;

@@ -179,6 +179,9 @@ describe('reconcile — notice-period filter (P2.31)', () => {
     const stamped = out.stamped_actions[0];
     expect(stamped.cohort_id).toBe('330_wood_frame_q3');
     expect(stamped.action).toBe('non_renew_next_renewal');
+    if (stamped.action !== 'non_renew_next_renewal') {
+      throw new Error('expected notice-period stamp');
+    }
     expect(stamped.original_action).toBe('non_renew');
     expect(stamped.downgrade_reason).toBe('insufficient_notice_period');
     // next renewal + 1 year
@@ -187,9 +190,6 @@ describe('reconcile — notice-period filter (P2.31)', () => {
       d.setUTCFullYear(d.getUTCFullYear() + 1);
       return d.toISOString().slice(0, 10);
     })();
-    if (stamped.action !== 'non_renew_next_renewal') {
-      throw new Error('expected notice-period stamp');
-    }
     expect(stamped.effective_date_stamp).toBe(expectedStamp);
   });
 
@@ -280,7 +280,11 @@ describe('reconcile — notice-period filter (P2.31)', () => {
       today,
     });
     expect(out.stamped_actions).toHaveLength(1);
-    expect(out.stamped_actions[0].downgrade_reason).toBe('insufficient_notice_period');
+    const stamp = out.stamped_actions[0];
+    if (stamp.action !== 'non_renew_next_renewal') {
+      throw new Error('expected notice-period stamp');
+    }
+    expect(stamp.downgrade_reason).toBe('insufficient_notice_period');
   });
 
   test('missing renewal date: defaults to today + 365 days → inside any state notice window → unchanged', () => {
@@ -411,5 +415,158 @@ describe('reconcile — territory caps (P2.32)', () => {
     expect(capStamp!.observed_fraction).toBeCloseTo(0.05, 6); // 500k / 10M
     expect(capStamp!.original_action).toBe('non_renew');
     expect(capStamp!.downgrade_reason).toBe('territory_cap_exceeded');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task P2.33 — Operator pin overrides
+// ---------------------------------------------------------------------------
+
+describe('reconcile — operator pins (P2.33)', () => {
+  const today = new Date('2026-05-17T00:00:00Z');
+  const addDays = (d: Date, days: number): string => {
+    const r = new Date(d.getTime());
+    r.setUTCDate(r.getUTCDate() + days);
+    return r.toISOString().slice(0, 10);
+  };
+
+  test('pinned cohort: reconciler forces the pinned action and emits a PinStamp', () => {
+    // MIP wants this cohort to retain; operator pins it to reprice_up.
+    const out = reconcile({
+      portfolio: {
+        actions: [
+          {
+            cohort_id: '330_wood_frame_q3',
+            retain: 0.9,
+            reprice_up: 0.05,
+            reprice_down: 0,
+            non_renew: 0.05,
+            cede_qs: 0,
+            cede_xs: 0,
+          },
+        ],
+      },
+      preflagged: [],
+      vrp: { assignments: [] },
+      cohort_zip3_map: { '330_wood_frame_q3': '330' },
+      pins: [
+        {
+          policy_id: 12345,
+          action: 'reprice_up',
+          operator: 'demo_operator',
+          ts: '2026-05-17T00:00:00Z',
+          rationale: 'manual override — exposure too high',
+        },
+      ],
+      policy_to_cohort_map: { 12345: '330_wood_frame_q3' },
+      today,
+    });
+    const pinStamps = out.stamped_actions.filter((s) => s.action === 'pin');
+    expect(pinStamps).toHaveLength(1);
+    const stamp = pinStamps[0];
+    if (stamp.action !== 'pin') throw new Error('expected pin stamp');
+    expect(stamp.cohort_id).toBe('330_wood_frame_q3');
+    expect(stamp.policy_id).toBe(12345);
+    expect(stamp.action).toBe('pin');
+    expect(stamp.pinned_action).toBe('reprice_up');
+    expect(stamp.operator).toBe('demo_operator');
+    expect(stamp.rationale).toMatch(/exposure too high/);
+    expect(stamp.original_action).toBe('retain');
+    // action_summary is replaced: the dominant action for the cohort is now
+    // the pinned action.
+    const a = out.portfolio.actions.find((x) => x.cohort_id === '330_wood_frame_q3');
+    expect(a).toBeDefined();
+    expect(a!.reprice_up).toBeCloseTo(1.0, 6);
+    expect(a!.retain).toBeCloseTo(0, 6);
+  });
+
+  test('pin → P2.31 downgrade chain: pin to non_renew + short notice → both stamps emitted', () => {
+    // MIP wants retain. Operator pins non_renew. Short notice window means
+    // P2.31 ALSO downgrades the now-pinned non_renew to non_renew_next_renewal.
+    const renewal = addDays(today, 60); // outside FL 120-day window
+    const out = reconcile({
+      portfolio: {
+        actions: [
+          {
+            cohort_id: '330_wood_frame_q3',
+            retain: 0.9,
+            reprice_up: 0.05,
+            reprice_down: 0,
+            non_renew: 0.05,
+            cede_qs: 0,
+            cede_xs: 0,
+          },
+        ],
+      },
+      preflagged: [],
+      vrp: { assignments: [] },
+      cohort_zip3_map: { '330_wood_frame_q3': '330' },
+      cohort_renewal_date_map: { '330_wood_frame_q3': renewal },
+      pins: [
+        {
+          policy_id: 9001,
+          action: 'non_renew',
+          operator: 'demo_operator',
+          ts: '2026-05-17T00:00:00Z',
+          rationale: 'operator confirms cohort exit despite MIP',
+        },
+      ],
+      policy_to_cohort_map: { 9001: '330_wood_frame_q3' },
+      today,
+    });
+    const pinStamps = out.stamped_actions.filter((s) => s.action === 'pin');
+    const noticeStamps = out.stamped_actions.filter(
+      (s) => s.action === 'non_renew_next_renewal',
+    );
+    expect(pinStamps).toHaveLength(1);
+    expect(noticeStamps).toHaveLength(1);
+    expect(noticeStamps[0].cohort_id).toBe('330_wood_frame_q3');
+  });
+
+  test('pin to retain: P2.31 / P2.32 do NOT touch the pinned cohort', () => {
+    // MIP wants non_renew (would normally trigger notice-period + cap pass).
+    // Operator pins retain — those filters must see retain, not non_renew.
+    const renewal = addDays(today, 60); // would fail FL 120-day notice
+    const out = reconcile({
+      portfolio: {
+        actions: [
+          {
+            cohort_id: '330_wood_frame_q3',
+            retain: 0.05,
+            reprice_up: 0.05,
+            reprice_down: 0,
+            non_renew: 0.9,
+            cede_qs: 0,
+            cede_xs: 0,
+          },
+        ],
+      },
+      preflagged: [],
+      vrp: { assignments: [] },
+      cohort_zip3_map: { '330_wood_frame_q3': '330' },
+      cohort_renewal_date_map: { '330_wood_frame_q3': renewal },
+      cohort_tiv_map: { '330_wood_frame_q3': 500_000 },
+      bucket_total_tiv: { 'FL:coastal': 10_000_000 },
+      pins: [
+        {
+          policy_id: 1234,
+          action: 'retain',
+          operator: 'demo_operator',
+          ts: '2026-05-17T00:00:00Z',
+          rationale: 'long-standing customer, retain regardless of model',
+        },
+      ],
+      policy_to_cohort_map: { 1234: '330_wood_frame_q3' },
+      today,
+    });
+    // Pin stamp emitted; no notice-period / cap stamps for this cohort.
+    const pinStamps = out.stamped_actions.filter((s) => s.action === 'pin');
+    const noticeStamps = out.stamped_actions.filter(
+      (s) => s.action === 'non_renew_next_renewal',
+    );
+    const capStamps = out.stamped_actions.filter((s) => s.action === 'non_renew_capped');
+    expect(pinStamps).toHaveLength(1);
+    expect(noticeStamps).toHaveLength(0);
+    expect(capStamps).toHaveLength(0);
   });
 });
