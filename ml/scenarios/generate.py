@@ -182,6 +182,7 @@ def generate_scenarios(
     seed_track: list[dict] | None = None,
     regime: dict | None = None,
     correlation: dict | None = None,
+    importance_buckets: list[dict] | None = None,
 ) -> list[dict]:
     """Generate ``n`` Monte-Carlo scenarios for ``storm_id``.
 
@@ -210,6 +211,15 @@ def generate_scenarios(
         downstream at loss-realization time via
         :func:`api_py.correlation.apply_common_factor` (wired into the
         per-cohort loss draw in P2.6 / P2.7).
+    importance_buckets:
+        Optional list of stratified IS draws from
+        :func:`ml.scenarios.importance.stratified_sample`.  Each dict
+        carries ``bucket``, ``weight``, and (typically) ``peak_wind_mph``
+        and ``category``.  Task P2.5 plumbing — when supplied, each
+        scenario inherits the bucket label + uncorrected weight as
+        metadata so IS-corrected TVaR computations (P2.6 / P2.7) can
+        apply the ``p_bucket / n_per_bucket`` Horvitz-Thompson factor at
+        evaluation time.  The actual perturbation math is unchanged.
 
     Returns
     -------
@@ -291,6 +301,15 @@ def generate_scenarios(
             # applied downstream via api_py.correlation.apply_common_factor
             # when per-cohort losses are materialized (P2.6 / P2.7).
             scenario["correlation"] = correlation
+        if importance_buckets is not None and i < len(importance_buckets):
+            # P2.5 plumbing — bucket label + uncorrected weight ride along
+            # as metadata.  Downstream IS-corrected TVaR (P2.6 / P2.7) uses
+            # the bucket to look up ATLANTIC_BASIN_FREQUENCIES and apply
+            # the p_bucket / n_per_bucket Horvitz-Thompson factor.  The
+            # underlying perturbation math is unchanged here.
+            sample = importance_buckets[i]
+            scenario["bucket"] = sample["bucket"]
+            scenario["weight"] = sample["weight"]
         scenarios.append(scenario)
 
     # Normalise (handles n where 1/n isn't exactly representable in float).
