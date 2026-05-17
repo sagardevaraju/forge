@@ -288,9 +288,9 @@ describe('PortfolioMap', () => {
     const currentPane = screen.getByTestId('portfolio-pane-current');
     const recommendedPane = screen.getByTestId('portfolio-pane-recommended');
 
-    // ZIP3 770 has dominant_action = reprice_up in the fixture; the recommended
-    // pane should color its row accordingly while the current pane stays in
-    // the neutral "retain" color.
+    // ZIP3 770 has dominant_action = reprice_p10 in the fixture (post-P2.8
+    // rate-grid); the recommended pane should color its row accordingly
+    // while the current pane stays in the neutral "retain" color.
     const leftZip770 = within(currentPane).getByRole('button', {
       name: /ZIP3 770/i,
     });
@@ -298,7 +298,7 @@ describe('PortfolioMap', () => {
       name: /ZIP3 770/i,
     });
     expect(leftZip770.getAttribute('data-action')).toBe('retain');
-    expect(rightZip770.getAttribute('data-action')).toBe('reprice_up');
+    expect(rightZip770.getAttribute('data-action')).toBe('reprice_p10');
     expect(leftZip770.getAttribute('data-color')).not.toBe(
       rightZip770.getAttribute('data-color'),
     );

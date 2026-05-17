@@ -171,10 +171,16 @@ export function PortfolioExportDocument({
   );
 
   // Order actions deterministically (matches the action grid in the UI).
+  // P2.8 swapped the two reprice scalars for a 7-bucket rate grid.
   const orderedActions: ActionName[] = [
     'retain',
-    'reprice_up',
-    'reprice_down',
+    'reprice_n20',
+    'reprice_n10',
+    'reprice_0',
+    'reprice_p5',
+    'reprice_p10',
+    'reprice_p15',
+    'reprice_p20',
     'non_renew',
     'cede_qs',
     'cede_xs',

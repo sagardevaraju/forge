@@ -210,10 +210,12 @@ describe('GET /portfolio/export', () => {
     const r = await GET();
     const body = new Uint8Array(await r.arrayBuffer());
     const text = decodePdf(body);
-    // The six canonical action labels (or their snake-case ids).
+    // P2.8 swapped the two reprice scalars for a 7-bucket rate grid; the
+    // canonical action labels now read "Reprice -20%" through "Reprice
+    // +20%" plus the four non-reprice ids (Retain, Non-renew, Cede QS,
+    // Cede XS).
     expect(text).toMatch(/Retain/i);
-    expect(text).toMatch(/Reprice up/i);
-    expect(text).toMatch(/Reprice down/i);
+    expect(text).toMatch(/Reprice/i);
     expect(text).toMatch(/Non-renew/i);
     expect(text).toMatch(/Cede.*quota share/i);
     expect(text).toMatch(/Cede.*excess of loss/i);
