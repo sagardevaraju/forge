@@ -30,7 +30,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from api_py.optimize_portfolio import solve  # noqa: E402
+from api_py.optimize_portfolio import ACTIONS, solve  # noqa: E402
 
 # Task P2.0 — Monte-Carlo scenario count per cohort. Sized so that the
 # 99th-percentile order statistic is stable (~30% sampling noise on 1000
@@ -279,11 +279,17 @@ def main() -> None:
         horizon_start=HORIZON_START,
         horizon_end=HORIZON_END,
     )
-    print(f"MIP status: {result['status']}  objective: ${result['objective']:,.0f}")
+    print(
+        f"MIP status: {result['status']}  "
+        f"solver_mode: {result.get('solver_mode', 'milp')}  "
+        f"objective: ${result['objective']:,.0f}"
+    )
 
     # Decorate each action row with the dominant action label + dominant share
-    # so the front-end doesn't need to recompute argmax.
-    ACTIONS = ("retain", "reprice_up", "reprice_down", "non_renew", "cede_qs", "cede_xs")
+    # so the front-end doesn't need to recompute argmax. ACTIONS is sourced
+    # from optimize_portfolio.py so the schema stays in lock-step with the
+    # MILP definition (Task P2.8: 11 actions = retain + 7-bucket rate grid +
+    # non_renew + cede_qs + cede_xs).
     cohort_by_id = {c["id"]: c for c in cohorts}
     enriched_actions = []
     action_summary = {a: {"count": 0, "tiv": 0.0} for a in ACTIONS}
@@ -329,10 +335,25 @@ def main() -> None:
         #       The server component must strip this field before passing
         #       data to the client so we don't ship MBs of scenarios over
         #       the wire (see `app/portfolio/page.tsx`).
-        # Holders of v1/v2 artifacts must re-run
+        #   4 — Task P2.8 (Phase 2): the action set expanded from 6 to 11.
+        #       The two reprice scalars (`reprice_up=1.15`, `reprice_down=
+        #       0.90`) are gone; in their place is a discretized rate
+        #       grid {`reprice_n20, reprice_n10, reprice_0, reprice_p5,
+        #       reprice_p10, reprice_p15, reprice_p20`} priced with a
+        #       price-elasticity correction. Decision variables are now
+        #       binary; ``action_summary`` keys grew from 6 → 11, and
+        #       each action row now reports the new ``reprice_*`` shares
+        #       (typically exactly one at 1.0 under the MILP path).
+        #       Holders of v3 artifacts must re-run
+        #       `python -m scripts.precompute_portfolio_optimization`.
+        # Holders of v1/v2/v3 artifacts must re-run
         # `python -m scripts.precompute_portfolio_optimization` to refresh.
-        "schema_version": 3,
+        "schema_version": 4,
         "status": result["status"],
+        # P2.8: surface which solver path produced this artifact (milp vs
+        # lp_relaxed_rounded). UI consumers can render a footnote if the
+        # fallback engaged.
+        "solver_mode": result.get("solver_mode", "milp"),
         "objective": result["objective"],
         "horizon_start": result["horizon_start"],
         "horizon_end": result["horizon_end"],
