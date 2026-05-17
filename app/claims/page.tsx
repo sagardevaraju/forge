@@ -13,6 +13,8 @@
  */
 import { db } from '@/lib/db/client';
 import { ClaimsTable, type PreflagPolicy } from '@/components/ClaimsTable';
+import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
+import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,11 +71,21 @@ export default async function ClaimsPage() {
 
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Claims Pre-Brief</h1>
-      <p className="text-sm text-zinc-600 mb-4">
-        {policies.length} policies pre-flagged inside the demo storm cone
+      <div className="flex items-center gap-2 mb-4">
+        <h1 className="text-2xl font-bold">Claims Pre-Brief</h1>
+        <TrustTierBadge tier="SYNTHETIC_SCAFFOLD" />
+      </div>
+      <p className="text-sm text-zinc-600 mb-2">
+        {policies.length} policies pre-flagged inside the demo storm cone.
+        This view uses a deterministic heuristic (severity tier × TIV) — the
+        production path swaps cohort-level loss_p50 in Phase 2.
       </p>
       <ClaimsTable policies={policies} />
+      <ProvenanceFootnote
+        source="policies table (synthetic seed) filtered by FL coastal ZIP3 × {AE, VE}"
+        method="app/claims/page.tsx severityFor + LOSS_FACTOR heuristic"
+        confidence="not calibrated — Phase 2 swap to cohort loss_p50"
+      />
     </div>
   );
 }
