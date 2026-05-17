@@ -22,6 +22,7 @@ import type { ChatRequest } from '@/lib/llm/types';
 import { TOOLS, TOOL_MAP } from '@/lib/llm/tool-registry';
 import { MAX_TOOL_ITERATIONS } from '@/lib/chat-stream';
 import { getLlmFactory } from './_llm-factory';
+import { getAuditSink } from './_audit-factory';
 
 function shortHash(value: unknown): string {
   const serialized = JSON.stringify(value);
@@ -99,6 +100,7 @@ export async function POST(req: Request) {
   }
 
   const llm = getLlmFactory()();
+  const auditSink = getAuditSink();
   const toolsSchema = TOOLS.map((t) => ({
     type: 'function' as const,
     function: { name: t.name, description: t.description, parameters: t.parameters },
@@ -108,6 +110,17 @@ export async function POST(req: Request) {
     { role: 'system', content: SYSTEM_PROMPT },
     ...(body.messages as ChatRequest['messages']),
   ];
+
+  // Task P2.36 — content-addressed audit log. We capture the LAST user
+  // message as the prompt, accumulate the (name + args) of each tool call
+  // that the LLM dispatches, and the final assistant text. Tool RESULTS are
+  // intentionally NOT audited (size + potential PII).
+  const userMessages = (body.messages as ChatRequest['messages']).filter(
+    (m) => m.role === 'user',
+  );
+  const lastUser = userMessages[userMessages.length - 1];
+  const auditPrompt = typeof lastUser?.content === 'string' ? lastUser.content : '';
+  const auditToolCalls: Array<{ name: string; args: unknown }> = [];
 
   const stream = ndjsonStream(async (controller) => {
     const writeEvent = (controller as unknown as {
@@ -119,7 +132,21 @@ export async function POST(req: Request) {
     for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
       const resp = await llm.chat({ messages: convo, tools: toolsSchema });
       if (!resp.tool_calls?.length) {
-        writeEvent({ type: 'final', text: resp.content ?? '', citations });
+        const finalText = resp.content ?? '';
+        writeEvent({ type: 'final', text: finalText, citations });
+        // Audit write is fire-and-forget — never block the stream on DB I/O,
+        // never fail the request if the audit insert fails. Errors are logged
+        // to stderr so they surface in Vercel function logs without leaking
+        // through to the client.
+        auditSink({
+          user_id: 'demo_user',
+          prompt: auditPrompt,
+          tool_calls: auditToolCalls,
+          final: finalText,
+        }).catch((e: unknown) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error('[chat-audit] insert failed:', msg);
+        });
         return;
       }
 
@@ -153,6 +180,8 @@ export async function POST(req: Request) {
           arguments: tc.arguments,
           iteration: i + 1,
         });
+        // Capture for the audit log (name + args only, NOT results).
+        auditToolCalls.push({ name: tc.name, args: tc.arguments });
         const tool = TOOL_MAP[tc.name];
         let result: unknown;
         let ok = true;

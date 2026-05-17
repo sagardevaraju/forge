@@ -51,3 +51,21 @@ CREATE TABLE IF NOT EXISTS pins (
 );
 CREATE INDEX IF NOT EXISTS idx_pins_operator ON pins(operator);
 CREATE INDEX IF NOT EXISTS idx_pins_ts ON pins(ts);
+
+-- Task P2.36 — Content-addressed audit log for chat turns.
+-- Each row is keyed by SHA-256(prompt_hash + tool_calls_json + final_hash),
+-- so inserting the same turn twice is idempotent (UPSERT semantics via
+-- ON CONFLICT DO NOTHING). We store hashes of the prompt and final assistant
+-- text plus canonical-JSON of the tool-call sequence (name + args, NOT
+-- results) so the table size stays bounded and no sensitive tool-result
+-- content lands in the audit. WORM enforcement / retention / UI are P3.
+CREATE TABLE IF NOT EXISTS chat_audit (
+  id TEXT PRIMARY KEY,
+  ts TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  prompt_hash TEXT NOT NULL,
+  tool_calls_json TEXT NOT NULL,
+  final_hash TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_audit_ts ON chat_audit(ts);
+CREATE INDEX IF NOT EXISTS idx_chat_audit_user_id ON chat_audit(user_id);
