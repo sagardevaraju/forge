@@ -1,6 +1,6 @@
 {
   "functions": {
-    "app/api/agent/chat/route.ts": { "runtime": "edge" },
+    "app/api/agent/chat/route.ts": { "runtime": "nodejs" },
     "api_py/*.py": { "runtime": "python3.12" }
   },
   "crons": [{ "path": "/api/cron/refresh", "schedule": "*/15 * * * *" }]
