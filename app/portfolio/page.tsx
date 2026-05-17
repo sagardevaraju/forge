@@ -19,12 +19,19 @@
  * delta vs the original solve. The server component still loads the initial
  * artifact; the shell owns the interactive state.
  *
+ * Task P2.15 (Phase 2): a `PortfolioPareto` panel below the map renders a
+ * 3×3 grid solve on (capital_budget, cession_budget) at multipliers
+ * [0.7×, 1.0×, 1.5×] of the baseline. Hidden behind a toggle; on toggle the
+ * client fires 9 parallel POSTs to `/api/optimize/portfolio` and renders
+ * the efficient-frontier cells with their achieved objectives.
+ *
  * Refresh the optimization with `python -m scripts.precompute_portfolio_optimization`.
  */
 import { aggregateCohorts } from '@/lib/db/cohorts';
 import { loadPortfolioOptimization } from '@/lib/db/portfolio_optimization';
 import { PortfolioMap } from '@/components/PortfolioMap';
 import { PortfolioWhatIfShell } from '@/components/PortfolioWhatIfShell';
+import { PortfolioPareto } from '@/components/PortfolioPareto';
 import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
 
 export const dynamic = 'force-dynamic';
@@ -65,6 +72,14 @@ export default async function PortfolioPage() {
       <div className="h-[60vh] border rounded">
         <PortfolioMap cohorts={cohorts} optimization={optimization} />
       </div>
+      {optimization && (
+        <div className="mt-4">
+          <PortfolioPareto
+            baselineOptimization={optimization}
+            totalTiv={totalTiv}
+          />
+        </div>
+      )}
       <ProvenanceFootnote
         source="policies table (synthetic seed via scripts/seed_policy_book.py)"
         method="lib/db/cohorts::aggregateCohorts + api_py/optimize_portfolio::solve"
