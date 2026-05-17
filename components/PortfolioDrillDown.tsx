@@ -1,7 +1,10 @@
 'use client';
 /**
  * Drilldown panel for a single ZIP3 within the Portfolio Map. (Task 13 adds
- * the Property-features sub-section + unmodeled-dim transparency footnote.)
+ * the Property-features sub-section + unmodeled-dim transparency footnote;
+ * Task 17 wires hover-to-source attribution onto the action fractions so
+ * reviewers can see the economic coefficients and the Python source line
+ * that owns them.)
  *
  * Shows the cohorts inside the clicked ZIP3 along with the MIP-recommended
  * action mix per cohort. Dominant action is the row badge; minor fractions
@@ -21,6 +24,7 @@ import {
   ACTION_COLORS,
 } from '@/lib/portfolio-actions';
 import { renderRecommendation } from '@/lib/portfolio/narrative';
+import { ECONOMICS_TABLE } from '@/lib/portfolio/economics';
 
 interface Props {
   zip3: string;
@@ -70,6 +74,26 @@ function averageCvFeatures(cohorts: Cohort[]): CvFeatures | null {
   return acc;
 }
 
+/**
+ * Hover-to-source tooltip (Task 17). Renders one line per economic term —
+ * premium × REPRICE, loss × LOSS_FACTOR, cession cost — followed by the
+ * Python source line and the Phase-2 replacement note. Plain-text only
+ * because the `title` attribute does not render HTML.
+ */
+function economicsTooltip(a: ActionName, fracPct?: string): string {
+  const row = ECONOMICS_TABLE[a];
+  const header = fracPct
+    ? `${ACTION_LABELS[a]} · ${fracPct}`
+    : ACTION_LABELS[a];
+  return [
+    header,
+    `premium ×${row.reprice.toFixed(2)}`,
+    `loss ×${row.loss.toFixed(2)}`,
+    `cession ${row.cession.toFixed(2)}`,
+    `source: ${row.source} — ${row.note}`,
+  ].join('\n');
+}
+
 function ActionSplitBar({ action }: { action: OptimizedAction }) {
   const segments = ACTIONS.map((a) => ({ a, frac: action[a] })).filter(
     (s) => s.frac > 0.005,
@@ -95,7 +119,7 @@ function ActionSplitBar({ action }: { action: OptimizedAction }) {
             flexGrow: s.frac,
             background: ACTION_COLORS[s.a],
           }}
-          title={`${ACTION_LABELS[s.a]}: ${(s.frac * 100).toFixed(0)}%`}
+          title={economicsTooltip(s.a, `${(s.frac * 100).toFixed(0)}%`)}
         />
       ))}
     </div>
@@ -174,7 +198,13 @@ export function PortfolioDrillDown({ zip3, cohorts, actionByCohort, onClose }: P
                 <td style={{ padding: 4, minWidth: 150 }}>
                   {a ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'help' }}
+                        title={economicsTooltip(
+                          a.dominant_action,
+                          `${(a.dominant_share * 100).toFixed(0)}%`,
+                        )}
+                      >
                         <span
                           aria-hidden
                           style={{
