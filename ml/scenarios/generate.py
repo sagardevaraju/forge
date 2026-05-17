@@ -31,6 +31,7 @@ parameter that needs to change.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Iterable
 
 import numpy as np
@@ -183,6 +184,7 @@ def generate_scenarios(
     regime: dict | None = None,
     correlation: dict | None = None,
     importance_buckets: list[dict] | None = None,
+    hurdat2_path: Path | None = None,
 ) -> list[dict]:
     """Generate ``n`` Monte-Carlo scenarios for ``storm_id``.
 
@@ -220,6 +222,16 @@ def generate_scenarios(
         metadata so IS-corrected TVaR computations (P2.6 / P2.7) can
         apply the ``p_bucket / n_per_bucket`` Horvitz-Thompson factor at
         evaluation time.  The actual perturbation math is unchanged.
+    hurdat2_path:
+        Optional path to the HURDAT2 parquet cache (typically
+        ``artifacts/hurdat2/best_track.parquet``).  Task P2.10 plumbing —
+        accepted as a kwarg so downstream consumers can wire a
+        HURDAT2-anchored log-likelihood without changing this function's
+        signature.  The Phase-1 (state, peak-wind bucket) log-lik
+        consumer was never wired upstream of this function, so P2.10
+        only plumbs the kwarg through; replacing the log-lik is a
+        follow-up that must coordinate with P2.6 / P2.7 IS-corrected
+        TVaR consumers.
 
     Returns
     -------
@@ -228,6 +240,11 @@ def generate_scenarios(
     """
     if n <= 0:
         return []
+
+    # P2.10 plumbing — kwarg accepted but no consumer is wired here yet.
+    # The HURDAT2-anchored log-lik replacement coordinates with P2.6 /
+    # P2.7 IS-corrected TVaR; see ml/scenarios/hurdat2.py.
+    _ = hurdat2_path
 
     track = seed_track if seed_track is not None else _DEMO_TRACK_FL
     if len(track) < 2:
