@@ -40,7 +40,14 @@ function cohort(over: Partial<Cohort>): Cohort {
     policy_count: 5,
     total_tiv: 1_000_000,
     total_premium: 25_000,
-    avg_cv_features: new Array(8).fill(0),
+    // Task 13 — typed CvFeatures (5 modeled dims; 3 unmodeled dropped).
+    avg_cv_features: {
+      vegetation_density: { value: 0, modeled: true },
+      fuel_proximity: { value: 0, modeled: true },
+      water_proximity: { value: 0, modeled: true },
+      elevation_bucket: { value: 0, modeled: true },
+      structure_density: { value: 0, modeled: true },
+    },
     modal_flood_zone: 'X',
     avg_elevation_m: 3,
     ...over,

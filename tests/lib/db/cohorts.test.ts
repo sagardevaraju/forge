@@ -16,12 +16,22 @@ describe('aggregateCohorts', () => {
     expect(Math.round(totalTiv)).toBeGreaterThan(2_000_000_000); // ~$3B book
   });
 
-  test('every cohort has 8-dim avg_cv_features', async () => {
+  test('every cohort has the 5 modeled CV dims in [0, 1]', async () => {
     const cohorts = await aggregateCohorts();
+    const modeledDims = [
+      'vegetation_density',
+      'fuel_proximity',
+      'water_proximity',
+      'elevation_bucket',
+      'structure_density',
+    ] as const;
     for (const c of cohorts) {
-      expect(c.avg_cv_features).toHaveLength(8);
-      for (const f of c.avg_cv_features) expect(f).toBeGreaterThanOrEqual(0);
-      for (const f of c.avg_cv_features) expect(f).toBeLessThanOrEqual(1);
+      for (const dim of modeledDims) {
+        const f = c.avg_cv_features[dim];
+        expect(f.value).toBeGreaterThanOrEqual(0);
+        expect(f.value).toBeLessThanOrEqual(1);
+        expect(f.modeled).toBe(true);
+      }
     }
   });
 
@@ -35,6 +45,18 @@ describe('aggregateCohorts', () => {
     for (const c of cohorts) {
       expect(c.id).toMatch(/_q[0-4]$/);
       expect(c.id).not.toMatch(/_d[0-4]$/);
+    }
+  });
+
+  test('cv_features carries named dims with unmodeled flags', async () => {
+    const cohorts = await aggregateCohorts();
+    const c = cohorts[0];
+    expect(c.avg_cv_features.vegetation_density.value).toBeTypeOf('number');
+    expect(c.avg_cv_features.vegetation_density.modeled).toBe(true);
+    // Three dims are unmodeled in Phase 1:
+    for (const dim of ['imperviousness', 'roof_complexity', 'tree_overhang']) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((c.avg_cv_features as any)[dim]).toBeUndefined(); // or modeled === false
     }
   });
 });

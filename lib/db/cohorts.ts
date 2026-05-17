@@ -1,5 +1,5 @@
 /**
- * Task 15 — Cohort aggregation.
+ * Task 15 — Cohort aggregation. (Task 13 — typed CvFeatures.)
  *
  * Groups the ~10k policies in the local book into cohorts defined by
  * (zip3, build_type, TIV quintile). Each cohort carries the aggregates the
@@ -21,11 +21,78 @@
  *   the book is small (~2MB), so we pull all rows into memory and compute
  *   bucket cutpoints + groupings in JS. This keeps the code portable and is
  *   measurably faster than firing 10k single-row queries.
- * - `cv_features` is stored as a JSON string and averaged element-wise.
+ * - `cv_features` on the row is a JSON string of 8 floats emitted by the
+ *   CV head (see `ml/cv/inference.py`). We average element-wise but ONLY
+ *   surface the 5 modeled dims (indices 0, 2, 4, 5, 7). Phase 1 ships with
+ *   3 dims (`imperviousness` @ idx 1, `roof_complexity` @ idx 3,
+ *   `tree_overhang` @ idx 6) that have no real label signal — they are
+ *   dropped here and re-introduced under Phase 2 / Task P2.37 once NLCD +
+ *   OSM weak labels are wired in. `CvFeatures` is a typed object (not a
+ *   raw `number[]`) so consumers can't accidentally render an unmodeled
+ *   dim as if it were real.
  * - `flood_zone` is aggregated as the mode (most frequent value in the
  *   cohort). Ties are broken by lexical order, which is deterministic.
  */
 import { db } from './client';
+
+/**
+ * A single modeled CV-head dimension with its cohort-averaged value.
+ *
+ * `modeled: true` is a phantom flag: consumers must not pattern-match on
+ * `modeled === false`, since unmodeled dims are dropped entirely from the
+ * object rather than being carried as null. The flag exists so the JSON
+ * shape stays self-describing for the agent tools + drill-down UI.
+ */
+export interface CvFeatureValue {
+  value: number;
+  modeled: true;
+}
+
+/**
+ * Cohort-averaged CV features, restricted to the 5 dims with real label
+ * signal in Phase 1.
+ *
+ * Index → name mapping (matches `ml/cv/inference.py`):
+ *
+ *   0  vegetation_density   modeled    (NDVI mean)
+ *   1  imperviousness       UNMODELED  — dropped in Phase 1
+ *   2  fuel_proximity       modeled    (SWIR mean)
+ *   3  roof_complexity      UNMODELED  — dropped in Phase 1
+ *   4  water_proximity      modeled    (NDWI mean)
+ *   5  elevation_bucket     modeled    (chip-hash bucket 0..4 / 4)
+ *   6  tree_overhang        UNMODELED  — dropped in Phase 1
+ *   7  structure_density    modeled    (Sobel edge density on NIR)
+ *
+ * The three unmodeled dims (idx 1, 3, 6) are re-introduced in Phase 2 via
+ * Task P2.37 (NLCD + OSM weak-label retraining).
+ */
+export interface CvFeatures {
+  vegetation_density: CvFeatureValue;
+  fuel_proximity: CvFeatureValue;
+  water_proximity: CvFeatureValue;
+  elevation_bucket: CvFeatureValue;
+  structure_density: CvFeatureValue;
+}
+
+/**
+ * Position of each modeled dim inside the raw 8-float `cv_features` JSON
+ * vector emitted by the CV head. Single source of truth — keep in sync with
+ * `ml/cv/inference.py::predict_chip_mock`.
+ */
+const MODELED_DIM_INDEX = {
+  vegetation_density: 0,
+  fuel_proximity: 2,
+  water_proximity: 4,
+  elevation_bucket: 5,
+  structure_density: 7,
+} as const;
+
+/** Names of the unmodeled dims (idx 1, 3, 6) for UI/agent transparency. */
+export const UNMODELED_CV_DIMS: readonly string[] = Object.freeze([
+  'imperviousness',
+  'roof_complexity',
+  'tree_overhang',
+]);
 
 export interface Cohort {
   id: string; // e.g., "330_wood_frame_q3"
@@ -35,7 +102,7 @@ export interface Cohort {
   policy_count: number;
   total_tiv: number;
   total_premium: number;
-  avg_cv_features: number[]; // 8 dims
+  avg_cv_features: CvFeatures; // 5 modeled dims; 3 unmodeled dropped (Task 13)
   modal_flood_zone: string;
   avg_elevation_m: number;
 }
@@ -177,10 +244,36 @@ export async function aggregateCohorts(): Promise<Cohort[]> {
   // 3. Materialize Cohort objects.
   const out: Cohort[] = [];
   for (const [key, b] of buckets) {
-    const avg_cv_features =
+    // Average the raw 8-float vector element-wise, then project only the
+    // modeled positions into the typed CvFeatures object. The three
+    // unmodeled positions (1, 3, 6) are intentionally dropped — they
+    // carry no real label signal until Phase 2 / Task P2.37.
+    const avgRaw =
       b.cv_n > 0
         ? b.cv_sum.map((s) => s / b.cv_n)
         : new Array<number>(8).fill(0);
+    const avg_cv_features: CvFeatures = {
+      vegetation_density: {
+        value: avgRaw[MODELED_DIM_INDEX.vegetation_density],
+        modeled: true,
+      },
+      fuel_proximity: {
+        value: avgRaw[MODELED_DIM_INDEX.fuel_proximity],
+        modeled: true,
+      },
+      water_proximity: {
+        value: avgRaw[MODELED_DIM_INDEX.water_proximity],
+        modeled: true,
+      },
+      elevation_bucket: {
+        value: avgRaw[MODELED_DIM_INDEX.elevation_bucket],
+        modeled: true,
+      },
+      structure_density: {
+        value: avgRaw[MODELED_DIM_INDEX.structure_density],
+        modeled: true,
+      },
+    };
 
     let modal_flood_zone = '';
     let bestCount = -1;
