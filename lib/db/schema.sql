@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS policies (
   flood_zone TEXT,
   elevation_m REAL,
   premium_annual REAL,
-  cv_features TEXT  -- JSON: 8-dim risk vector
+  cv_features TEXT,  -- JSON: 8-dim risk vector
+  synthetic INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_policies_zip3 ON policies(zip3);
 

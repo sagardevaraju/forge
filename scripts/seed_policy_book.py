@@ -62,6 +62,8 @@ ZONE_MULT = {"X": 0.9, "A": 1.2, "AE": 1.4, "VE": 1.8}
 
 N_POLICIES = 10_000
 
+SCHEMA_PATH = Path(__file__).resolve().parent.parent / "lib" / "db" / "schema.sql"
+
 
 def weighted_choice(population, weights):
     """Pick one element from population using the given weights."""
@@ -108,26 +110,49 @@ def generate_policy():
         tiv, build_year, build_type, flood_zone,
         elevation_m, premium_annual,
         None,  # cv_features — populated by Task 9
+        1,  # synthetic — Task 15: tag demo data
     )
 
 
-def main():
-    conn = sqlite3.connect(DB_PATH)
+def _ensure_schema(conn: sqlite3.Connection) -> None:
+    """Apply schema.sql to an empty DB so seed() works on a fresh tmp path.
+
+    The TS migrate script (lib/db/migrate.ts) is the canonical migrator; this
+    helper mirrors its behaviour for Python callers (tests, ad-hoc seeding)
+    so seed() can target a brand-new sqlite file without depending on Node.
+    """
+    schema = SCHEMA_PATH.read_text()
+    stmts = [s.strip() for s in schema.split(";") if s.strip()]
+    cur = conn.cursor()
+    for stmt in stmts:
+        cur.execute(stmt)
+    conn.commit()
+
+
+def seed(db_path: str, n: int = N_POLICIES) -> None:
+    """Seed `n` deterministic synthetic policies into the sqlite file at `db_path`.
+
+    Idempotent: clears the policies table before inserting. Tagging is
+    `synthetic=1` for every row (Task 15) — the CSV upload path is the only
+    source of `synthetic=0` rows.
+    """
+    conn = sqlite3.connect(db_path)
+    _ensure_schema(conn)
     cur = conn.cursor()
 
     # Idempotency: truncate before seeding
     cur.execute("DELETE FROM policies")
-    print(f"Cleared existing policies. Inserting {N_POLICIES:,} new records...")
+    print(f"Cleared existing policies. Inserting {n:,} new records...")
 
-    rows = [generate_policy() for _ in range(N_POLICIES)]
+    rows = [generate_policy() for _ in range(n)]
 
     cur.executemany(
         """
         INSERT INTO policies
             (state, zip3, county, lat, lon,
              tiv, build_year, build_type, flood_zone,
-             elevation_m, premium_annual, cv_features)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             elevation_m, premium_annual, cv_features, synthetic)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         rows,
     )
@@ -142,9 +167,9 @@ def main():
             ROUND(SUM(premium_annual)) AS total_premium
         FROM policies
     """)
-    n, avg_tiv, total_premium = cur.fetchone()
-    print(f"\nVerification:")
-    print(f"  Total policies   : {n:,}")
+    total, avg_tiv, total_premium = cur.fetchone()
+    print("\nVerification:")
+    print(f"  Total policies   : {total:,}")
     print(f"  Avg TIV ($)      : {avg_tiv:,.0f}")
     print(f"  Total premium ($): {total_premium:,.0f}")
 
@@ -160,6 +185,10 @@ def main():
 
     conn.close()
     print("\nDone.")
+
+
+def main():
+    seed(str(DB_PATH), N_POLICIES)
 
 
 if __name__ == "__main__":

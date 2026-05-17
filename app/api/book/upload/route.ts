@@ -120,8 +120,8 @@ export async function POST(req: Request) {
         return {
           sql:
             'INSERT INTO policies (id, state, zip3, county, lat, lon, tiv, build_year, ' +
-            'build_type, flood_zone, elevation_m, premium_annual, cv_features) ' +
-            'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+            'build_type, flood_zone, elevation_m, premium_annual, cv_features, synthetic) ' +
+            'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
           args: [
             p.id,
             p.state,
@@ -136,6 +136,7 @@ export async function POST(req: Request) {
             p.elevation_m,
             p.premium_annual,
             cv,
+            0, // Task 15: CSV-uploaded rows are real, not synthetic
           ],
         };
       });
