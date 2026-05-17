@@ -20,7 +20,7 @@ The codebase is a **single Next.js 16 monorepo** that mixes runtimes on Vercel:
 
 ## Cohorts
 
-`aggregateCohorts()` (`lib/db/cohorts.ts`) is the canonical TS implementation; `eval/end_to_end.py` ships a Python re-implementation. **Both must stay in sync** — same key (`{zip3}_{build_type}_d{0..4}`), same quintile cut-points (computed over the entire book, not per-state), same modal-flood-zone tie-break (lexical order). The field name `tiv_decile` is historical; the value range is actually `0..4` (quintile bucket).
+`aggregateCohorts()` (`lib/db/cohorts.ts`) is the canonical TS implementation; `eval/end_to_end.py` ships a Python re-implementation. **Both must stay in sync** — same key (`{zip3}_{build_type}_q{0..4}`), same quintile cut-points (computed over the entire book, not per-state), same modal-flood-zone tie-break (lexical order). The cohort field is `tiv_quintile` (Task 12 renamed it from the historical `tiv_decile`); the value range is `0..4`.
 
 ## Portfolio MIP
 
@@ -66,7 +66,7 @@ Every commit in the original plan tags a `Task N` from `docs/superpowers/plans/2
 - Don't move secrets into client components — even `NEXT_PUBLIC_*` is over-exposed for the LLM keys.
 - Don't add a new Python runtime version. Vercel pins `python3.12` in `vercel.json` and every script is tested against it.
 - Don't add `pnpm` / `bun` / `yarn` lockfiles. The project commits `package-lock.json` only.
-- Don't break the cohort key format (`{zip3}_{build_type}_d{N}`) — it's a join key between TS and Python.
+- Don't break the cohort key format (`{zip3}_{build_type}_q{N}`) — it's a join key between TS and Python.
 
 ## Where things live
 

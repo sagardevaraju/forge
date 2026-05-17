@@ -33,10 +33,10 @@ import { PortfolioDrillDown } from '@/components/PortfolioDrillDown';
 
 function cohort(over: Partial<Cohort>): Cohort {
   return {
-    id: '330_wood_frame_d0',
+    id: '330_wood_frame_q0',
     zip3: '330',
     build_type: 'wood_frame',
-    tiv_decile: 0,
+    tiv_quintile: 0,
     policy_count: 5,
     total_tiv: 1_000_000,
     total_premium: 25_000,
@@ -56,9 +56,9 @@ afterEach(() => {
 describe('PortfolioMap', () => {
   test('renders aggregate stats in the legend', () => {
     const cohorts: Cohort[] = [
-      cohort({ id: '330_wood_frame_d0', zip3: '330', total_tiv: 1_000_000, policy_count: 5 }),
-      cohort({ id: '330_masonry_d1', zip3: '330', total_tiv: 500_000, policy_count: 3 }),
-      cohort({ id: '770_wood_frame_d2', zip3: '770', total_tiv: 2_500_000, policy_count: 10 }),
+      cohort({ id: '330_wood_frame_q0', zip3: '330', total_tiv: 1_000_000, policy_count: 5 }),
+      cohort({ id: '330_masonry_q1', zip3: '330', total_tiv: 500_000, policy_count: 3 }),
+      cohort({ id: '770_wood_frame_q2', zip3: '770', total_tiv: 2_500_000, policy_count: 10 }),
     ];
     render(<PortfolioMap cohorts={cohorts} />);
 
@@ -82,8 +82,8 @@ describe('PortfolioMap', () => {
 describe('PortfolioDrillDown', () => {
   test('renders cohorts for the selected ZIP3', () => {
     const cohorts: Cohort[] = [
-      cohort({ id: '330_wood_frame_d0', zip3: '330', policy_count: 7, total_tiv: 3_500_000 }),
-      cohort({ id: '330_masonry_d2', zip3: '330', policy_count: 4, total_tiv: 1_200_000 }),
+      cohort({ id: '330_wood_frame_q0', zip3: '330', policy_count: 7, total_tiv: 3_500_000 }),
+      cohort({ id: '330_masonry_q2', zip3: '330', policy_count: 4, total_tiv: 1_200_000 }),
     ];
     render(<PortfolioDrillDown zip3="330" cohorts={cohorts} onClose={() => {}} />);
 
@@ -91,7 +91,7 @@ describe('PortfolioDrillDown', () => {
     // 7 + 4 = 11 policies in the selected ZIP3.
     expect(screen.getByText('Policies: 11')).toBeInTheDocument();
     // Each cohort id should appear in the table.
-    expect(screen.getByText('330_wood_frame_d0')).toBeInTheDocument();
-    expect(screen.getByText('330_masonry_d2')).toBeInTheDocument();
+    expect(screen.getByText('330_wood_frame_q0')).toBeInTheDocument();
+    expect(screen.getByText('330_masonry_q2')).toBeInTheDocument();
   });
 });

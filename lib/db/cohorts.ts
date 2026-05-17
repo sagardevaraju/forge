@@ -2,21 +2,21 @@
  * Task 15 — Cohort aggregation.
  *
  * Groups the ~10k policies in the local book into cohorts defined by
- * (zip3, build_type, TIV decile). Each cohort carries the aggregates the
+ * (zip3, build_type, TIV quintile). Each cohort carries the aggregates the
  * Portfolio MIP (Task 16) needs to make a portfolio-level decision without
  * having to solve over 10k decision variables.
  *
  * Implementation notes
  * --------------------
- * - TIV decile buckets are computed once across the entire book (not per
- *   zip3 or per build_type), so a "decile 4" cohort always means "top
+ * - TIV quintile buckets are computed once across the entire book (not per
+ *   zip3 or per build_type), so a "quintile 4" cohort always means "top
  *   ~20% of TIV in the book", regardless of which zip3 it sits in.
  * - We use 5 TIV buckets (quintiles, labeled 0..4) rather than 10 (deciles
  *   labeled 0..9). With 38 zip3s × 3 build_types × 10 deciles the cohort
  *   count balloons past 1000, which blows the spec-stated 60s Vercel MIP
  *   budget. Quintiles land us in the 200-500 range called for in Task 15.
- *   The field name remains `tiv_decile` for downstream-API stability; the
- *   value range is 0..4 (the "decile" label is bucket-index by convention).
+ *   See `docs/cohort-card.md` for the cohort-id contract that downstream
+ *   consumers (Portfolio MIP, Decision Reconciler, eval pipeline) join on.
  * - SQLite (libsql) doesn't ship NTILE on older builds we may target, and
  *   the book is small (~2MB), so we pull all rows into memory and compute
  *   bucket cutpoints + groupings in JS. This keeps the code portable and is
@@ -28,10 +28,10 @@
 import { db } from './client';
 
 export interface Cohort {
-  id: string; // e.g., "330_wood_frame_d3"
+  id: string; // e.g., "330_wood_frame_q3"
   zip3: string;
   build_type: string;
-  tiv_decile: number; // 0..4 (quintile-style TIV bucket)
+  tiv_quintile: number; // 0..4 (TIV quintile bucket)
   policy_count: number;
   total_tiv: number;
   total_premium: number;
@@ -111,7 +111,7 @@ export async function aggregateCohorts(): Promise<Cohort[]> {
   interface Bucket {
     zip3: string;
     build_type: string;
-    tiv_decile: number;
+    tiv_quintile: number;
     policy_count: number;
     total_tiv: number;
     total_premium: number;
@@ -124,14 +124,14 @@ export async function aggregateCohorts(): Promise<Cohort[]> {
   const buckets = new Map<string, Bucket>();
 
   for (const row of rows) {
-    const decile = tivBin(row.tiv, cuts);
-    const key = `${row.zip3}_${row.build_type}_d${decile}`;
+    const quintile = tivBin(row.tiv, cuts);
+    const key = `${row.zip3}_${row.build_type}_q${quintile}`;
     let b = buckets.get(key);
     if (!b) {
       b = {
         zip3: row.zip3,
         build_type: row.build_type,
-        tiv_decile: decile,
+        tiv_quintile: quintile,
         policy_count: 0,
         total_tiv: 0,
         total_premium: 0,
@@ -200,7 +200,7 @@ export async function aggregateCohorts(): Promise<Cohort[]> {
       id: key,
       zip3: b.zip3,
       build_type: b.build_type,
-      tiv_decile: b.tiv_decile,
+      tiv_quintile: b.tiv_quintile,
       policy_count: b.policy_count,
       total_tiv: b.total_tiv,
       total_premium: b.total_premium,

@@ -27,7 +27,7 @@ export interface OptimizedCohort {
   id: string;
   zip3: string;
   build_type: string;
-  tiv_decile: number;
+  tiv_quintile: number;
   policy_count: number;
   total_tiv: number;
   total_premium: number;

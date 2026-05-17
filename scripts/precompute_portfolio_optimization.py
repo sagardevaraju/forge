@@ -32,7 +32,7 @@ from api_py.optimize_portfolio import solve  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # HAZUS-derived annual loss prior. Values calibrated so that the worst
-# cohorts (manufactured + VE flood zone, top-decile TIV) carry ~4-5% annual
+# cohorts (manufactured + VE flood zone, top-quintile TIV) carry ~4-5% annual
 # expected loss ratios, matching FL coastal book benchmarks.
 # ---------------------------------------------------------------------------
 FLOOD_ZONE_SEVERITY: dict[str, float] = {
@@ -105,15 +105,15 @@ def _aggregate_cohorts_from_sqlite(db_path: Path) -> list[dict]:
     for r in rows:
         zip3 = str(r["zip3"])
         bt = str(r["build_type"])
-        decile = bucket(float(r["tiv"]))
-        key = f"{zip3}_{bt}_d{decile}"
+        quintile = bucket(float(r["tiv"]))
+        key = f"{zip3}_{bt}_q{quintile}"
         b = buckets.setdefault(
             key,
             {
                 "id": key,
                 "zip3": zip3,
                 "build_type": bt,
-                "tiv_decile": decile,
+                "tiv_quintile": quintile,
                 "policy_count": 0,
                 "total_tiv": 0.0,
                 "total_premium": 0.0,
@@ -150,7 +150,7 @@ def _aggregate_cohorts_from_sqlite(db_path: Path) -> list[dict]:
                 "id": b["id"],
                 "zip3": b["zip3"],
                 "build_type": b["build_type"],
-                "tiv_decile": b["tiv_decile"],
+                "tiv_quintile": b["tiv_quintile"],
                 "policy_count": b["policy_count"],
                 "total_tiv": b["total_tiv"],
                 "total_premium": b["total_premium"],
@@ -216,6 +216,11 @@ def main() -> None:
     artifacts_dir.mkdir(exist_ok=True)
     out_path = artifacts_dir / "portfolio_optimization.json"
     payload = {
+        # schema_version 2 (Task 12): cohort ids switched from `{zip3}_{build_type}_d{N}`
+        # to `{zip3}_{build_type}_q{N}` and the cohort field `tiv_decile` was
+        # renamed to `tiv_quintile`. Holders of v1 artifacts must re-run
+        # `python -m scripts.precompute_portfolio_optimization` to refresh.
+        "schema_version": 2,
         "status": result["status"],
         "objective": result["objective"],
         "budgets": {

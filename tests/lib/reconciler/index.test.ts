@@ -8,7 +8,7 @@ describe('reconcile', () => {
       portfolio: {
         actions: [
           {
-            cohort_id: '330_wood_frame_d3',
+            cohort_id: '330_wood_frame_q3',
             retain: 0.05,
             non_renew: 0.9,
             reprice_up: 0.05,
@@ -21,7 +21,7 @@ describe('reconcile', () => {
       preflagged: [
         {
           policy_id: 100,
-          cohort_id: '330_wood_frame_d3',
+          cohort_id: '330_wood_frame_q3',
           severity: 'high',
           expected_loss: 50000,
         },
@@ -36,7 +36,7 @@ describe('reconcile', () => {
       portfolio: {
         actions: [
           {
-            cohort_id: '330_wood_frame_d3',
+            cohort_id: '330_wood_frame_q3',
             retain: 0.7,
             non_renew: 0.1,
             reprice_up: 0.2,
@@ -49,7 +49,7 @@ describe('reconcile', () => {
       preflagged: [
         {
           policy_id: 100,
-          cohort_id: '330_wood_frame_d3',
+          cohort_id: '330_wood_frame_q3',
           severity: 'high',
           expected_loss: 50000,
         },

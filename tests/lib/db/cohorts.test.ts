@@ -29,4 +29,12 @@ describe('aggregateCohorts', () => {
     const cohorts = await aggregateCohorts();
     expect(cohorts.reduce((s, c) => s + c.policy_count, 0)).toBe(10000);
   });
+
+  test('cohort id uses _q{N} not _d{N}', async () => {
+    const cohorts = await aggregateCohorts();
+    for (const c of cohorts) {
+      expect(c.id).toMatch(/_q[0-4]$/);
+      expect(c.id).not.toMatch(/_d[0-4]$/);
+    }
+  });
 });
