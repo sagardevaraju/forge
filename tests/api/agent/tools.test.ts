@@ -226,7 +226,103 @@ describe('generate_scenarios', () => {
 });
 
 describe('draft_sitrep', () => {
-  test('returns mocked memo when no LLM key and no factory override', async () => {
+  // Task P2.24 — the tool now returns a StructuredSitrep (6 named fields)
+  // wrapped in { data_source, sitrep }. The handler's mock-fallback path
+  // (no LLM key) must still produce a valid StructuredSitrep so the UI
+  // never has to handle a half-shaped payload.
+
+  test('returns valid StructuredSitrep on happy path (mock LLM)', async () => {
+    process.env.OPENROUTER_API_KEY = 'test';
+    delete process.env.FORGE_TOOLS_MODE;
+    const goodPayload = {
+      threat_tier: 'high',
+      lead_time_hours: 36,
+      portfolio_recommendation:
+        'Cede QS on FL ZIP3 330–339; non-renew the bottom-decile cohorts.',
+      operational_recommendation:
+        'Stage 12 adjusters in Tampa, 8 in Miami, 6 in Jacksonville.',
+      claims_prep_recommendation:
+        'Pre-flag cohorts above 35% probability; open IVR overflow.',
+      escalation_criteria:
+        'Re-broadcast if peak wind > 140 mph or cone shifts >25 nm east.',
+    };
+    const fakeLlm = {
+      chat: vi
+        .fn()
+        .mockResolvedValue({ content: JSON.stringify(goodPayload) }),
+    };
+    __setDraftSitrepLlmFactory(() => fakeLlm);
+    try {
+      const out = await draftSitrep.handler({
+        threat_id: 'AL092024',
+        posture_summary: 'p',
+      });
+      expect(out.data_source).toBe('live');
+      expect(out.sitrep.threat_tier).toBe('high');
+      expect(out.sitrep.lead_time_hours).toBe(36);
+      expect(out.sitrep.portfolio_recommendation).toMatch(/Cede QS/);
+      expect(out.sitrep.operational_recommendation).toMatch(/adjusters/);
+      expect(out.sitrep.claims_prep_recommendation).toMatch(/IVR/);
+      expect(out.sitrep.escalation_criteria).toMatch(/140 mph/);
+      expect(fakeLlm.chat).toHaveBeenCalledTimes(1);
+    } finally {
+      __resetDraftSitrepLlmFactory();
+    }
+  });
+
+  test('malformed LLM output falls back to synthetic with data_source=synthetic_fallback', async () => {
+    process.env.OPENROUTER_API_KEY = 'test';
+    delete process.env.FORGE_TOOLS_MODE;
+    // LLM returns prose, not JSON ⇒ validator rejects ⇒ stub falls in.
+    __setDraftSitrepLlmFactory(() => ({
+      chat: vi.fn().mockResolvedValue({
+        content: 'Sure, here is a memo as freeform markdown without JSON.',
+      }),
+    }));
+    try {
+      const out = await draftSitrep.handler({
+        threat_id: 'AL092024',
+        posture_summary: 'p',
+      });
+      expect(out.data_source).toBe('synthetic_fallback');
+      // The stub still satisfies the schema so the UI never crashes.
+      expect(['low', 'medium', 'high', 'critical']).toContain(out.sitrep.threat_tier);
+      expect(typeof out.sitrep.lead_time_hours).toBe('number');
+      expect(typeof out.sitrep.portfolio_recommendation).toBe('string');
+      expect(typeof out.sitrep.operational_recommendation).toBe('string');
+      expect(typeof out.sitrep.claims_prep_recommendation).toBe('string');
+      expect(typeof out.sitrep.escalation_criteria).toBe('string');
+    } finally {
+      __resetDraftSitrepLlmFactory();
+    }
+  });
+
+  test('tool registry shape — JSON-schema parameters describe the 6 fields', () => {
+    // The LLM uses these parameters to plan the call; the tool itself
+    // uses them as a documentation contract for what the LLM-emitted
+    // content should look like. We pin the names so a regression in
+    // the schema is caught at unit-test time.
+    expect(draftSitrep.parameters.type).toBe('object');
+    const props = draftSitrep.parameters.properties as Record<string, unknown>;
+    // Inputs: the tool still takes threat_id + posture_summary as args.
+    expect(props.threat_id).toBeDefined();
+    expect(props.posture_summary).toBeDefined();
+    // The description string MUST advertise the 6-field output shape so the
+    // LLM emits a JSON body with the right keys.
+    const desc = draftSitrep.description.toLowerCase();
+    for (const key of [
+      'threat_tier',
+      'lead_time_hours',
+      'portfolio_recommendation',
+      'operational_recommendation',
+      'claims_prep_recommendation',
+      'escalation_criteria',
+    ]) {
+      expect(desc).toContain(key);
+    }
+  });
+
+  test('returns synthetic_fallback when no LLM key and no factory override', async () => {
     delete process.env.OPENROUTER_API_KEY;
     delete process.env.GITHUB_MODELS_PAT;
     delete process.env.FORGE_TOOLS_MODE;
@@ -234,30 +330,11 @@ describe('draft_sitrep', () => {
       threat_id: 'AL092024',
       posture_summary: '5 ZIP3s in-cone; TIV $400M.',
     });
-    expect(out.memo_markdown).toMatch(/SITREP/);
-    expect(out.memo_markdown).toMatch(/AL092024/);
+    expect(out.data_source).toBe('synthetic_fallback');
+    expect(out.sitrep.portfolio_recommendation).toBeTruthy();
   });
 
-  test('uses the injected LLM factory when keys are set', async () => {
-    process.env.OPENROUTER_API_KEY = 'test';
-    delete process.env.FORGE_TOOLS_MODE;
-    const fakeLlm = {
-      chat: vi.fn().mockResolvedValue({ content: '# Drafted Memo\n\nbody' }),
-    };
-    __setDraftSitrepLlmFactory(() => fakeLlm);
-    try {
-      const out = await draftSitrep.handler({
-        threat_id: 'X',
-        posture_summary: 'y',
-      });
-      expect(out.memo_markdown).toContain('Drafted Memo');
-      expect(fakeLlm.chat).toHaveBeenCalledTimes(1);
-    } finally {
-      __resetDraftSitrepLlmFactory();
-    }
-  });
-
-  test('falls back to mock memo when injected LLM throws', async () => {
+  test('synthetic_fallback when injected LLM throws', async () => {
     process.env.OPENROUTER_API_KEY = 'test';
     delete process.env.FORGE_TOOLS_MODE;
     __setDraftSitrepLlmFactory(() => ({
@@ -268,7 +345,8 @@ describe('draft_sitrep', () => {
         threat_id: 'AL092024',
         posture_summary: 'p',
       });
-      expect(out.memo_markdown).toMatch(/SITREP/);
+      expect(out.data_source).toBe('synthetic_fallback');
+      expect(out.sitrep.threat_tier).toBeTruthy();
     } finally {
       __resetDraftSitrepLlmFactory();
     }
