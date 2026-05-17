@@ -6,7 +6,7 @@
  * without needing a real Mapbox instance.
  */
 import { describe, test, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { fireEvent, render, screen, cleanup, within } from '@testing-library/react';
 import type { Cohort } from '@/lib/db/cohorts';
 
 // Stub react-map-gl/maplibre so we render plain DOM nodes in jsdom. Each Map,
@@ -188,6 +188,105 @@ describe('PortfolioMap', () => {
     expect(
       swatches.some((s) => s.getAttribute('aria-label')?.toLowerCase().includes('retain')),
     ).toBe(true);
+  });
+
+  // Task P2.20 — single-pane is the default mount mode so the existing page
+  // render stays unchanged.
+  test('renders single-pane by default (one map shell)', () => {
+    const cohorts: Cohort[] = [
+      cohort({ id: '330_wood_frame_q0', zip3: '330', total_tiv: 3_500_000, policy_count: 5 }),
+      cohort({ id: '770_wood_frame_q2', zip3: '770', total_tiv: 500_000, policy_count: 10 }),
+    ];
+    render(<PortfolioMap cohorts={cohorts} optimization={makeOptimization()} />);
+    expect(screen.getAllByTestId('map-base-stub')).toHaveLength(1);
+    // The compare toggle button is present and labelled.
+    expect(
+      screen.getByRole('button', { name: /compare current vs recommended/i }),
+    ).toBeInTheDocument();
+  });
+
+  // Task P2.20 — clicking the compare toggle reveals the second pane.
+  test('toggle splits to dual-pane (two map shells, two pane regions)', () => {
+    const cohorts: Cohort[] = [
+      cohort({ id: '330_wood_frame_q0', zip3: '330', total_tiv: 3_500_000, policy_count: 5 }),
+      cohort({ id: '770_wood_frame_q2', zip3: '770', total_tiv: 500_000, policy_count: 10 }),
+    ];
+    render(<PortfolioMap cohorts={cohorts} optimization={makeOptimization()} />);
+    fireEvent.click(
+      screen.getByRole('button', { name: /compare current vs recommended/i }),
+    );
+    expect(screen.getAllByTestId('map-base-stub')).toHaveLength(2);
+    expect(screen.getByTestId('portfolio-pane-current')).toBeInTheDocument();
+    expect(screen.getByTestId('portfolio-pane-recommended')).toBeInTheDocument();
+  });
+
+  // Task P2.20 — hovering a cohort in the left pane sets shared state so the
+  // matching cohort in the right pane is flagged as hovered too.
+  test('hovering a cohort in the left pane highlights the same cohort in the right', () => {
+    const cohorts: Cohort[] = [
+      cohort({ id: '330_wood_frame_q0', zip3: '330', total_tiv: 3_500_000, policy_count: 5 }),
+      cohort({ id: '770_wood_frame_q2', zip3: '770', total_tiv: 500_000, policy_count: 10 }),
+    ];
+    render(<PortfolioMap cohorts={cohorts} optimization={makeOptimization()} />);
+    fireEvent.click(
+      screen.getByRole('button', { name: /compare current vs recommended/i }),
+    );
+
+    const currentPane = screen.getByTestId('portfolio-pane-current');
+    const recommendedPane = screen.getByTestId('portfolio-pane-recommended');
+
+    // Find the keyboard-list button for ZIP3 770 inside the current pane and
+    // fire mouseEnter on it. The same ZIP3 in the other pane should report
+    // `data-hovered="true"`.
+    const leftZip770 = within(currentPane).getByRole('button', {
+      name: /ZIP3 770/i,
+    });
+    fireEvent.mouseEnter(leftZip770);
+
+    const rightZip770 = within(recommendedPane).getByRole('button', {
+      name: /ZIP3 770/i,
+    });
+    expect(rightZip770.getAttribute('data-hovered')).toBe('true');
+
+    const rightZip330 = within(recommendedPane).getByRole('button', {
+      name: /ZIP3 330/i,
+    });
+    expect(rightZip330.getAttribute('data-hovered')).toBe('false');
+
+    // And the hover clears on mouseLeave.
+    fireEvent.mouseLeave(leftZip770);
+    expect(rightZip770.getAttribute('data-hovered')).toBe('false');
+  });
+
+  // Task P2.20 — the right pane uses the MIP dominant_action color; the left
+  // pane is the neutral "current" color (every cohort is retained today).
+  test('right pane colors cohorts by dominant_action; current pane does not', () => {
+    const cohorts: Cohort[] = [
+      cohort({ id: '330_wood_frame_q0', zip3: '330', total_tiv: 3_500_000, policy_count: 5 }),
+      cohort({ id: '770_wood_frame_q2', zip3: '770', total_tiv: 500_000, policy_count: 10 }),
+    ];
+    render(<PortfolioMap cohorts={cohorts} optimization={makeOptimization()} />);
+    fireEvent.click(
+      screen.getByRole('button', { name: /compare current vs recommended/i }),
+    );
+
+    const currentPane = screen.getByTestId('portfolio-pane-current');
+    const recommendedPane = screen.getByTestId('portfolio-pane-recommended');
+
+    // ZIP3 770 has dominant_action = reprice_up in the fixture; the recommended
+    // pane should color its row accordingly while the current pane stays in
+    // the neutral "retain" color.
+    const leftZip770 = within(currentPane).getByRole('button', {
+      name: /ZIP3 770/i,
+    });
+    const rightZip770 = within(recommendedPane).getByRole('button', {
+      name: /ZIP3 770/i,
+    });
+    expect(leftZip770.getAttribute('data-action')).toBe('retain');
+    expect(rightZip770.getAttribute('data-action')).toBe('reprice_up');
+    expect(leftZip770.getAttribute('data-color')).not.toBe(
+      rightZip770.getAttribute('data-color'),
+    );
   });
 });
 
