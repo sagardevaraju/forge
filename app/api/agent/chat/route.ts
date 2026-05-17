@@ -4,17 +4,31 @@
  * Returns a streaming NDJSON response so the client can show tool-call
  * progress in real time instead of staring at "Thinking…" for 30 seconds.
  * Each line is a JSON event of shape:
- *   {type:"tool_call",  name, arguments}    — LLM requested a tool
- *   {type:"tool_result",name, ok, summary}  — tool finished
- *   {type:"final",      text}               — final assistant content
- *   {type:"error",      message}            — fatal error mid-stream
+ *   {type:"tool_call",  name, arguments}                            — LLM requested a tool
+ *   {type:"tool_result",name, ok, summary, args_hash, result_hash}  — tool finished
+ *   {type:"final",      text, citations}                            — final assistant content
+ *   {type:"error",      message}                                    — fatal error mid-stream
+ *
+ * Task 21 — tool_result events now carry sha1-truncated hashes of the call
+ * arguments and the tool result. Those hashes accumulate into a `citations`
+ * array on the final event so the UI can render a "Sources: tool@hash"
+ * breadcrumb under each assistant message.
  *
  * Node runtime (NOT Edge) because @libsql/client touches the local
  * forge-local.db file in dev and the DB-backed tools need direct fs access.
  */
+import { createHash } from 'node:crypto';
 import type { ChatRequest } from '@/lib/llm/types';
 import { TOOLS, TOOL_MAP } from '@/lib/llm/tool-registry';
 import { getLlmFactory } from './_llm-factory';
+
+function shortHash(value: unknown): string {
+  const serialized = JSON.stringify(value);
+  return createHash('sha1')
+    .update(typeof serialized === 'string' ? serialized : 'null')
+    .digest('hex')
+    .slice(0, 8);
+}
 
 export const runtime = 'nodejs';
 
@@ -74,10 +88,12 @@ export async function POST(req: Request) {
       writeEvent: (obj: unknown) => void;
     }).writeEvent;
 
+    const citations: Array<{ tool: string; args_hash: string; result_hash: string }> = [];
+
     for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
       const resp = await llm.chat({ messages: convo, tools: toolsSchema });
       if (!resp.tool_calls?.length) {
-        writeEvent({ type: 'final', text: resp.content ?? '' });
+        writeEvent({ type: 'final', text: resp.content ?? '', citations });
         return;
       }
 
@@ -128,7 +144,17 @@ export async function POST(req: Request) {
         const summary = typeof result === 'object' && result !== null
           ? Object.keys(result as object).slice(0, 5).join(', ')
           : String(result).slice(0, 100);
-        writeEvent({ type: 'tool_result', name: tc.name, ok, summary });
+        const args_hash = shortHash(tc.arguments);
+        const result_hash = shortHash(result);
+        citations.push({ tool: tc.name, args_hash, result_hash });
+        writeEvent({
+          type: 'tool_result',
+          name: tc.name,
+          ok,
+          summary,
+          args_hash,
+          result_hash,
+        });
         convo.push({
           role: 'tool',
           tool_call_id: tc.id,

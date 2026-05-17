@@ -6,13 +6,18 @@
  * calls happen in real time instead of waiting in silence. Each `tool_call`
  * event becomes a "Calling X…" status line; each `tool_result` collapses
  * it; the `final` event becomes the assistant's reply.
+ *
+ * Task 21 — when the `final` event carries `citations`, render a
+ * "Sources: tool@hash" breadcrumb under the assistant message so analysts
+ * can trace which tool result each numeric claim came from.
  */
 import { useState } from 'react';
-import { readChatStream } from '@/lib/chat-stream';
+import { readChatStream, type Citation } from '@/lib/chat-stream';
 
 interface Msg {
   role: 'user' | 'assistant';
   content: string;
+  citations?: Citation[];
 }
 
 export function AgentChat() {
@@ -36,6 +41,7 @@ export function AgentChat() {
       if (!r.ok) throw new Error(`chat returned ${r.status}`);
 
       let final = '';
+      let citations: Citation[] | undefined;
       for await (const ev of readChatStream(r)) {
         if (ev.type === 'tool_call') {
           setStatusLine(`Calling ${ev.name}…`);
@@ -45,13 +51,18 @@ export function AgentChat() {
           );
         } else if (ev.type === 'final') {
           final = ev.text;
+          citations = ev.citations;
         } else if (ev.type === 'error') {
           throw new Error(ev.message);
         }
       }
       setMessages([
         ...next,
-        { role: 'assistant', content: final || '(empty response)' },
+        {
+          role: 'assistant',
+          content: final || '(empty response)',
+          citations,
+        },
       ]);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -83,6 +94,17 @@ export function AgentChat() {
               {m.role === 'user' ? 'You' : 'FORGE'}:{' '}
             </span>
             <span style={{ whiteSpace: 'pre-wrap' }}>{m.content}</span>
+            {m.role === 'assistant' && m.citations && m.citations.length > 0 && (
+              <div
+                className="text-[10px] text-zinc-500 mt-1"
+                data-testid="agent-citations"
+              >
+                Sources:{' '}
+                {m.citations
+                  .map((c) => `${c.tool}@${c.result_hash}`)
+                  .join(', ')}
+              </div>
+            )}
           </div>
         ))}
         {busy && statusLine && (

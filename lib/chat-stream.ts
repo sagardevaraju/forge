@@ -3,10 +3,19 @@
  * (tool_call, tool_result, final, error) so the AgentChat and Sitrep
  * panels can surface progress without re-implementing the line parser.
  */
+export type Citation = { tool: string; args_hash: string; result_hash: string };
+
 export type ChatEvent =
   | { type: 'tool_call'; name: string; arguments: unknown }
-  | { type: 'tool_result'; name: string; ok: boolean; summary: string }
-  | { type: 'final'; text: string }
+  | {
+      type: 'tool_result';
+      name: string;
+      ok: boolean;
+      summary: string;
+      args_hash?: string;
+      result_hash?: string;
+    }
+  | { type: 'final'; text: string; citations?: Citation[] }
   | { type: 'error'; message: string };
 
 export async function* readChatStream(
