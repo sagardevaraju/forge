@@ -1,12 +1,16 @@
 'use client';
 /**
  * Task 21 — Event Console UI.
+ * Task P2.21 — Cone-vs-outside book exposure mini-map.
  *
  * Two-column layout for the active-event view:
  *   - Left: Mapbox base layer with the NHC cone polygon and FIRMS active-fire
  *     point markers overlaid as separate GeoJSON sources. A small floating
  *     summary card shows the advisory number, peak wind, and fire count so
- *     operators get the headline numbers without scanning the map.
+ *     operators get the headline numbers without scanning the map. A second
+ *     floating panel (Task P2.21) ranks book exposure that falls inside the
+ *     cone vs outside, computed via point-in-polygon against ZIP3 cohort
+ *     centroids.
  *   - Right: a chat panel against `/api/agent/chat` plus a SITREP panel that
  *     drafts a memo via the same endpoint (the LLM picks `draft_sitrep`).
  *
@@ -19,15 +23,23 @@ import { Source, Layer } from 'react-map-gl/maplibre';
 import { AgentChat } from './AgentChat';
 import { SitrepPanel } from './SitrepPanel';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
+import { ConeExposureBars, type ConeExposureCohort } from './ConeExposureBars';
 import type { FetchNhcConeResult } from '@/app/api/agent/tools/fetch_nhc_cone';
 import type { FireDetection } from '@/app/api/agent/tools/fetch_firms_fires';
+import type { PolygonLike } from '@/lib/geo/point_in_polygon';
 
 interface Props {
   cone: FetchNhcConeResult | null;
   fires: FireDetection[];
+  /**
+   * Cohort-level exposure rows for the P2.21 mini-map. Optional so existing
+   * callers / tests don't need to wire it up — when omitted the mini-map
+   * falls back to its "no book loaded" placeholder.
+   */
+  cohorts?: ConeExposureCohort[];
 }
 
-export function EventConsole({ cone, fires }: Props) {
+export function EventConsole({ cone, fires, cohorts }: Props) {
   const [sitrepMd, setSitrepMd] = useState<string>('');
 
   const sitrepCtx = cone
@@ -101,6 +113,14 @@ export function EventConsole({ cone, fires }: Props) {
               <div>{(fires ?? []).length} active fires nearby</div>
             </div>
           )}
+          {/* Task P2.21: cone exposure ratio mini-map (left rail). */}
+          <div className="absolute bottom-3 left-3 w-[280px]">
+            <ConeExposureBars
+              cone={(cone?.cone as PolygonLike | null) ?? null}
+              cohorts={cohorts ?? []}
+              coneSource={cone?.source}
+            />
+          </div>
         </div>
         <div className="flex flex-col gap-4 overflow-auto">
           <AgentChat />

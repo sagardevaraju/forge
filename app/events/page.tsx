@@ -21,8 +21,10 @@ import { EventConsole } from '@/components/EventConsole';
 import { ThreatBanner } from '@/components/grammar/ThreatBanner';
 import { fetchNhcCone } from '@/app/api/agent/tools/fetch_nhc_cone';
 import { fetchFirmsFires } from '@/app/api/agent/tools/fetch_firms_fires';
+import { aggregateCohorts } from '@/lib/db/cohorts';
 import type { FetchNhcConeResult } from '@/app/api/agent/tools/fetch_nhc_cone';
 import type { FireDetection } from '@/app/api/agent/tools/fetch_firms_fires';
+import type { ConeExposureCohort } from '@/components/ConeExposureBars';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,10 +33,26 @@ const DEMO_STORM_ID = 'AL092024';
 const FL_BBOX: [number, number, number, number] = [-88, 24, -76, 32];
 
 export default async function EventsPage() {
-  const [cone, fires]: [FetchNhcConeResult | null, FireDetection[]] = await Promise.all([
+  const [cone, fires, cohortsRaw]: [
+    FetchNhcConeResult | null,
+    FireDetection[],
+    Awaited<ReturnType<typeof aggregateCohorts>>,
+  ] = await Promise.all([
     fetchNhcCone.handler({ storm_id: DEMO_STORM_ID }).catch(() => null),
     fetchFirmsFires.handler({ bbox: FL_BBOX, hours: 24 }).catch(() => []),
+    // Task P2.21: cohort-level exposure for the cone-vs-outside mini-map.
+    // The book is small (~500 cohorts) and the page is already
+    // `force-dynamic`, so we can afford the DB hit on each render. Failure
+    // (e.g. fresh clone without `npm run migrate`) degrades gracefully via
+    // the mini-map's "no book loaded" placeholder.
+    aggregateCohorts().catch(() => []),
   ]);
+  const cohorts: ConeExposureCohort[] = cohortsRaw.map((c) => ({
+    id: c.id,
+    zip3: c.zip3,
+    total_tiv: c.total_tiv,
+    policy_count: c.policy_count,
+  }));
 
   // Delta is suppressed when either reading is null — the banner just hides
   // the chip rather than rendering a misleading "+NaN mph vs prior".
@@ -55,7 +73,7 @@ export default async function EventsPage() {
           coneRefreshedAt={coneRefreshedAt}
         />
       )}
-      <EventConsole cone={cone} fires={fires} />
+      <EventConsole cone={cone} fires={fires} cohorts={cohorts} />
     </>
   );
 }
