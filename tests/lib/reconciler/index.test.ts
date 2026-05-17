@@ -570,3 +570,200 @@ describe('reconcile — operator pins (P2.33)', () => {
     expect(capStamps).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task P2.34 — Agent-channel notification emit
+// ---------------------------------------------------------------------------
+
+describe('reconcile — agent notifications (P2.34)', () => {
+  const today = new Date('2026-05-17T00:00:00Z');
+  const addDays = (d: Date, days: number): string => {
+    const r = new Date(d.getTime());
+    r.setUTCDate(r.getUTCDate() + days);
+    return r.toISOString().slice(0, 10);
+  };
+
+  test('direct non_renew emits one non_renew_decision notification', () => {
+    const out = reconcile({
+      portfolio: {
+        actions: [
+          {
+            cohort_id: '330_wood_frame_q3',
+            retain: 0.05,
+            non_renew: 0.9,
+            reprice_up: 0.05,
+            reprice_down: 0,
+            cede_qs: 0,
+            cede_xs: 0,
+          },
+        ],
+      },
+      preflagged: [],
+      vrp: { assignments: [] },
+      cohort_zip3_map: { '330_wood_frame_q3': '330' },
+      // Long renewal so the notice-period filter does NOT downgrade.
+      cohort_renewal_date_map: { '330_wood_frame_q3': addDays(today, 365) },
+      cohort_tiv_map: { '330_wood_frame_q3': 100_000 },
+      // No bucket denominator → cap pass treats observed = 1.0; we expect the
+      // cap to fire too, but for this test we focus on the "non_renew direct"
+      // path by giving the bucket plenty of headroom.
+      bucket_total_tiv: { 'FL:coastal': 100_000_000 },
+      today,
+    });
+    expect(out.notifications).toBeDefined();
+    expect(out.notifications).toHaveLength(1);
+    const n = out.notifications[0];
+    expect(n.type).toBe('non_renew_decision');
+    expect(n.cohort_id).toBe('330_wood_frame_q3');
+    expect(n.action).toBe('non_renew');
+    expect(n.total_tiv).toBe(100_000);
+    expect(typeof n.rationale).toBe('string');
+    expect(n.rationale.length).toBeGreaterThan(0);
+    expect(typeof n.ts).toBe('string');
+    // ISO-8601 sanity check.
+    expect(Number.isNaN(Date.parse(n.ts))).toBe(false);
+    expect(Array.isArray(n.stamps)).toBe(true);
+  });
+
+  test('non_renew_next_renewal emits notification with deferred action + notice stamp context', () => {
+    const renewal = addDays(today, 60); // outside FL 120-day window
+    const out = reconcile({
+      portfolio: {
+        actions: [
+          {
+            cohort_id: '330_wood_frame_q3',
+            retain: 0.05,
+            non_renew: 0.9,
+            reprice_up: 0.05,
+            reprice_down: 0,
+            cede_qs: 0,
+            cede_xs: 0,
+          },
+        ],
+      },
+      preflagged: [],
+      vrp: { assignments: [] },
+      cohort_zip3_map: { '330_wood_frame_q3': '330' },
+      cohort_renewal_date_map: { '330_wood_frame_q3': renewal },
+      cohort_tiv_map: { '330_wood_frame_q3': 250_000 },
+      bucket_total_tiv: { 'FL:coastal': 100_000_000 },
+      today,
+    });
+    expect(out.notifications).toHaveLength(1);
+    const n = out.notifications[0];
+    expect(n.cohort_id).toBe('330_wood_frame_q3');
+    expect(n.action).toBe('non_renew_next_renewal');
+    expect(n.total_tiv).toBe(250_000);
+    // Notice-period stamp should be attached for context.
+    expect(n.stamps.some((s) => s.action === 'non_renew_next_renewal')).toBe(true);
+    // Rationale should mention notice / next renewal.
+    expect(n.rationale.toLowerCase()).toMatch(/notice|renewal/);
+  });
+
+  test('non_renew_capped emits notification mentioning bucket + cap fraction', () => {
+    const out = reconcile({
+      portfolio: {
+        actions: [
+          {
+            cohort_id: 'C',
+            retain: 0.05,
+            non_renew: 0.9,
+            reprice_up: 0.05,
+            reprice_down: 0,
+            cede_qs: 0,
+            cede_xs: 0,
+          },
+        ],
+      },
+      preflagged: [],
+      vrp: { assignments: [] },
+      cohort_zip3_map: { C: '330' }, // FL:coastal
+      cohort_tiv_map: { C: 500_000 },
+      bucket_total_tiv: { 'FL:coastal': 10_000_000 },
+      today,
+    });
+    expect(out.notifications).toHaveLength(1);
+    const n = out.notifications[0];
+    expect(n.action).toBe('non_renew_capped');
+    expect(n.cohort_id).toBe('C');
+    // Rationale carries the bucket key + a cap-vs-observed fraction.
+    expect(n.rationale).toMatch(/FL:coastal/);
+    expect(n.rationale).toMatch(/3(\.\d+)?%|0\.03/); // cap
+    expect(n.stamps.some((s) => s.action === 'non_renew_capped')).toBe(true);
+  });
+
+  test('retain action does NOT emit notification', () => {
+    const out = reconcile({
+      portfolio: {
+        actions: [
+          {
+            cohort_id: '330_wood_frame_q3',
+            retain: 0.9,
+            non_renew: 0.05,
+            reprice_up: 0.05,
+            reprice_down: 0,
+            cede_qs: 0,
+            cede_xs: 0,
+          },
+        ],
+      },
+      preflagged: [],
+      vrp: { assignments: [] },
+      cohort_zip3_map: { '330_wood_frame_q3': '330' },
+      today,
+    });
+    expect(out.notifications).toEqual([]);
+  });
+
+  test('multiple non-renew cohorts: notification count matches non-renew action count', () => {
+    // Two cohorts, both non-renew, plenty of cap headroom + long notice.
+    const longRenewal = addDays(today, 365);
+    const out = reconcile({
+      portfolio: {
+        actions: [
+          {
+            cohort_id: 'A',
+            retain: 0.05,
+            non_renew: 0.9,
+            reprice_up: 0.05,
+            reprice_down: 0,
+            cede_qs: 0,
+            cede_xs: 0,
+          },
+          {
+            cohort_id: 'B',
+            retain: 0.05,
+            non_renew: 0.9,
+            reprice_up: 0.05,
+            reprice_down: 0,
+            cede_qs: 0,
+            cede_xs: 0,
+          },
+          {
+            cohort_id: 'C_retain',
+            retain: 0.9,
+            non_renew: 0.05,
+            reprice_up: 0.05,
+            reprice_down: 0,
+            cede_qs: 0,
+            cede_xs: 0,
+          },
+        ],
+      },
+      preflagged: [],
+      vrp: { assignments: [] },
+      cohort_zip3_map: { A: '330', B: '330', C_retain: '330' },
+      cohort_renewal_date_map: { A: longRenewal, B: longRenewal },
+      cohort_tiv_map: { A: 100_000, B: 100_000 },
+      bucket_total_tiv: { 'FL:coastal': 1_000_000_000 },
+      today,
+    });
+    // Two non-renew cohorts → two notifications. The retain cohort is silent.
+    expect(out.notifications).toHaveLength(2);
+    const cohorts = out.notifications.map((n) => n.cohort_id).sort();
+    expect(cohorts).toEqual(['A', 'B']);
+    for (const n of out.notifications) {
+      expect(n.action).toBe('non_renew');
+    }
+  });
+});

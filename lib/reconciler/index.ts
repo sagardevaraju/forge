@@ -37,6 +37,15 @@
  * deferred by P2.31 does NOT count toward this year's bucket cap; it has
  * already been pushed to next year's cycle.
  *
+ * Task P2.34 — Agent-channel notification emit. After the pin / notice /
+ * cap passes finalize each non-renew cohort's action label, the reconciler
+ * emits an ``AgentNotification`` per non-renewed cohort summarizing the
+ * decision (cohort, final action label, policy / TIV totals, human-readable
+ * rationale, attached stamps for traceability). The reconciler does NOT
+ * make a network call — it just produces the array; a caller can then POST
+ * it to ``/api/notifications/agent`` which (Phase 2) logs the events to
+ * stdout and (Phase 3) will wire to a real channel.
+ *
  * The reconciler is intentionally pure: same input → same output, no I/O,
  * no DB access. Inputs come in as plain objects; outputs are a new
  * `ReconcileOutput` (the original inputs are not mutated).
@@ -125,6 +134,13 @@ export interface ReconcileInput {
   }>;
   /** P2.33 — ``policy_id → cohort_id`` lookup for pin resolution. */
   policy_to_cohort_map?: Record<number, string>;
+  /**
+   * P2.34 — per-cohort policy count, used to populate the
+   * ``policy_count`` field of the emitted ``AgentNotification``. Optional;
+   * missing entries default to ``0`` (the reconciler is pure and does not
+   * hit the DB to compute this).
+   */
+  cohort_policy_count_map?: Record<string, number>;
 }
 
 export interface ReconcileConflict {
@@ -218,6 +234,33 @@ export interface PinStamp {
  */
 export type StampedAction = NoticePeriodStamp | TerritoryCapStampWithZip | PinStamp;
 
+/**
+ * P2.34 — Agent-channel notification event. Emitted once per cohort whose
+ * final action (after pin / notice / cap passes) lands in any of the
+ * three non-renew variants:
+ *   * ``non_renew``                — direct MIP non-renewal.
+ *   * ``non_renew_next_renewal``   — P2.31 deferred the call to next cycle.
+ *   * ``non_renew_capped``         — P2.32 downgraded the call (bucket cap).
+ *
+ * The rationale is a free-text string built from the attached stamps; the
+ * stamps themselves are also surfaced for callers (e.g. an LLM agent) that
+ * want the structured context. Phase 3 may swap the free-text rationale
+ * for a structured payload when wiring real channels.
+ */
+export interface AgentNotification {
+  type: 'non_renew_decision';
+  cohort_id: string;
+  action: 'non_renew' | 'non_renew_next_renewal' | 'non_renew_capped';
+  policy_count: number;
+  total_tiv: number;
+  /** Human-readable summary; e.g. "FL coastal cap exceeded (5.0% vs 3.0% cap)". */
+  rationale: string;
+  /** ISO-8601 timestamp at which the reconciler produced this event. */
+  ts: string;
+  /** Any P2.31 / P2.32 / P2.33 stamps attached to this cohort (for context). */
+  stamps: StampedAction[];
+}
+
 export interface ReconcileOutput {
   /** Pass-through: portfolio decisions are not mutated. */
   portfolio: { actions: PortfolioAction[] };
@@ -233,6 +276,11 @@ export interface ReconcileOutput {
    * sufficient lead time.
    */
   stamped_actions: StampedAction[];
+  /**
+   * P2.34 — per-non-renewed-cohort agent-channel events. Empty when the
+   * reconciler made no non-renewal calls (e.g. every cohort retains).
+   */
+  notifications: AgentNotification[];
 }
 
 // ---------------------------------------------------------------------------
@@ -330,6 +378,7 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
     bucket_total_tiv = {},
     pins = [],
     policy_to_cohort_map = {},
+    cohort_policy_count_map = {},
   } = input;
 
   // ── 0. P2.33 — Apply operator pin overrides. ───────────────────────────
@@ -530,6 +579,78 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
     stampedActions.push({ ...stamp, zip3 });
   }
 
+  // ── 7. P2.34 — Emit agent-channel notifications. ───────────────────────
+  // For each cohort whose final non_renew action label (after the pin /
+  // notice / cap precedence chain) lands in one of the three non-renew
+  // variants, build an ``AgentNotification`` summarizing the decision. The
+  // reconciler does NOT make a network call — it just produces the array.
+  // A caller can POST it to ``/api/notifications/agent`` to deliver the
+  // events (Phase 2: log to stdout; Phase 3: real channel).
+  //
+  // Precedence resolution:
+  //   * ``non_renew_capped``        wins if a TerritoryCapStampWithZip exists
+  //   * ``non_renew_next_renewal``  wins next if a NoticePeriodStamp exists
+  //   * ``non_renew``               otherwise (the MIP / pin direct call)
+  //
+  // We only emit when the cohort's *cloned* action (which already reflects
+  // any pin override) has ``non_renew > NON_RENEW_THRESHOLD`` — pins to
+  // ``retain`` etc. correctly silence the channel.
+  const capStampByCohort = new Map<string, TerritoryCapStampWithZip>();
+  const noticeStampByCohort = new Map<string, NoticePeriodStamp>();
+  const stampsByCohort = new Map<string, StampedAction[]>();
+  for (const s of stampedActions) {
+    const arr = stampsByCohort.get(s.cohort_id) ?? [];
+    arr.push(s);
+    stampsByCohort.set(s.cohort_id, arr);
+    if (s.action === 'non_renew_capped') {
+      capStampByCohort.set(s.cohort_id, s as TerritoryCapStampWithZip);
+    } else if (s.action === 'non_renew_next_renewal') {
+      noticeStampByCohort.set(s.cohort_id, s as NoticePeriodStamp);
+    }
+  }
+
+  const tsNow = today.toISOString();
+  const notifications: AgentNotification[] = [];
+  for (const a of portfolio.actions) {
+    if (a.non_renew <= NON_RENEW_THRESHOLD) continue;
+    const cohortId = a.cohort_id;
+    const capStamp = capStampByCohort.get(cohortId);
+    const noticeStamp = noticeStampByCohort.get(cohortId);
+    let finalAction: AgentNotification['action'];
+    let rationale: string;
+    if (capStamp) {
+      finalAction = 'non_renew_capped';
+      const capPct = (capStamp.cap_fraction * 100).toFixed(1);
+      const obsPct = (capStamp.observed_fraction * 100).toFixed(1);
+      rationale =
+        `Territory cap exceeded for bucket ${capStamp.bucket}: observed ` +
+        `${obsPct}% non-renew TIV share vs ${capPct}% cap. Cohort ` +
+        `${cohortId} downgraded (smallest-first selection).`;
+    } else if (noticeStamp) {
+      finalAction = 'non_renew_next_renewal';
+      rationale =
+        `Insufficient notice period for cohort ${cohortId}: ` +
+        `${noticeStamp.days_to_renewal} day(s) to renewal vs ` +
+        `${noticeStamp.notice_days}-day statutory window. ` +
+        `Deferred to next renewal cycle (effective ${noticeStamp.effective_date_stamp}).`;
+    } else {
+      finalAction = 'non_renew';
+      rationale =
+        `MIP non-renew call for cohort ${cohortId}; notice window and ` +
+        `territory cap both cleared.`;
+    }
+    notifications.push({
+      type: 'non_renew_decision',
+      cohort_id: cohortId,
+      action: finalAction,
+      policy_count: cohort_policy_count_map[cohortId] ?? 0,
+      total_tiv: cohort_tiv_map[cohortId] ?? 0,
+      rationale,
+      ts: tsNow,
+      stamps: stampsByCohort.get(cohortId) ?? [],
+    });
+  }
+
   return {
     portfolio,
     preflagged: filteredPreflag,
@@ -539,5 +660,6 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
     },
     conflicts,
     stamped_actions: stampedActions,
+    notifications,
   };
 }
