@@ -31,8 +31,19 @@
 export interface PortfolioAction {
   cohort_id: string;
   retain: number;
-  reprice_up: number;
-  reprice_down: number;
+  /**
+   * P2.8 rate-grid reprice buckets (mirrors
+   * `api_py/optimize_portfolio.py::RATE_GRID`). The two pre-Phase-2
+   * scalars `reprice_up`/`reprice_down` were replaced by a 7-bucket
+   * discretized grid.
+   */
+  reprice_n20: number;
+  reprice_n10: number;
+  reprice_0: number;
+  reprice_p5: number;
+  reprice_p10: number;
+  reprice_p15: number;
+  reprice_p20: number;
   non_renew: number;
   cede_qs: number;
   cede_xs: number;
