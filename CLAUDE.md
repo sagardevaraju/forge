@@ -56,6 +56,7 @@ Every commit in the original plan tags a `Task N` from `docs/superpowers/plans/2
 
 - **`force-dynamic`**: the three view pages set `export const dynamic = 'force-dynamic'` because they read live DB state. Don't remove this — Vercel will otherwise ISR-cache the page across deploys.
 - **`forge-local.db` is gitignored**. Never check it in. Same for `artifacts/*.parquet`, `artifacts/*.joblib`, `artifacts/chips/`, `eval/results/*`.
+- **`artifacts/portfolio_optimization.json` and `artifacts/calibration.json` ARE tracked** (Phase 1 P2.0 / Phase 2 P2.2). Pages read them at render time; never re-run the precompute in serverless. Regenerate locally with `python -m scripts.precompute_portfolio_optimization` and `python -m scripts.precompute_calibration`.
 - **Mapbox token**: the basemap needs `NEXT_PUBLIC_MAPBOX_TOKEN`. Without it, MapLibre falls back to its style which is fine for dev but looks bare.
 - **Python imports inside `api_py/`**: must work both as a Vercel function (where `api_py/` is the package root) and as `from api_py.optimize_portfolio import solve` from `tests/api/`. Use relative imports sparingly; the test layout assumes absolute `api_py.*` paths.
 - **Pre-commit hook lint**: `npm run build` runs `next lint` implicitly. Lint warnings about `any` are deliberate in the chat route (see the `eslint-disable` comments) — leave them.
