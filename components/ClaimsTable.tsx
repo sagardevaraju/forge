@@ -16,6 +16,13 @@
  *               transient confirmation ("Pushed N policies"). Disabled when
  *               there are no visible rows. Phase 2 endpoint just logs;
  *               Phase 3 will persist to a decisions table.
+ * Task P2.29 — Δ column compares each row's current `expected_loss` to the
+ *               prior snapshot supplied via the `priorSeverities` prop. The
+ *               page reads the previous snapshot from `claims_history` and
+ *               writes the current one back so the next render can diff
+ *               again. Tolerance: max($100, 2% of current) — anything inside
+ *               that band renders "=" so noisy re-solves don't flicker the
+ *               table. Missing prior or null current renders "—".
  *
  * Renders pre-flagged policies returned by the server component, with a
  * severity tier filter and a one-click CSV export. The export builds the
@@ -57,6 +64,44 @@ export interface PreflagPolicy {
 
 interface Props {
   policies: PreflagPolicy[];
+  /**
+   * Task P2.29 — Map of `policy_id → prior severity` from the previous render
+   * (read from `claims_history` server-side). Omit / undefined ⇒ first render,
+   * every row shows "—".
+   */
+  priorSeverities?: Map<number, number>;
+}
+
+/**
+ * Task P2.29 — Tolerance band for the severity-diff column. Anything inside
+ * `max($100, 2% × current)` renders "=" rather than ↑/↓ to avoid flickering
+ * arrows on negligible re-solves. Exported so unit tests / future callers
+ * can reuse the same threshold.
+ */
+export const SEVERITY_DIFF_TOLERANCE_ABS = 100;
+export const SEVERITY_DIFF_TOLERANCE_REL = 0.02;
+
+export type SeverityDiff = '↑' | '↓' | '=' | '—';
+
+/**
+ * Task P2.29 — Pure helper: compares `current` against `prior` under the
+ * documented tolerance and returns one of four symbols. Either argument
+ * being `null` / `undefined` (no prior snapshot, or no current cohort match)
+ * collapses to "—".
+ */
+export function computeSeverityDiff(
+  current: number | null | undefined,
+  prior: number | null | undefined,
+): SeverityDiff {
+  if (current == null || prior == null) return '—';
+  const tol = Math.max(
+    SEVERITY_DIFF_TOLERANCE_ABS,
+    Math.abs(current) * SEVERITY_DIFF_TOLERANCE_REL,
+  );
+  const delta = current - prior;
+  if (delta > tol) return '↑';
+  if (delta < -tol) return '↓';
+  return '=';
 }
 
 type SeverityFilter = 'all' | 'low' | 'medium' | 'high';
@@ -93,7 +138,7 @@ function groupByZip3(policies: PreflagPolicy[]): Zip3Group[] {
   return order.map((z) => groups[z]);
 }
 
-export function ClaimsTable({ policies }: Props) {
+export function ClaimsTable({ policies, priorSeverities }: Props) {
   const [filter, setFilter] = useState<SeverityFilter>('all');
   const [pushState, setPushState] = useState<'idle' | 'pushing' | 'done' | 'error'>(
     'idle',
@@ -231,6 +276,13 @@ export function ClaimsTable({ policies }: Props) {
                 <TrustTierBadge tier="MODEL_OUTPUT" />
               </span>
             </th>
+            <th
+              className="text-center p-2"
+              title="Change vs last refresh (max($100, 2%) tolerance)"
+              data-testid="severity-diff-header"
+            >
+              Δ
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -241,7 +293,7 @@ export function ClaimsTable({ policies }: Props) {
                 data-testid={`zip3-group-${g.zip3}`}
               >
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   className="p-2 font-semibold text-zinc-800 text-xs uppercase tracking-wide"
                 >
                   {g.county} · ZIP3 {g.zip3} · {g.policies.length}{' '}
@@ -279,6 +331,29 @@ export function ClaimsTable({ policies }: Props) {
                       ? '—'
                       : `$${p.expected_loss.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
                   </td>
+                  {(() => {
+                    const prior = priorSeverities?.get(p.policy_id);
+                    const diff = computeSeverityDiff(p.expected_loss, prior);
+                    const title =
+                      prior == null
+                        ? 'no prior snapshot'
+                        : `prior $${prior.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+                    const color =
+                      diff === '↑'
+                        ? 'text-red-700'
+                        : diff === '↓'
+                          ? 'text-emerald-700'
+                          : 'text-zinc-500';
+                    return (
+                      <td
+                        className={`p-2 text-center font-medium tabular-nums ${color}`}
+                        title={title}
+                        data-testid={`severity-diff-${p.policy_id}`}
+                      >
+                        {diff}
+                      </td>
+                    );
+                  })()}
                 </tr>
               ))}
             </Fragment>

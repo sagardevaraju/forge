@@ -52,6 +52,18 @@ CREATE TABLE IF NOT EXISTS pins (
 CREATE INDEX IF NOT EXISTS idx_pins_operator ON pins(operator);
 CREATE INDEX IF NOT EXISTS idx_pins_ts ON pins(ts);
 
+-- Task P2.29 — Severity diff vs last refresh.
+-- One row per policy_id; each /claims render upserts the current severity
+-- (expected loss). The next render compares against this snapshot to render
+-- a ↑/↓/= column. Last-write-wins per policy is sufficient for Phase 2; a
+-- full audit trail would require a composite PK + retention policy (Phase 3).
+CREATE TABLE IF NOT EXISTS claims_history (
+  policy_id INTEGER PRIMARY KEY,
+  severity REAL NOT NULL,
+  snapshot_ts TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_claims_history_ts ON claims_history(snapshot_ts);
+
 -- Task P2.36 — Content-addressed audit log for chat turns.
 -- Each row is keyed by SHA-256(prompt_hash + tool_calls_json + final_hash),
 -- so inserting the same turn twice is idempotent (UPSERT semantics via

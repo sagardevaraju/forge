@@ -11,6 +11,12 @@
  *               does not yet expose a per-ZIP3 `demand_adjustments` field
  *               for the claims pre-brief — the rollup currently derives
  *               on-the-fly and is documented as such on the page footnote.
+ * Task P2.29 — Each render loads the prior severity snapshot from the
+ *               `claims_history` table (`lib/db/claims_history.ts`), passes
+ *               it down to `ClaimsTable` so the Δ column can render ↑/↓/=,
+ *               and then upserts the current snapshot back into history so
+ *               the *next* render can diff against today's numbers. The
+ *               diff column inherits the table's trust tier (no new badge).
  *
  * Server component: derives a pre-flag list directly from the policy book
  * (still synthetic seed) — FL coastal ZIP3s × {AE, VE} flood zone — but the
@@ -45,6 +51,7 @@ import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
 import { loadPortfolioOptimization } from '@/lib/db/portfolio_optimization';
 import { AdjusterLoadRollup } from '@/components/AdjusterLoadRollup';
 import { computeAdjusterLoad } from '@/lib/reconciler/adjuster_load';
+import { loadPrevSeverities, upsertSnapshot } from '@/lib/db/claims_history';
 
 export const dynamic = 'force-dynamic';
 
@@ -171,6 +178,16 @@ export default async function ClaimsPage() {
   // missing or no cohort matches were found.
   const adjusterLoad = computeAdjusterLoad(top);
 
+  // Task P2.29 — load the prior severity snapshot, then persist the current
+  // one. The load runs before the persist so the diff is against *yesterday*,
+  // not today. Policies whose expected_loss is null are not persisted (no
+  // signal to compare next time).
+  const priorSeverities = await loadPrevSeverities();
+  const snapshotRows = top
+    .filter((p): p is typeof p & { expected_loss: number } => p.expected_loss != null)
+    .map((p) => ({ policy_id: p.policy_id, severity: p.expected_loss }));
+  await upsertSnapshot(snapshotRows);
+
   return (
     <div className="p-6">
       <div className="flex items-center gap-2 mb-4">
@@ -195,7 +212,7 @@ export default async function ClaimsPage() {
         )}
       </p>
       <AdjusterLoadRollup rollup={adjusterLoad} />
-      <ClaimsTable policies={top} />
+      <ClaimsTable policies={top} priorSeverities={priorSeverities} />
       <ProvenanceFootnote
         source="policies table (synthetic seed) filtered by FL coastal ZIP3 × {AE, VE}; loss column from artifacts/portfolio_optimization.json"
         method="Portfolio MIP cohort prior (HAZUS-derived loss_p50, proportional TIV split per policy); adjuster-load rollup derived via lib/reconciler/adjuster_load.ts (ceil(sum cohort loss / $250K)); see docs/methodology.md"

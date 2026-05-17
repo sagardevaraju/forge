@@ -32,6 +32,15 @@ vi.mock('@/lib/db/portfolio_optimization', () => ({
   loadPortfolioOptimization: (...args: unknown[]) => loadOptMock(...args),
 }));
 
+// Task P2.29 — mock the claims_history DB layer. Each page render loads the
+// prior snapshot, renders the diff column, and persists the current snapshot.
+const loadPrevSeveritiesMock = vi.fn();
+const upsertSnapshotMock = vi.fn();
+vi.mock('@/lib/db/claims_history', () => ({
+  loadPrevSeverities: (...args: unknown[]) => loadPrevSeveritiesMock(...args),
+  upsertSnapshot: (...args: unknown[]) => upsertSnapshotMock(...args),
+}));
+
 import ClaimsPage from '@/app/claims/page';
 
 // ────────────────────────────────────────────────────────────────────────
@@ -138,6 +147,11 @@ afterEach(() => {
 beforeEach(() => {
   executeMock.mockReset();
   loadOptMock.mockReset();
+  loadPrevSeveritiesMock.mockReset();
+  upsertSnapshotMock.mockReset();
+  // Default to "no prior snapshot" so existing pre-P2.29 tests keep working.
+  loadPrevSeveritiesMock.mockResolvedValue(new Map<number, number>());
+  upsertSnapshotMock.mockResolvedValue(undefined);
 });
 
 describe('ClaimsPage — cohort loss_p50 replaces LOSS_FACTOR heuristic', () => {
@@ -424,5 +438,103 @@ describe('ClaimsPage — adjuster-load rollup (P2.28)', () => {
     const rollup = screen.getByTestId('adjuster-load-rollup');
     const badge = within(rollup).getByTestId('trust-tier-badge');
     expect(badge).toHaveTextContent(/^Model$/);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// Task P2.29 — Severity diff vs last refresh
+// ────────────────────────────────────────────────────────────────────────
+//
+// Each /claims render persists the current severity snapshot into the
+// `claims_history` table (one row per policy_id, last write wins). The
+// next render loads that prior snapshot, computes a ↑/↓/= per row, and
+// shows the result in a new Δ column.
+describe('ClaimsPage — severity diff vs last refresh (P2.29)', () => {
+  test('page render upserts current severities into claims_history', async () => {
+    // Both policies sit at q4 (we pad the book with low-TIV rows so the q4
+    // cut-point lands well below both flagged policies' TIVs). That's the
+    // same trick the P2.27 sum-test uses to control quintile placement.
+    const book: FakeRow[] = [
+      { id: 1, zip3: '337', tiv: 1_000_000, build_type: 'masonry', flood_zone: 'AE' },
+      { id: 2, zip3: '342', tiv: 800_000, build_type: 'masonry', flood_zone: 'VE' },
+    ];
+    const extraLowTivs = Array.from({ length: 40 }, (_, i) => 10_000 + i * 1_000);
+    wireDb(book, extraLowTivs);
+    loadOptMock.mockResolvedValue(
+      fakeOpt([
+        { id: '337_masonry_q4', zip3: '337', build_type: 'masonry', tiv_quintile: 4, total_tiv: 1_000_000, loss_p50: 200_000 },
+        { id: '342_masonry_q4', zip3: '342', build_type: 'masonry', tiv_quintile: 4, total_tiv: 800_000, loss_p50: 90_000 },
+      ]),
+    );
+    // No prior snapshot — first render of this DB.
+    loadPrevSeveritiesMock.mockResolvedValue(new Map<number, number>());
+
+    const ui = await ClaimsPage();
+    render(ui);
+
+    // The page must have written each policy's current severity into history.
+    expect(upsertSnapshotMock).toHaveBeenCalledTimes(1);
+    const rows = upsertSnapshotMock.mock.calls[0][0] as { policy_id: number; severity: number }[];
+    const ids = rows.map((r) => r.policy_id).sort();
+    expect(ids).toEqual([1, 2]);
+    // Severity is the per-policy expected_loss (whole-cohort split, since each
+    // cohort here has total_tiv == single policy's tiv).
+    const byId = new Map(rows.map((r) => [r.policy_id, r.severity]));
+    expect(byId.get(1)).toBeCloseTo(200_000, 0);
+    expect(byId.get(2)).toBeCloseTo(90_000, 0);
+  });
+
+  test('second render shows ↑/↓ diffs vs the prior snapshot', async () => {
+    const book: FakeRow[] = [
+      { id: 1, zip3: '337', tiv: 1_000_000, build_type: 'masonry', flood_zone: 'AE' },
+      { id: 2, zip3: '342', tiv: 800_000, build_type: 'masonry', flood_zone: 'VE' },
+    ];
+    const extraLowTivs = Array.from({ length: 40 }, (_, i) => 10_000 + i * 1_000);
+    wireDb(book, extraLowTivs);
+    loadOptMock.mockResolvedValue(
+      fakeOpt([
+        // policy 1 cohort loss went UP to 200K (from 50K prior).
+        { id: '337_masonry_q4', zip3: '337', build_type: 'masonry', tiv_quintile: 4, total_tiv: 1_000_000, loss_p50: 200_000 },
+        // policy 2 cohort loss went DOWN to 40K (from 90K prior).
+        { id: '342_masonry_q4', zip3: '342', build_type: 'masonry', tiv_quintile: 4, total_tiv: 800_000, loss_p50: 40_000 },
+      ]),
+    );
+    // Prior snapshot from "last refresh".
+    loadPrevSeveritiesMock.mockResolvedValue(
+      new Map<number, number>([
+        [1, 50_000],
+        [2, 90_000],
+      ]),
+    );
+
+    const ui = await ClaimsPage();
+    render(ui);
+
+    // Policy 1 should show ↑, policy 2 should show ↓.
+    expect(screen.getByTestId('severity-diff-1')).toHaveTextContent('↑');
+    expect(screen.getByTestId('severity-diff-2')).toHaveTextContent('↓');
+
+    // And the page still persists the *current* snapshot for next time.
+    expect(upsertSnapshotMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('page render does not crash when the prior load fails (empty map fallback)', async () => {
+    // A real read error in claims_history shouldn't 500 the page — the page
+    // treats the prior as empty and shows "—" for every row.
+    const book: FakeRow[] = [
+      { id: 1, zip3: '337', tiv: 1_000_000, build_type: 'masonry', flood_zone: 'AE' },
+    ];
+    wireDb(book);
+    loadOptMock.mockResolvedValue(
+      fakeOpt([
+        { id: '337_masonry_q4', zip3: '337', build_type: 'masonry', tiv_quintile: 4, total_tiv: 1_000_000, loss_p50: 200_000 },
+      ]),
+    );
+    loadPrevSeveritiesMock.mockResolvedValue(new Map<number, number>());
+
+    const ui = await ClaimsPage();
+    render(ui);
+
+    expect(screen.getByTestId('severity-diff-1')).toHaveTextContent('—');
   });
 });
