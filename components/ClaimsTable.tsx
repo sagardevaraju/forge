@@ -2,6 +2,7 @@
 /**
  * Task 22 — Claims Pre-Brief table.
  * Task 19 — Group rows by ZIP3 → county header rows.
+ * Task 20 — Statutory non-renewal notice-period column.
  *
  * Renders pre-flagged policies returned by the server component, with a
  * severity tier filter and a one-click CSV export. The export builds the
@@ -14,9 +15,15 @@
  * individual policies; when a group has zero visible policies after the
  * filter is applied, the header is omitted as well so the table doesn't
  * render empty section banners.
+ *
+ * Each row also surfaces the statutory non-renewal notice-period window in
+ * days (resolved from ZIP3 → state via `lib/regulatory/notice_periods.ts`)
+ * so the ops user can gut-check whether a non-renewal action is even
+ * feasible against the regulatory clock.
  */
 import { useState, useMemo, Fragment } from 'react';
 import { zip3ToCounty } from '@/lib/regulatory/zip3_to_county';
+import { noticeWindowForZip3 } from '@/lib/regulatory/notice_periods';
 
 export interface PreflagPolicy {
   policy_id: number;
@@ -86,11 +93,12 @@ export function ClaimsTable({ policies }: Props) {
   );
 
   function exportCsv() {
-    const header = 'policy_id,zip3,tiv,build_type,flood_zone,severity,expected_loss\n';
+    const header =
+      'policy_id,zip3,tiv,build_type,flood_zone,severity,expected_loss,notice_days\n';
     const rows = filtered
       .map(
         (p) =>
-          `${p.policy_id},${p.zip3},${p.tiv},${p.build_type},${p.flood_zone},${p.severity},${p.expected_loss.toFixed(0)}`,
+          `${p.policy_id},${p.zip3},${p.tiv},${p.build_type},${p.flood_zone},${p.severity},${p.expected_loss.toFixed(0)},${noticeWindowForZip3(p.zip3)}`,
       )
       .join('\n');
     const blob = new Blob([header + rows], { type: 'text/csv' });
@@ -135,6 +143,7 @@ export function ClaimsTable({ policies }: Props) {
             <th className="text-left p-2">Build</th>
             <th className="text-left p-2">Flood zone</th>
             <th className="text-left p-2">Severity</th>
+            <th className="text-right p-2">Notice (days)</th>
             <th className="text-right p-2">Expected loss</th>
           </tr>
         </thead>
@@ -146,7 +155,7 @@ export function ClaimsTable({ policies }: Props) {
                 data-testid={`zip3-group-${g.zip3}`}
               >
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="p-2 font-semibold text-zinc-800 text-xs uppercase tracking-wide"
                 >
                   {g.county} · ZIP3 {g.zip3} · {g.policies.length}{' '}
@@ -175,6 +184,9 @@ export function ClaimsTable({ policies }: Props) {
                     }`}
                   >
                     {p.severity}
+                  </td>
+                  <td className="p-2 text-right tabular-nums">
+                    {noticeWindowForZip3(p.zip3)}
                   </td>
                   <td className="p-2 text-right">
                     ${p.expected_loss.toLocaleString(undefined, { maximumFractionDigits: 0 })}
