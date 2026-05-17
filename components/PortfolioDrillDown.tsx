@@ -20,6 +20,7 @@ import {
   ACTION_LABELS,
   ACTION_COLORS,
 } from '@/lib/portfolio-actions';
+import { renderRecommendation } from '@/lib/portfolio/narrative';
 
 interface Props {
   zip3: string;
@@ -143,6 +144,11 @@ export function PortfolioDrillDown({ zip3, cohorts, actionByCohort, onClose }: P
         {totalTiv.toLocaleString(undefined, { maximumFractionDigits: 0 })}
       </div>
       <div style={{ color: '#3f3f46' }}>Policies: {totalPolicies.toLocaleString()}</div>
+      {hasOptimization && (
+        <p style={{ color: '#18181b', marginTop: 8 }}>
+          {renderRecommendation(cohorts.map((c) => actions[c.id]).filter(Boolean))}
+        </p>
+      )}
       <h4 style={{ marginTop: 14, marginBottom: 6, fontWeight: 600 }}>
         Cohorts {hasOptimization ? '· recommended actions' : ''}
       </h4>
