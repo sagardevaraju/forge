@@ -15,6 +15,11 @@
  * for a demo that only needs to communicate "this is where your exposure
  * is concentrated and what we're doing about it." Hand-coded centroids
  * derived from the seed distribution; revisit when the book widens.
+ *
+ * Task 26 — accessibility pass. MapLibre circles aren't keyboard-focusable
+ * features, so we render a visually-hidden `<ul>` of one `<button>` per
+ * ZIP3 adjacent to the map. Keyboard + screen-reader users can tab to a
+ * ZIP3 and press Enter to invoke the same drilldown that map clicks fire.
  */
 import { useState, useMemo, useCallback } from 'react';
 import { MapBase } from './MapBase';
@@ -27,6 +32,7 @@ import {
   ACTION_COLORS,
   ACTION_LABELS,
 } from '@/lib/portfolio-actions';
+import { zip3ToCounty } from '@/lib/regulatory/zip3_to_county';
 import { Source, Layer, type MapMouseEvent } from 'react-map-gl/maplibre';
 
 interface Props {
@@ -274,6 +280,33 @@ export function PortfolioMap({ cohorts, optimization }: Props) {
           onClose={() => setSelectedZip3(null)}
         />
       )}
+      {/*
+        Task 26 — sr-only keyboard parallel for the MapLibre circles. MapLibre
+        canvas circles aren't DOM nodes, so screen-reader + keyboard users
+        get this list as their entry point into the drilldown. Activating
+        a button fires the same `setSelectedZip3` that map clicks trigger.
+      */}
+      <ul
+        data-testid="portfolio-zip3-keyboard-list"
+        aria-label="ZIP3 cohorts on the map"
+        className="sr-only"
+      >
+        {Object.entries(zip3Totals).map(([zip3, data]) => {
+          const action = zip3Actions[zip3]?.dominantActionByTiv ?? null;
+          const actionLabel = action ? ACTION_LABELS[action] : 'no recommendation';
+          return (
+            <li key={zip3}>
+              <button
+                type="button"
+                onClick={() => setSelectedZip3(zip3)}
+                aria-label={`Inspect cohorts in ZIP3 ${zip3}, ${zip3ToCounty(zip3)} — ${data.policies.toLocaleString()} policies, recommended action: ${actionLabel}`}
+              >
+                ZIP3 {zip3} — {zip3ToCounty(zip3)}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

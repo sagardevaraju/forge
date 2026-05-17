@@ -9,9 +9,10 @@ import { describe, test, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import type { Cohort } from '@/lib/db/cohorts';
 
-// Stub react-map-gl/mapbox so we render plain DOM nodes in jsdom. Each Map,
+// Stub react-map-gl/maplibre so we render plain DOM nodes in jsdom. Each Map,
 // Source and Layer becomes a div so children (the legend) still mount.
-vi.mock('react-map-gl/mapbox', () => ({
+// Task 19 swapped Mapbox for MapLibre; this mock was updated in Task 26.
+vi.mock('react-map-gl/maplibre', () => ({
   __esModule: true,
   default: ({ children }: { children?: React.ReactNode }) => (
     <div data-testid="map-base-stub">{children}</div>
@@ -23,7 +24,7 @@ vi.mock('react-map-gl/mapbox', () => ({
 }));
 
 // Also stub the CSS import — vitest can't parse it via the jsdom transform.
-vi.mock('mapbox-gl/dist/mapbox-gl.css', () => ({}));
+vi.mock('maplibre-gl/dist/maplibre-gl.css', () => ({}));
 
 // Force the fallback-free path so the legend renders on top of the map shell.
 process.env.NEXT_PUBLIC_MAPBOX_TOKEN = 'pk.test.token';
