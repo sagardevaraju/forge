@@ -72,3 +72,6 @@ eval/results/*.png
 
 # Local worktrees for isolated subagent execution
 .worktrees/
+
+# Brainstorming visual companion sessions
+.superpowers/
