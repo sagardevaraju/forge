@@ -297,14 +297,14 @@ describe('PortfolioPersonaScope — per-persona content', () => {
 // --- EventsPersonaScope — quick-links surface on /events -------------------
 
 describe('EventsPersonaScope', () => {
-  test('default cat-ops shows toggle but no quick-links', () => {
+  test('cat-ops (default) renders nothing — no quick-links band', () => {
+    // Cat-ops has no configured quick-links, and the persona toggle now
+    // lives in the global LayoutSubBanner, so this scope renders nothing
+    // at all. Empty DOM is the contract.
     mockedQuery = '';
     mockedPathname = '/events';
-    render(<EventsPersonaScope />);
-    expect(screen.getByRole('button', { name: 'Cat-ops' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    const { container } = render(<EventsPersonaScope />);
+    expect(container.firstChild).toBeNull();
     expect(screen.queryByTestId('persona-quick-links')).toBeNull();
   });
 

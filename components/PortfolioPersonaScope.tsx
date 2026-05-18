@@ -1,25 +1,18 @@
 'use client';
 
 /**
- * Task P2.18 (Redesign Phase 2) — Persona scope for /portfolio.
+ * Persona scope for /portfolio. Reads `?persona=` from the URL and hands
+ * the parsed value to `PortfolioWhatIfShell` so its ExecCard strip + rail
+ * re-shape per archetype. The persona TOGGLE lives in the global
+ * LayoutSubBanner; this scope is read-only.
  *
- * Thin client wrapper that:
- *   1. Reads `?persona=<id>` from the URL (single source of truth).
- *   2. Renders the URL-backed `PersonaToggleUrl` so the operator can pin
- *      the lens.
- *   3. Hands the parsed persona down to `PortfolioWhatIfShell` so the
- *      headline ExecCard strip + quick-links + what-if rail re-shape
- *      themselves for the selected archetype.
- *
- * All persona-driven data is passed in as props from the server component
- * (which already loaded the optimization, calibration, and treaty
- * artifacts). The wrapper does NOT fetch — that's a deliberate constraint
- * of P2.18: persona is RE-SHAPING, not RE-FETCHING.
+ * The wrapper does NOT fetch — persona only re-shapes already-loaded
+ * artifact data (the server component already pulled the optimization,
+ * calibration, and treaty objects).
  */
 
 import { useSearchParams } from 'next/navigation';
 import { PortfolioWhatIfShell } from '@/components/PortfolioWhatIfShell';
-import { PersonaToggleUrl } from '@/components/grammar/PersonaToggle';
 import { parsePersona } from '@/lib/persona/config';
 import type { PortfolioOptimization } from '@/lib/portfolio-actions';
 
@@ -44,9 +37,6 @@ export function PortfolioPersonaScope({
   const persona = parsePersona(searchParams?.get('persona'));
   return (
     <div data-testid="portfolio-persona-scope" data-persona={persona}>
-      <div className="flex justify-end mb-3">
-        <PersonaToggleUrl />
-      </div>
       <PortfolioWhatIfShell
         initialOptimization={initialOptimization}
         totalTiv={totalTiv}

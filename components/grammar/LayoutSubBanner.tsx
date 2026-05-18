@@ -1,26 +1,24 @@
 'use client';
 
 /**
- * Task 7 (Redesign Phase 1) — LayoutSubBanner.
+ * Global navigation chrome — brand link, the route list, and the persona
+ * lens anchored on the right.
  *
- * The second of three regions in the global layout shell. Sits directly below
- * the ThreatBanner and provides the persistent navigation chrome plus the
- * persona lens for the page. Holds the FORGE brand link, the three view
- * links (Portfolio · Events · Claims), and the PersonaToggle anchored to
- * the right. Persona state is owned locally for now — Phase 2 (Task P2.18)
- * lifts it into a context provider so downstream content swaps follow the
- * selection.
+ * The persona toggle is URL-backed (`PersonaToggleUrl`) so this single
+ * instance is the source of truth: the page-scoped persona scopes
+ * (PortfolioPersonaScope / EventsPersonaScope) only read `?persona=` and
+ * re-shape their content, they no longer render a second toggle.
  *
- * Client component because it owns the persona `useState` and feeds the
- * controlled PersonaToggle.
+ * `PersonaToggleUrl` calls `useSearchParams()` which Next requires to sit
+ * inside a Suspense boundary for the static `/404` prerender. The fallback
+ * keeps the layout width stable for the brief mount-time gap.
  */
 
-import { useState } from 'react';
+import { Suspense } from 'react';
 import Link from 'next/link';
-import { PersonaToggle, type Persona } from './PersonaToggle';
+import { PersonaToggleUrl } from './PersonaToggle';
 
 export function LayoutSubBanner() {
-  const [persona, setPersona] = useState<Persona>('cat-ops');
   return (
     <div className="bg-white border-b px-4 py-2 flex items-center gap-4 text-xs">
       <Link href="/" className="font-semibold">FORGE</Link>
@@ -28,8 +26,16 @@ export function LayoutSubBanner() {
         <Link href="/portfolio" className="hover:text-zinc-900">Portfolio</Link>
         <Link href="/events" className="hover:text-zinc-900">Events</Link>
         <Link href="/claims" className="hover:text-zinc-900">Claims</Link>
+        <Link href="/calibration" className="hover:text-zinc-900">Calibration</Link>
+        <Link href="/treaty" className="hover:text-zinc-900">Treaty</Link>
+        <Link href="/load" className="hover:text-zinc-900">Load</Link>
+        <Link href="/methodology" className="hover:text-zinc-900">Methodology</Link>
       </nav>
-      <div className="ml-auto"><PersonaToggle value={persona} onChange={setPersona} /></div>
+      <div className="ml-auto">
+        <Suspense fallback={<div className="inline-block w-[260px] h-[26px]" />}>
+          <PersonaToggleUrl />
+        </Suspense>
+      </div>
     </div>
   );
 }

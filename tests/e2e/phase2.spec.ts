@@ -76,11 +76,10 @@ test('phase 2 — what-if commit on /portfolio re-solves and renders a delta', a
 test('phase 2 — persona switch through all 5 modes on /portfolio', async ({ page }) => {
   await page.goto(`${BASE}/portfolio`);
 
-  // PortfolioPersonaScope renders the page-level PersonaToggle. The shared
-  // app layout also surfaces one in its sub-banner, so we scope by test-id
-  // to disambiguate.
-  const scope = page.getByTestId('portfolio-persona-scope');
-  const toggle = scope.getByRole('group', { name: 'persona-toggle' });
+  // The persona toggle lives in the global LayoutSubBanner (one source of
+  // truth). The PortfolioPersonaScope only reads `?persona=` and re-shapes
+  // the page; it does not render its own toggle.
+  const toggle = page.getByRole('group', { name: 'persona-toggle' });
   await expect(toggle).toBeVisible();
 
   // 1) Cat-ops — canonical, no query param.
