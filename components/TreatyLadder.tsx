@@ -176,10 +176,18 @@ function LadderSvg({ stack, yMax }: LadderSvgProps) {
             stroke="#94a3b8"
             strokeWidth={1}
           >
-            <title>
-              QS — {(qsLayer.share * 100).toFixed(0)}% share
-              {qsLayer.rol !== undefined ? ` · RoL ${(qsLayer.rol * 100).toFixed(0)}%` : ''}
-            </title>
+            {/*
+              Title text is composed in JS rather than as multi-line JSX so
+              React emits a single text child. Multi-line JSX with embedded
+              expressions becomes a sequence of text nodes whose whitespace
+              normalization can differ between server and client, which
+              produced the QS-band hydration mismatch on /treaty.
+            */}
+            <title>{`QS — ${(qsLayer.share * 100).toFixed(0)}% share${
+              qsLayer.rol !== undefined
+                ? ` · RoL ${(qsLayer.rol * 100).toFixed(0)}%`
+                : ''
+            }`}</title>
           </rect>
           {/* Second test handle on the same SVG node would collide; expose
               the QS-specific testid via a transparent overlay rect instead. */}
@@ -232,11 +240,13 @@ function LadderSvg({ stack, yMax }: LadderSvgProps) {
               stroke="#064e3b"
               strokeWidth={1}
             >
-              <title>
-                XS {roundToMillion(layer.attachment)} – {roundToMillion(layer.exhaustion)} ·
-                RoL {(layer.rol * 100).toFixed(0)}% · {layer.reinstatements_remaining} reinstatement
-                {layer.reinstatements_remaining === 1 ? '' : 's'} left
-              </title>
+              <title>{`XS ${roundToMillion(layer.attachment)} – ${roundToMillion(
+                layer.exhaustion,
+              )} · RoL ${(layer.rol * 100).toFixed(0)}% · ${
+                layer.reinstatements_remaining
+              } reinstatement${
+                layer.reinstatements_remaining === 1 ? '' : 's'
+              } left`}</title>
             </rect>
             {/* Transparent overlay carrying the xs-specific testid so the
                 test suite can grab xs bands without filtering on attrs. */}
@@ -372,11 +382,14 @@ export function TreatyLadder({ stack }: TreatyLadderProps) {
   const dataSourceLabel = stack.data_source === 'live' ? 'live' : 'synthetic_demo';
 
   // Compute the dollar axis ceiling: round the max of (top exhaustion,
-  // book_p99) up by 10% so neither hugs the top tick.
+  // book_p99) up by 10% so neither hugs the top tick. `Math.round` collapses
+  // the float artifact (e.g. 132_000_000.00000001 → 132_000_000) so server
+  // and client agree on the SVG `<rect y=...>` attribute strings — without
+  // it, React reports a hydration mismatch on the LadderSvg subtree.
   const xsLayers = stack.layers.filter((l): l is XSLayer => l.type === 'xs');
   const topExhaustion = xsLayers.length ? Math.max(...xsLayers.map((l) => l.exhaustion)) : 0;
   const yMaxRaw = Math.max(topExhaustion, stack.book_p99, 1);
-  const yMax = yMaxRaw * 1.1;
+  const yMax = Math.round(yMaxRaw * 1.1);
 
   if (stack.layers.length === 0) {
     // Honest empty-state — render the trust-tier badge so we don't drop the
