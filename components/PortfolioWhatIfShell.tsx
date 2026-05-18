@@ -37,7 +37,10 @@ import Link from 'next/link';
 import { PortfolioHeader } from '@/components/PortfolioHeader';
 import { WhatIfControl } from '@/components/grammar/WhatIfControl';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
-import type { PortfolioOptimization } from '@/lib/portfolio-actions';
+import {
+  type PortfolioOptimization,
+  computeProjectedCessionSpend,
+} from '@/lib/portfolio-actions';
 import { type Persona, getPersonaConfig } from '@/lib/persona/config';
 
 interface Budgets {
@@ -198,8 +201,13 @@ export function PortfolioWhatIfShell({
   }, [baseline, baselineBudgets]);
 
   // Derive the ExecCard inputs from the latest solve. capital_used is the
-  // VaR-99 retained tail loss (same convention as the Phase 1 page).
+  // gross VaR-99 carried on book_totals.loss_p99; the matching card label is
+  // "Tail exposure / capital budget" (see PortfolioHeader::capital_used).
+  // cessionSpend is summed scenario-by-scenario from the cohort × action
+  // matrix using CESSION_COST_RATE — the previous hardcoded 0 contradicted
+  // every solve that recommended cede_qs or cede_xs.
   const capitalUsed = current.book_totals.loss_p99;
+  const cessionSpend = computeProjectedCessionSpend(current);
   const nonrenewUsedTiv = current.action_summary?.non_renew?.tiv ?? 0;
   const nonrenewCapTiv = totalTiv * current.budgets.max_nonrenew_pct;
 
@@ -229,7 +237,7 @@ export function PortfolioWhatIfShell({
           capitalBudget={current.budgets.capital_budget}
           nonrenewUsedTiv={nonrenewUsedTiv}
           nonrenewCapTiv={nonrenewCapTiv}
-          cessionSpend={0}
+          cessionSpend={cessionSpend}
           cessionBudget={current.budgets.cession_budget}
           horizonStart={current.horizon_start}
           horizonEnd={current.horizon_end}

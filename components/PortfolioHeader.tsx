@@ -172,10 +172,19 @@ function renderCard(kind: PersonaCardKind, p: Props) {
         />
       );
     case 'capital_used':
+      // The numerator is gross VaR-99 (book_totals.loss_p99 from the MIP
+      // artifact), not retained-tail capital actually consumed against the
+      // budget. The budget is the constraint cap on retained tail; ceded
+      // cohorts (cede_xs) contribute ~0 to retained tail, so retained ≪ gross
+      // VaR-99 is expected. We label this honestly: "Tail exposure / capital
+      // budget" makes the relationship clear so a value of $78M / $31M no
+      // longer reads as a constraint violation. A future task may surface
+      // a separate "Retained tail vs budget" card sourced from
+      // book_totals.tvar_99 once the Python-track TVaR-99 lands.
       return (
         <ExecCard
           key={kind}
-          label="Capital used / budget"
+          label="Tail exposure / capital budget"
           value={`${$M(p.capitalUsed)} / ${$M(p.capitalBudget)}`}
           delta={p.capitalUsedDelta}
           tier="MODEL_OUTPUT"
