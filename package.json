@@ -20,7 +20,9 @@
     "next": "^16.2.6",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-map-gl": "^8.1.1"
+    "react-map-gl": "^8.1.1",
+    "terra-draw": "^1.30.0",
+    "terra-draw-maplibre-gl-adapter": "^1.4.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
