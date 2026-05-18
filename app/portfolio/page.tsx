@@ -32,10 +32,18 @@
  * added so the Reinsurance lens has live RoL-by-layer + retained-tail
  * data); the persona only RE-SHAPES the rendering, it never re-fetches.
  *
+ * Task 22/23 (simulate-tab): SimulationBanner is mounted above
+ * PortfolioPersonaScope. loadUnresolvedSims() queries the DB for
+ * promoted+non-retired sims whose IDs are not yet in
+ * portfolio_optimization.meta.json so the banner appears whenever the
+ * cached MIP solve is stale relative to the current simulation set.
+ *
  * Refresh the optimization with `python -m scripts.precompute_portfolio_optimization`.
  */
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { db } from '@/lib/db/client';
+import { SimulationBanner, type UnresolvedSim } from '@/components/grammar/SimulationBanner';
 import { aggregateCohorts } from '@/lib/db/cohorts';
 import { loadPortfolioOptimization } from '@/lib/db/portfolio_optimization';
 import { PortfolioMap } from '@/components/PortfolioMap';
@@ -73,11 +81,34 @@ async function loadTreatyArtifact(): Promise<TreatyStack | null> {
   }
 }
 
+const META_PATH = path.join(process.cwd(), 'artifacts', 'portfolio_optimization.meta.json');
+
+async function loadUnresolvedSims(): Promise<UnresolvedSim[]> {
+  // Sims that are promoted + not retired AND not in the latest meta.json
+  const promoted = await db.execute(
+    'SELECT id, name, peril, promoted_at FROM simulations WHERE promoted = 1 AND retired = 0',
+  );
+  let included: string[] = [];
+  try {
+    const meta = JSON.parse(await readFile(META_PATH, 'utf-8')) as { included_sims?: string[] };
+    included = meta.included_sims ?? [];
+  } catch { /* fresh clone — no meta yet */ }
+  return promoted.rows
+    .map((r) => ({
+      id: String(r.id),
+      name: String(r.name),
+      peril: String(r.peril),
+      promoted_at: String(r.promoted_at),
+    }))
+    .filter((s) => !included.includes(s.id));
+}
+
 export default async function PortfolioPage() {
-  const [cohorts, optimizationRaw, treaty] = await Promise.all([
+  const [cohorts, optimizationRaw, treaty, unresolved] = await Promise.all([
     aggregateCohorts(),
     loadPortfolioOptimization(),
     loadTreatyArtifact(),
+    loadUnresolvedSims(),
   ]);
   // Task P2.0: schema_version 3 ships per-cohort `loss_scenarios` arrays
   // (K=1000 lognormal draws) for downstream P2.6 / P2.7 / P2.8 use. Those
@@ -106,6 +137,7 @@ export default async function PortfolioPage() {
     optWithGap && typeof optWithGap.gap === 'number' ? optWithGap.gap : undefined;
   return (
     <div className="p-6">
+      <SimulationBanner unresolved={unresolved} />
       <h1 className="text-2xl font-bold mb-4">Portfolio Map</h1>
       {optimization ? (
         <PortfolioPersonaScope
