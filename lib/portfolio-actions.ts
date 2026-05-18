@@ -172,6 +172,51 @@ function formatRateLabel(delta: number): string {
   return `${pct > 0 ? '+' : ''}${pct}%`;
 }
 
+/**
+ * Mirror of `api_py/optimize_portfolio.py::CESSION_COST_RATE` — the cession
+ * premium paid out per dollar of cohort `loss_p50` for each action. Only the
+ * two cede actions cost anything; everything else is zero. Kept in TS so the
+ * UI can sum projected cession spend from the cached MIP artifact without
+ * needing to re-run the Python solver.
+ */
+export const CESSION_COST_RATE: Record<ActionName, number> = {
+  retain: 0.0,
+  reprice_n20: 0.0,
+  reprice_n10: 0.0,
+  reprice_0: 0.0,
+  reprice_p5: 0.0,
+  reprice_p10: 0.0,
+  reprice_p15: 0.0,
+  reprice_p20: 0.0,
+  non_renew: 0.0,
+  cede_qs: 0.6,
+  cede_xs: 0.15,
+};
+
+/**
+ * Sum the projected cession premium across all cohort × action fractions in
+ * the optimization artifact. For each cohort `c` and action `a`:
+ *
+ *     contribution = c.loss_p50 × CESSION_COST_RATE[a] × actions[a]
+ *
+ * The MIP relaxation lets `actions[a]` carry a fractional weight, so we sum
+ * over the full 11-action vector rather than the dominant action only.
+ */
+export function computeProjectedCessionSpend(opt: PortfolioOptimization): number {
+  const cohortById = new Map(opt.cohorts.map((c) => [c.id, c]));
+  let total = 0;
+  for (const a of opt.actions) {
+    const cohort = cohortById.get(a.cohort_id);
+    if (!cohort) continue;
+    for (const action of ACTIONS) {
+      const rate = CESSION_COST_RATE[action];
+      if (rate === 0) continue;
+      total += cohort.loss_p50 * rate * (a[action] ?? 0);
+    }
+  }
+  return total;
+}
+
 export const ACTION_LABELS: Record<ActionName, string> = {
   retain: 'Retain',
   reprice_n20: `Reprice ${formatRateLabel(RATE_GRID.reprice_n20)}`,
