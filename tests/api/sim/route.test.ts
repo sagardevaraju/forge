@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { POST, GET } from '@/app/api/sim/route';
+import { GET as GET_BY_ID } from '@/app/api/sim/[id]/route';
 import { db } from '@/lib/db/client';
 
 async function jsonRequest(body: unknown): Promise<Request> {
@@ -47,5 +48,12 @@ describe('GET /api/sim', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(Array.isArray(body.sims)).toBe(true);
+  });
+});
+
+describe('GET /api/sim/[id]', () => {
+  test('returns 404 for unknown id', async () => {
+    const res = await GET_BY_ID(new Request('http://localhost'), { params: Promise.resolve({ id: '0000000000000_deadbeef' }) });
+    expect(res.status).toBe(404);
   });
 });
