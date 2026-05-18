@@ -88,3 +88,25 @@ CREATE TABLE IF NOT EXISTS chat_audit (
 );
 CREATE INDEX IF NOT EXISTS idx_chat_audit_ts ON chat_audit(ts);
 CREATE INDEX IF NOT EXISTS idx_chat_audit_user_id ON chat_audit(user_id);
+
+-- Task SIM.1 — Operator-drawn catastrophe simulations.
+-- Lifecycle: draft (drawn, preview only) → promoted (K=1000 cohort
+-- losses cached at artifacts/simulations/<id>.parquet) → retired
+-- (soft-deleted, no longer feeds joint TVaR-99). See
+-- docs/superpowers/specs/2026-05-18-simulate-tab-design.md section 6.
+CREATE TABLE IF NOT EXISTS simulations (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  peril TEXT NOT NULL,
+  intensity TEXT NOT NULL,
+  footprint TEXT NOT NULL,
+  effective_date TEXT NOT NULL,
+  drawn_by TEXT NOT NULL,
+  drawn_at TEXT NOT NULL,
+  promoted INTEGER NOT NULL DEFAULT 0,
+  promoted_at TEXT,
+  retired INTEGER NOT NULL DEFAULT 0,
+  retired_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_simulations_promoted ON simulations(promoted, retired);
+CREATE INDEX IF NOT EXISTS idx_simulations_drawn_at ON simulations(drawn_at DESC);
