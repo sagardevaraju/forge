@@ -60,10 +60,15 @@ export function AdjusterLoadRollup({ rollup }: Props) {
         {rollup.rows.length > 0 && (
           <span
             data-testid="rollup-summary"
-            className={`ml-auto text-xs font-medium ${deltaColor(rollup.total_delta)}`}
+            className="ml-auto text-xs font-medium text-zinc-700"
           >
-            {formatDelta(rollup.total_delta)} adjusters across {rollup.rows.length}{' '}
-            ZIP3{rollup.rows.length === 1 ? '' : 's'}
+            {rollup.total_needed} needed
+            {' · '}
+            <span className={deltaColor(rollup.total_delta)}>
+              {formatDelta(rollup.total_delta)} vs baseline
+            </span>
+            {' · '}
+            {rollup.rows.length} ZIP3{rollup.rows.length === 1 ? '' : 's'}
           </span>
         )}
       </div>
