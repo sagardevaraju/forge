@@ -2,11 +2,34 @@
  * Shared NDJSON stream reader for /api/agent/chat. Yields parsed events
  * (tool_call, tool_result, final, error) so the AgentChat and Sitrep
  * panels can surface progress without re-implementing the line parser.
+ *
+ * Task 22 — `tool_call` events carry an optional `iteration` (1-indexed) so
+ * the UI can render "Iter N/MAX_TOOL_ITERATIONS" and operators know when the
+ * agent is approaching the loop cap. The cap itself lives here so both the
+ * route and the client component import the same number.
  */
+export const MAX_TOOL_ITERATIONS = 6;
+
+export type Citation = { tool: string; args_hash: string; result_hash: string };
+
 export type ChatEvent =
-  | { type: 'tool_call'; name: string; arguments: unknown }
-  | { type: 'tool_result'; name: string; ok: boolean; summary: string }
-  | { type: 'final'; text: string }
+  | { type: 'tool_call'; name: string; arguments: unknown; iteration?: number }
+  | {
+      type: 'tool_result';
+      name: string;
+      ok: boolean;
+      summary: string;
+      args_hash?: string;
+      result_hash?: string;
+      /**
+       * Optional structured result payload. Task P2.24 — the SITREP panel
+       * pulls the StructuredSitrep off `draft_sitrep`'s tool_result rather
+       * than parsing the assistant's final-message text. Other tools may
+       * leave this undefined; consumers should feature-detect by tool name.
+       */
+      result?: unknown;
+    }
+  | { type: 'final'; text: string; citations?: Citation[] }
   | { type: 'error'; message: string };
 
 export async function* readChatStream(

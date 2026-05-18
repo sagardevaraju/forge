@@ -10,27 +10,33 @@ west coast.  Each scenario carries:
     * a per-ZIP3 surge depth grid in metres
     * an equal probability weight (1/n)
 
-Real NHC ATCF ensemble ingest is deferred to live-demo runs — see the
-module-level note below.
+Task P2.38 — the generator now accepts an optional ``ensemble`` argument
+holding the real GEFS ensemble members served by ``fetch_nhc_cone``.
+When provided, each scenario is seeded from one ensemble member
+(resampled uniformly to reach the requested ``n``), so the output
+distribution reflects the real forecast uncertainty rather than a
+parametric Gaussian assumption.  When ``ensemble`` is None or empty,
+the historical parametric path runs unchanged — existing callers see
+bit-exactly the same draws.
 
-Real-path data source (deferred)
---------------------------------
-NHC publishes GEFS ensemble track files publicly via NCEP NOMADS::
+Real-path data source
+---------------------
+NHC publishes the GEFS ensemble publicly via the AIDS a-deck:
 
-    https://nomads.ncep.noaa.gov/pub/data/nccf/com/atmos/prod/
-        gefs.YYYYMMDD/HH/atmos/
+    https://ftp.nhc.noaa.gov/atcf/aid_public/a<basin><NN><YYYY>.dat
 
-The ATCF "adeck/bdeck" file format (e.g. ``aal092024.dat``) is the
-canonical hurricane track representation.  Live fetching is only
-meaningful during an active storm, so this module ships with a
-built-in demo seed track approximating a typical Florida-bound Cat-4
-landfall.  When wired up for a real event, ``seed_track`` is the only
-parameter that needs to change.
+``fetch_nhc_cone`` (TypeScript) parses the ATCF rows and filters to
+GEFS ensemble tech codes (AC01..AC20, AP01..AP20). The ``ensemble=``
+kwarg is currently a library-only API — the ``/api/scenarios`` HTTP
+route does not yet forward ensemble members from the TS proxy, so
+end-to-end live wiring is a follow-up. Unit + ensemble-path tests
+cover the library contract.
 """
 
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Iterable
 
 import numpy as np
@@ -176,10 +182,90 @@ def _storm_seed(storm_id: str) -> int:
 # ── public API ─────────────────────────────────────────────────────────────
 
 
+def _scenarios_from_ensemble(
+    storm_id: str,
+    n: int,
+    ensemble: list[dict],
+    regime: dict | None,
+    correlation: dict | None = None,
+) -> list[dict]:
+    """Build ``n`` scenarios by resampling the GEFS ensemble members.
+
+    Each output scenario is seeded from one member's forecast track,
+    translated into the canonical scenario schema (``path`` uses
+    ``lon``/``hours_from_now``, while the input ensemble uses
+    ``lng``/``t_hours`` per the TS tool contract).  We sample members
+    deterministically (round-robin starting from a storm-seeded offset)
+    so the resampling is reproducible without drawing from numpy's RNG —
+    that keeps the parametric path's RNG sequence intact.
+
+    Task P2.38.
+    """
+    rng = np.random.default_rng(_storm_seed(storm_id))
+    # Round-robin assignment with a storm-seeded jitter so two storms
+    # with the same N pick different starting members; within one storm
+    # the assignment is reproducible.
+    offset = int(rng.integers(0, max(1, len(ensemble))))
+    scenarios: list[dict] = []
+    prob = 1.0 / n
+    for i in range(n):
+        member = ensemble[(offset + i) % len(ensemble)]
+        member_id = str(member.get("member_id", f"M{(offset + i) % len(ensemble):02d}"))
+        raw_track = member.get("track") or []
+        # Normalise track schema: the TS tool emits {lat, lng, t_hours,
+        # peak_wind}; downstream we expose {lat, lon, hours_from_now}.
+        path: list[dict[str, float]] = []
+        member_peak = 0.0
+        for pt in raw_track:
+            lat = float(pt.get("lat", 0.0))
+            lon = float(pt.get("lon", pt.get("lng", 0.0)))
+            t_h = int(pt.get("hours_from_now", pt.get("t_hours", 0)))
+            pw = float(pt.get("peak_wind", 0.0))
+            if pw > member_peak:
+                member_peak = pw
+            path.append({"lat": round(lat, 4), "lon": round(lon, 4), "hours_from_now": t_h})
+        # Empty member track ⇒ defensive: synthesize a single point at
+        # the FL demo start so the scenario shape is still well-formed.
+        if not path:
+            path.append({"lat": 24.0, "lon": -83.0, "hours_from_now": 0})
+            member_peak = 130.0
+        peak_wind = round(max(35.0, min(215.0, member_peak)), 1)
+        # Per-ZIP3 surge grid identical to the parametric path's model.
+        surge_grid: dict[str, float] = {}
+        for zip3, meta in _COASTAL_ZIP3S.items():
+            dist_km = _min_distance_to_track_km(meta["lat"], meta["lon"], path)
+            surge_grid[zip3] = _surge_depth(dist_km, peak_wind, meta["elev_m"])
+        scenario: dict = {
+            "id": f"{storm_id}_{i + 1:04d}",
+            "path": path,
+            "peak_wind": peak_wind,
+            "surge_grid": surge_grid,
+            "prob": prob,
+            "member_id": member_id,
+        }
+        if regime is not None:
+            scenario["regime"] = regime
+        if correlation is not None:
+            # P2.4 plumbing — common-factor (β, σ) ride along as metadata.
+            scenario["correlation"] = correlation
+        scenarios.append(scenario)
+    # Normalise (handles n where 1/n isn't exactly representable in float).
+    total = sum(s["prob"] for s in scenarios)
+    if total > 0 and abs(total - 1.0) > 1e-9:
+        for s in scenarios:
+            s["prob"] = s["prob"] / total
+    return scenarios
+
+
 def generate_scenarios(
     storm_id: str,
     n: int = 1000,
     seed_track: list[dict] | None = None,
+    regime: dict | None = None,
+    ensemble: list[dict] | None = None,
+    correlation: dict | None = None,
+    importance_buckets: list[dict] | None = None,
+    hurdat2_path: Path | None = None,
 ) -> list[dict]:
     """Generate ``n`` Monte-Carlo scenarios for ``storm_id``.
 
@@ -195,14 +281,68 @@ def generate_scenarios(
         contain ``lat``, ``lon``, ``hours_from_now``, and optionally
         ``peak_wind``.  If omitted, a built-in Cat-4 Florida-bound seed
         is used.
+    regime:
+        Optional AMO/ENSO regime label (typically the return value of
+        :func:`ml.scenarios.regime.regime_label`).  Task P2.3 plumbing —
+        attached to every scenario as metadata so downstream consumers
+        can see the conditioning context.  P2.4+ will use this to bias
+        the scenario draws; for now it is pass-through.
+    ensemble:
+        Optional list of GEFS ensemble member dicts as returned by the
+        ``fetch_nhc_cone`` TS tool.  Each member must shape as
+        ``{"member_id": str, "track": [{"lat", "lng", "t_hours",
+        "peak_wind"}, …]}``.  When provided and non-empty, scenarios
+        are resampled from these members (one member per scenario,
+        round-robin to reach ``n``) rather than drawn from the
+        parametric Gaussian perturbation.  ``None`` or ``[]`` falls
+        back to the parametric path so existing callers are unaffected.
+        Task P2.38.
+    correlation:
+        Optional ``{"beta": float, "sigma": float}`` dict for the
+        common-factor event-residual loss correlation (Task P2.4).
+        Pass-through metadata only — the actual multiplication happens
+        downstream at loss-realization time via
+        :func:`api_py.correlation.apply_common_factor` (wired into the
+        per-cohort loss draw in P2.6 / P2.7).
+    importance_buckets:
+        Optional list of stratified IS draws from
+        :func:`ml.scenarios.importance.stratified_sample`.  Each dict
+        carries ``bucket``, ``weight``, and (typically) ``peak_wind_mph``
+        and ``category``.  Task P2.5 plumbing — when supplied, each
+        scenario inherits the bucket label + uncorrected weight as
+        metadata so IS-corrected TVaR computations (P2.6 / P2.7) can
+        apply the ``p_bucket / n_per_bucket`` Horvitz-Thompson factor at
+        evaluation time.  The actual perturbation math is unchanged.
+    hurdat2_path:
+        Optional path to the HURDAT2 parquet cache (typically
+        ``artifacts/hurdat2/best_track.parquet``).  Task P2.10 plumbing —
+        accepted as a kwarg so downstream consumers can wire a
+        HURDAT2-anchored log-likelihood without changing this function's
+        signature.  The Phase-1 (state, peak-wind bucket) log-lik
+        consumer was never wired upstream of this function, so P2.10
+        only plumbs the kwarg through; replacing the log-lik is a
+        follow-up that must coordinate with P2.6 / P2.7 IS-corrected
+        TVaR consumers.
 
     Returns
     -------
     list[dict]
-        ``n`` scenario dicts.  Probability weights sum to 1.
+        ``n`` scenario dicts.  Probability weights sum to 1.  When the
+        ensemble path is used each scenario additionally carries a
+        ``member_id`` key identifying its source ensemble member.
     """
     if n <= 0:
         return []
+
+    # P2.10 plumbing — kwarg accepted but no consumer is wired here yet.
+    # The HURDAT2-anchored log-lik replacement coordinates with P2.6 /
+    # P2.7 IS-corrected TVaR; see ml/scenarios/hurdat2.py.
+    _ = hurdat2_path
+
+    # Task P2.38 — when a non-empty ensemble is supplied, resample from
+    # it.  Empty / None ⇒ parametric path (backward compat).
+    if ensemble:
+        return _scenarios_from_ensemble(storm_id, n, list(ensemble), regime, correlation)
 
     track = seed_track if seed_track is not None else _DEMO_TRACK_FL
     if len(track) < 2:
@@ -259,15 +399,33 @@ def generate_scenarios(
             dist_km = _min_distance_to_track_km(meta["lat"], meta["lon"], path)
             surge_grid[zip3] = _surge_depth(dist_km, peak_wind, meta["elev_m"])
 
-        scenarios.append(
-            {
-                "id": f"{storm_id}_{i + 1:04d}",
-                "path": path,
-                "peak_wind": peak_wind,
-                "surge_grid": surge_grid,
-                "prob": prob,
-            }
-        )
+        scenario = {
+            "id": f"{storm_id}_{i + 1:04d}",
+            "path": path,
+            "peak_wind": peak_wind,
+            "surge_grid": surge_grid,
+            "prob": prob,
+        }
+        if regime is not None:
+            # P2.3 plumbing — regime label rides along as scenario metadata.
+            # P2.4+ will branch the draw math on this; for now it is opaque.
+            scenario["regime"] = regime
+        if correlation is not None:
+            # P2.4 plumbing — common-factor (β, σ) ride along as metadata.
+            # The actual L'_{s,c} = L_{s,c}·(1 + β·ε_s) multiplication is
+            # applied downstream via api_py.correlation.apply_common_factor
+            # when per-cohort losses are materialized (P2.6 / P2.7).
+            scenario["correlation"] = correlation
+        if importance_buckets is not None and i < len(importance_buckets):
+            # P2.5 plumbing — bucket label + uncorrected weight ride along
+            # as metadata.  Downstream IS-corrected TVaR (P2.6 / P2.7) uses
+            # the bucket to look up ATLANTIC_BASIN_FREQUENCIES and apply
+            # the p_bucket / n_per_bucket Horvitz-Thompson factor.  The
+            # underlying perturbation math is unchanged here.
+            sample = importance_buckets[i]
+            scenario["bucket"] = sample["bucket"]
+            scenario["weight"] = sample["weight"]
+        scenarios.append(scenario)
 
     # Normalise (handles n where 1/n isn't exactly representable in float).
     total = sum(s["prob"] for s in scenarios)

@@ -73,6 +73,156 @@ describe('fetch_nhc_cone', () => {
       fetchNhcCone.handler({ storm_id: '' } as { storm_id: string }),
     ).rejects.toThrow(/storm_id required/);
   });
+
+  test('returns prior_peak_wind in mock fallback (Task 23 delta)', async () => {
+    process.env.FORGE_TOOLS_MODE = 'mock';
+    const out = await fetchNhcCone.handler({ storm_id: 'AL092024' });
+    expect(out.prior_peak_wind).toBe(135);
+  });
+
+  // -------------------------------------------------------------------------
+  // Task P2.22 — multi-advisory ribbon. The tool now also returns up to 4
+  // prior advisories' cones so the EventConsole can stack them as faint
+  // outlines under the current cone. The field is additive and never throws.
+  // -------------------------------------------------------------------------
+
+  test('mock fallback returns prior_cones with 3 entries deterministically (Task P2.22)', async () => {
+    process.env.FORGE_TOOLS_MODE = 'mock';
+    const out = await fetchNhcCone.handler({ storm_id: 'AL092024' });
+    expect(Array.isArray(out.prior_cones)).toBe(true);
+    expect(out.prior_cones).toHaveLength(3);
+    // Each entry has advisory_number, issued_at, and a cone GeoJSON feature.
+    for (const p of out.prior_cones) {
+      expect(typeof p.advisory_number).toBe('number');
+      expect(typeof p.issued_at).toBe('string');
+      expect(p.cone).toBeTruthy();
+    }
+    // Determinism: a second invocation produces the same advisory_number list.
+    const out2 = await fetchNhcCone.handler({ storm_id: 'AL092024' });
+    expect(out2.prior_cones.map((p) => p.advisory_number)).toEqual(
+      out.prior_cones.map((p) => p.advisory_number),
+    );
+  });
+
+  test('mock prior_cones are sorted by advisory_number desc (Task P2.22)', async () => {
+    process.env.FORGE_TOOLS_MODE = 'mock';
+    const out = await fetchNhcCone.handler({ storm_id: 'AL092024' });
+    const advs = out.prior_cones.map((p) => p.advisory_number);
+    const sortedDesc = [...advs].sort((a, b) => b - a);
+    expect(advs).toEqual(sortedDesc);
+    // And each prior advisory_number is strictly less than the current one
+    // (mock current is "14A" ⇒ numeric 14; priors should be 13, 12, 11).
+    for (const a of advs) expect(a).toBeLessThan(14);
+  });
+
+  test('live path returns prior_cones with up to 4 entries when archive serves them (Task P2.22)', async () => {
+    delete process.env.FORGE_TOOLS_MODE;
+    // First call is the CONE_latest.json; subsequent calls fetch advisory N-1,
+    // N-2, N-3, N-4. We let the spy serve a generic cone payload for all of
+    // them — the only thing that needs to differ is the ADVISNUM so the tool
+    // can sort by it. Counter mutates per call.
+    let callIndex = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      callIndex++;
+      // Latest is advisory 23; priors are 22, 21, 20, 19 (in some order).
+      const advisnum = callIndex === 1 ? 23 : 23 - (callIndex - 1);
+      return new Response(
+        JSON.stringify({
+          features: [
+            {
+              properties: {
+                ADVISNUM: String(advisnum),
+                MAXWIND: 110,
+                ADVDATE: `2026-05-1${callIndex}T00:00:00Z`,
+              },
+              geometry: { type: 'Polygon', coordinates: [[[callIndex, 0]]] },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+    const out = await fetchNhcCone.handler({ storm_id: 'AL092024' });
+    expect(out.source).toBe('live');
+    // Up to 4 priors.
+    expect(out.prior_cones.length).toBeGreaterThan(0);
+    expect(out.prior_cones.length).toBeLessThanOrEqual(4);
+    // Sorted desc by advisory_number, all strictly less than current 23.
+    const advs = out.prior_cones.map((p) => p.advisory_number);
+    expect(advs).toEqual([...advs].sort((a, b) => b - a));
+    for (const a of advs) expect(a).toBeLessThan(23);
+  });
+
+  test('live path tolerates 404s on individual priors (Task P2.22)', async () => {
+    delete process.env.FORGE_TOOLS_MODE;
+    let callIndex = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      callIndex++;
+      // First call (latest) succeeds; alternate priors 404 to exercise the
+      // skip-on-failure path. Result: latest + 2 priors (the even-indexed
+      // prior fetches), not 4.
+      if (callIndex === 1) {
+        return new Response(
+          JSON.stringify({
+            features: [
+              {
+                properties: { ADVISNUM: '23', MAXWIND: 130 },
+                geometry: { type: 'Polygon', coordinates: [[[0, 0]]] },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      // Odd-numbered subsequent calls (prior 1, prior 3) → 404.
+      if (callIndex % 2 === 0) {
+        return new Response('not found', { status: 404 });
+      }
+      return new Response(
+        JSON.stringify({
+          features: [
+            {
+              properties: { ADVISNUM: String(23 - (callIndex - 1)), MAXWIND: 110 },
+              geometry: { type: 'Polygon', coordinates: [[[callIndex, 0]]] },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+    const out = await fetchNhcCone.handler({ storm_id: 'AL092024' });
+    expect(out.source).toBe('live');
+    // Some priors must have come through, but fewer than 4 because half 404'd.
+    expect(out.prior_cones.length).toBeLessThan(4);
+    // And the response itself is still well-formed (regression guard).
+    expect(out.advisory_number).toBe('23');
+  });
+
+  test('live path returns empty prior_cones when ALL priors fail (Task P2.22)', async () => {
+    delete process.env.FORGE_TOOLS_MODE;
+    let callIndex = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      callIndex++;
+      if (callIndex === 1) {
+        return new Response(
+          JSON.stringify({
+            features: [
+              {
+                properties: { ADVISNUM: '23', MAXWIND: 130 },
+                geometry: { type: 'Polygon', coordinates: [[[0, 0]]] },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      // Every prior 404s — should still return a well-formed result with [].
+      return new Response('not found', { status: 404 });
+    });
+    const out = await fetchNhcCone.handler({ storm_id: 'AL092024' });
+    expect(out.source).toBe('live');
+    expect(out.prior_cones).toEqual([]);
+  });
 });
 
 describe('fetch_firms_fires', () => {
@@ -190,23 +340,29 @@ describe('query_book_exposure (real DB)', () => {
 });
 
 describe('generate_scenarios', () => {
+  // Task P2.23 — the handler now returns `{ scenarios, cone_envelope }`
+  // instead of `Scenario[]`. The envelope payload is the GEFS-perturbation
+  // convex hull at t24h/t48h/t72h. Existing assertions are rewritten to
+  // peek inside `out.scenarios`; new ones check the envelope shape.
+
   test('returns mock when FORGE_TOOLS_MODE=mock', async () => {
     process.env.FORGE_TOOLS_MODE = 'mock';
     const spy = vi.spyOn(globalThis, 'fetch');
     const out = await generateScenarios.handler({ storm_id: 'AL092024', n: 5 });
-    expect(out).toHaveLength(5);
-    expect(out[0].peak_wind).toBeGreaterThan(0);
+    expect(out.scenarios).toHaveLength(5);
+    expect(out.scenarios[0].peak_wind).toBeGreaterThan(0);
+    expect(out.cone_envelope).not.toBeNull();
     expect(spy).not.toHaveBeenCalled();
   });
 
-  test('proxies to /api/scenarios and returns its JSON', async () => {
+  test('proxies to /api/scenarios and surfaces its JSON as `scenarios`', async () => {
     delete process.env.FORGE_TOOLS_MODE;
     const payload = [{ id: 0, path: {}, peak_wind: 100, surge_grid: {}, prob: 0.5 }];
     const spy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response(JSON.stringify(payload), { status: 200 }));
     const out = await generateScenarios.handler({ storm_id: 'AL092024', n: 1 });
-    expect(out).toEqual(payload);
+    expect(out.scenarios).toEqual(payload);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(String(spy.mock.calls[0][0])).toContain('storm_id=AL092024');
   });
@@ -215,12 +371,111 @@ describe('generate_scenarios', () => {
     delete process.env.FORGE_TOOLS_MODE;
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('boom', { status: 500 }));
     const out = await generateScenarios.handler({ storm_id: 'AL092024', n: 3 });
-    expect(out).toHaveLength(3);
+    expect(out.scenarios).toHaveLength(3);
+    // Mock fallback also synthesises the cone envelope so the UI has
+    // something to render offline.
+    expect(out.cone_envelope).not.toBeNull();
   });
 });
 
 describe('draft_sitrep', () => {
-  test('returns mocked memo when no LLM key and no factory override', async () => {
+  // Task P2.24 — the tool now returns a StructuredSitrep (6 named fields)
+  // wrapped in { data_source, sitrep }. The handler's mock-fallback path
+  // (no LLM key) must still produce a valid StructuredSitrep so the UI
+  // never has to handle a half-shaped payload.
+
+  test('returns valid StructuredSitrep on happy path (mock LLM)', async () => {
+    process.env.OPENROUTER_API_KEY = 'test';
+    delete process.env.FORGE_TOOLS_MODE;
+    const goodPayload = {
+      threat_tier: 'high',
+      lead_time_hours: 36,
+      portfolio_recommendation:
+        'Cede QS on FL ZIP3 330–339; non-renew the bottom-decile cohorts.',
+      operational_recommendation:
+        'Stage 12 adjusters in Tampa, 8 in Miami, 6 in Jacksonville.',
+      claims_prep_recommendation:
+        'Pre-flag cohorts above 35% probability; open IVR overflow.',
+      escalation_criteria:
+        'Re-broadcast if peak wind > 140 mph or cone shifts >25 nm east.',
+    };
+    const fakeLlm = {
+      chat: vi
+        .fn()
+        .mockResolvedValue({ content: JSON.stringify(goodPayload) }),
+    };
+    __setDraftSitrepLlmFactory(() => fakeLlm);
+    try {
+      const out = await draftSitrep.handler({
+        threat_id: 'AL092024',
+        posture_summary: 'p',
+      });
+      expect(out.data_source).toBe('live');
+      expect(out.sitrep.threat_tier).toBe('high');
+      expect(out.sitrep.lead_time_hours).toBe(36);
+      expect(out.sitrep.portfolio_recommendation).toMatch(/Cede QS/);
+      expect(out.sitrep.operational_recommendation).toMatch(/adjusters/);
+      expect(out.sitrep.claims_prep_recommendation).toMatch(/IVR/);
+      expect(out.sitrep.escalation_criteria).toMatch(/140 mph/);
+      expect(fakeLlm.chat).toHaveBeenCalledTimes(1);
+    } finally {
+      __resetDraftSitrepLlmFactory();
+    }
+  });
+
+  test('malformed LLM output falls back to synthetic with data_source=synthetic_fallback', async () => {
+    process.env.OPENROUTER_API_KEY = 'test';
+    delete process.env.FORGE_TOOLS_MODE;
+    // LLM returns prose, not JSON ⇒ validator rejects ⇒ stub falls in.
+    __setDraftSitrepLlmFactory(() => ({
+      chat: vi.fn().mockResolvedValue({
+        content: 'Sure, here is a memo as freeform markdown without JSON.',
+      }),
+    }));
+    try {
+      const out = await draftSitrep.handler({
+        threat_id: 'AL092024',
+        posture_summary: 'p',
+      });
+      expect(out.data_source).toBe('synthetic_fallback');
+      // The stub still satisfies the schema so the UI never crashes.
+      expect(['low', 'medium', 'high', 'critical']).toContain(out.sitrep.threat_tier);
+      expect(typeof out.sitrep.lead_time_hours).toBe('number');
+      expect(typeof out.sitrep.portfolio_recommendation).toBe('string');
+      expect(typeof out.sitrep.operational_recommendation).toBe('string');
+      expect(typeof out.sitrep.claims_prep_recommendation).toBe('string');
+      expect(typeof out.sitrep.escalation_criteria).toBe('string');
+    } finally {
+      __resetDraftSitrepLlmFactory();
+    }
+  });
+
+  test('tool registry shape — JSON-schema parameters describe the 6 fields', () => {
+    // The LLM uses these parameters to plan the call; the tool itself
+    // uses them as a documentation contract for what the LLM-emitted
+    // content should look like. We pin the names so a regression in
+    // the schema is caught at unit-test time.
+    expect(draftSitrep.parameters.type).toBe('object');
+    const props = draftSitrep.parameters.properties as Record<string, unknown>;
+    // Inputs: the tool still takes threat_id + posture_summary as args.
+    expect(props.threat_id).toBeDefined();
+    expect(props.posture_summary).toBeDefined();
+    // The description string MUST advertise the 6-field output shape so the
+    // LLM emits a JSON body with the right keys.
+    const desc = draftSitrep.description.toLowerCase();
+    for (const key of [
+      'threat_tier',
+      'lead_time_hours',
+      'portfolio_recommendation',
+      'operational_recommendation',
+      'claims_prep_recommendation',
+      'escalation_criteria',
+    ]) {
+      expect(desc).toContain(key);
+    }
+  });
+
+  test('returns synthetic_fallback when no LLM key and no factory override', async () => {
     delete process.env.OPENROUTER_API_KEY;
     delete process.env.GITHUB_MODELS_PAT;
     delete process.env.FORGE_TOOLS_MODE;
@@ -228,30 +483,11 @@ describe('draft_sitrep', () => {
       threat_id: 'AL092024',
       posture_summary: '5 ZIP3s in-cone; TIV $400M.',
     });
-    expect(out.memo_markdown).toMatch(/SITREP/);
-    expect(out.memo_markdown).toMatch(/AL092024/);
+    expect(out.data_source).toBe('synthetic_fallback');
+    expect(out.sitrep.portfolio_recommendation).toBeTruthy();
   });
 
-  test('uses the injected LLM factory when keys are set', async () => {
-    process.env.OPENROUTER_API_KEY = 'test';
-    delete process.env.FORGE_TOOLS_MODE;
-    const fakeLlm = {
-      chat: vi.fn().mockResolvedValue({ content: '# Drafted Memo\n\nbody' }),
-    };
-    __setDraftSitrepLlmFactory(() => fakeLlm);
-    try {
-      const out = await draftSitrep.handler({
-        threat_id: 'X',
-        posture_summary: 'y',
-      });
-      expect(out.memo_markdown).toContain('Drafted Memo');
-      expect(fakeLlm.chat).toHaveBeenCalledTimes(1);
-    } finally {
-      __resetDraftSitrepLlmFactory();
-    }
-  });
-
-  test('falls back to mock memo when injected LLM throws', async () => {
+  test('synthetic_fallback when injected LLM throws', async () => {
     process.env.OPENROUTER_API_KEY = 'test';
     delete process.env.FORGE_TOOLS_MODE;
     __setDraftSitrepLlmFactory(() => ({
@@ -262,7 +498,8 @@ describe('draft_sitrep', () => {
         threat_id: 'AL092024',
         posture_summary: 'p',
       });
-      expect(out.memo_markdown).toMatch(/SITREP/);
+      expect(out.data_source).toBe('synthetic_fallback');
+      expect(out.sitrep.threat_tier).toBeTruthy();
     } finally {
       __resetDraftSitrepLlmFactory();
     }

@@ -1,0 +1,29 @@
+/**
+ * Task 1 (Redesign Phase 1) — TrustTierBadge grammar primitive.
+ *
+ * A pure, stateless pill that renders a trust-tier label with its tooltip and
+ * Tailwind palette pulled from `lib/grammar/trust-tiers.ts`. Every later view
+ * composes against this primitive instead of hand-rolling green/amber pills.
+ */
+import { TRUST_TIER_META, type TrustTier } from '@/lib/grammar/trust-tiers';
+
+interface TrustTierBadgeProps {
+  tier: TrustTier;
+  className?: string;
+}
+
+export function TrustTierBadge({ tier, className }: TrustTierBadgeProps) {
+  const meta = TRUST_TIER_META[tier];
+  const classes = [
+    'inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium',
+    meta.className,
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  return (
+    <span data-testid="trust-tier-badge" title={meta.tooltip} className={classes}>
+      {meta.label}
+    </span>
+  );
+}

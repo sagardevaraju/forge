@@ -14,6 +14,28 @@ function req(body: unknown): Request {
   });
 }
 
+// Task 21 — /api/agent/chat is an NDJSON stream. Each line is one JSON event
+// of shape {type:"tool_call"|"tool_result"|"final"|"error", ...}. Parse the
+// body line-by-line so tests can assert on individual events.
+async function readNdjson(r: Response): Promise<Array<Record<string, unknown>>> {
+  const text = await r.text();
+  return text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .map((l) => JSON.parse(l) as Record<string, unknown>);
+}
+
+// Task P2.35 — tool results sent back to the LLM are wrapped in
+// <tool_result name="..."> ... </tool_result> delimiters. Strip the wrapper
+// before JSON-parsing the body.
+function stripToolResultWrapper(content: string): string {
+  return content.replace(
+    /^<tool_result name="[^"]+">|<\/tool_result>$/g,
+    '',
+  );
+}
+
 beforeEach(() => __resetChatRouteLlmFactory());
 afterEach(() => __resetChatRouteLlmFactory());
 
@@ -33,7 +55,11 @@ describe('POST /api/agent/chat', () => {
     __setChatRouteLlmFactory(() => ({ chat }));
     const r = await POST(req({ messages: [{ role: 'user', content: 'hi' }] }));
     expect(r.status).toBe(200);
-    expect(await r.text()).toBe('hello operator');
+    const events = await readNdjson(r);
+    // Last event must be the final assistant turn.
+    const finalEvent = events[events.length - 1];
+    expect(finalEvent.type).toBe('final');
+    expect(finalEvent.text).toBe('hello operator');
     expect(chat).toHaveBeenCalledTimes(1);
     // System prompt must be prepended.
     const sentMessages = chat.mock.calls[0][0].messages;
@@ -58,7 +84,10 @@ describe('POST /api/agent/chat', () => {
     );
 
     expect(r.status).toBe(200);
-    expect(await r.text()).toMatch(/109M|342/);
+    const events = await readNdjson(r);
+    const finalEvent = events[events.length - 1] as { type: string; text: string };
+    expect(finalEvent.type).toBe('final');
+    expect(finalEvent.text).toMatch(/109M|342/);
     expect(chat).toHaveBeenCalledTimes(2);
 
     // Second call must include the tool result.
@@ -66,7 +95,8 @@ describe('POST /api/agent/chat', () => {
     const toolMsg = secondMessages.find((m: { role: string }) => m.role === 'tool');
     expect(toolMsg).toBeDefined();
     expect(toolMsg.tool_call_id).toBe('tc1');
-    const parsed = JSON.parse(toolMsg.content);
+    // Task P2.35 — strip <tool_result name="..."> wrapper before parsing.
+    const parsed = JSON.parse(stripToolResultWrapper(toolMsg.content));
     expect(parsed.policies).toBeGreaterThan(0);
     expect(parsed.total_tiv).toBeGreaterThan(0);
   });
@@ -85,9 +115,14 @@ describe('POST /api/agent/chat', () => {
 
     const r = await POST(req({ messages: [{ role: 'user', content: 'cone?' }] }));
     expect(r.status).toBe(200);
+    // Consume the stream so the async tool-dispatch + second LLM call complete.
+    await readNdjson(r);
     const secondMessages = chat.mock.calls[1][0].messages;
     const toolMsg = secondMessages.find((m: { role: string }) => m.role === 'tool');
-    expect(JSON.parse(toolMsg.content)).toMatchObject({ error: expect.stringMatching(/storm_id/) });
+    // Task P2.35 — strip <tool_result name="..."> wrapper before parsing.
+    expect(
+      JSON.parse(stripToolResultWrapper(toolMsg.content)),
+    ).toMatchObject({ error: expect.stringMatching(/storm_id/) });
   });
 
   test('returns {error:unknown tool} for unrecognized tool name', async () => {
@@ -103,10 +138,16 @@ describe('POST /api/agent/chat', () => {
     const r = await POST(req({ messages: [{ role: 'user', content: 'q' }] }));
     expect(r.status).toBe(200);
     const toolMsg = chat.mock.calls[1][0].messages.find((m: { role: string }) => m.role === 'tool');
-    expect(JSON.parse(toolMsg.content)).toMatchObject({ error: 'unknown tool: not_a_tool' });
+    // Task P2.35 — tool results are wrapped in <tool_result name="..."> tags.
+    // Strip the wrapper before JSON-parsing the body.
+    const stripped = toolMsg.content.replace(
+      /^<tool_result name="[^"]+">|<\/tool_result>$/g,
+      '',
+    );
+    expect(JSON.parse(stripped)).toMatchObject({ error: 'unknown tool: not_a_tool' });
   });
 
-  test('hits the 6-iteration loop ceiling and returns 500', async () => {
+  test('hits the 6-iteration loop ceiling and emits an error event', async () => {
     const chat = vi.fn().mockResolvedValue({
       content: '',
       tool_calls: [
@@ -115,7 +156,13 @@ describe('POST /api/agent/chat', () => {
     });
     __setChatRouteLlmFactory(() => ({ chat }));
     const r = await POST(req({ messages: [{ role: 'user', content: 'x' }] }));
-    expect(r.status).toBe(500);
+    // Task 21 — NDJSON stream: the route returns 200 with an inline error
+    // event on the LAST line instead of a non-200 status.
+    expect(r.status).toBe(200);
+    const events = await readNdjson(r);
+    const lastEvent = events[events.length - 1] as { type: string; message: string };
+    expect(lastEvent.type).toBe('error');
+    expect(lastEvent.message).toMatch(/exceeded 6 iterations/);
     expect(chat).toHaveBeenCalledTimes(6);
   });
 });

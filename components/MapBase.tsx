@@ -15,6 +15,13 @@ interface MapBaseProps {
   style?: React.CSSProperties;
   interactiveLayerIds?: string[];
   onClick?: (e: MapMouseEvent) => void;
+  /**
+   * Task P2.20 — forwarded so the Portfolio Map can drive a shared hover
+   * state across two synchronized panes. Receives the same MapLibre move
+   * event; callers typically inspect `e.features?.[0]?.properties` to find
+   * the hovered feature.
+   */
+  onMouseMove?: (e: MapMouseEvent) => void;
 }
 
 const DEFAULT_VIEW = { longitude: -82.5, latitude: 28.5, zoom: 5 };
@@ -26,6 +33,7 @@ export function MapBase({
   style,
   interactiveLayerIds,
   onClick,
+  onMouseMove,
 }: MapBaseProps) {
   return (
     <Map
@@ -34,6 +42,7 @@ export function MapBase({
       mapStyle={MAP_STYLE}
       interactiveLayerIds={interactiveLayerIds}
       onClick={onClick}
+      onMouseMove={onMouseMove}
     >
       {children}
     </Map>

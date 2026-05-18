@@ -19,6 +19,28 @@ const policies: PreflagPolicy[] = [
   { policy_id: 4, zip3: '337', tiv: 600_000, build_type: 'wood_frame', flood_zone: 'VE', severity: 'high', expected_loss: 240_000 },
 ];
 
+/**
+ * Task P2.29 — Diff column compares the current severity (`expected_loss`)
+ * with a prior snapshot supplied by the page. Tolerance is the max of $100
+ * and 2% of the current severity, so noisy re-solves don't flip arrows.
+ */
+const policiesWithDiff: PreflagPolicy[] = [
+  // Up: 320K → 150K is a $170K drop, well outside tolerance, so this is ↓.
+  { policy_id: 1, zip3: '332', tiv: 1_000_000, build_type: 'masonry', flood_zone: 'AE', severity: 'medium', expected_loss: 150_000 },
+  // Up: 100K → 320K is a $220K rise.
+  { policy_id: 2, zip3: '334', tiv: 800_000, build_type: 'manufactured', flood_zone: 'VE', severity: 'high', expected_loss: 320_000 },
+  // Within tolerance: 25_000 vs 25_050 (delta $50, < max($100, 2% of 25K = $500)).
+  { policy_id: 3, zip3: '335', tiv: 500_000, build_type: 'wood_frame', flood_zone: 'X', severity: 'low', expected_loss: 25_000 },
+  // No prior snapshot.
+  { policy_id: 4, zip3: '337', tiv: 600_000, build_type: 'wood_frame', flood_zone: 'VE', severity: 'high', expected_loss: 240_000 },
+];
+const priorMap = new Map<number, number>([
+  [1, 320_000],
+  [2, 100_000],
+  [3, 25_050],
+  // policy_id 4 deliberately absent.
+]);
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -68,6 +90,113 @@ describe('ClaimsTable', () => {
 
     expect(clickSpy).toHaveBeenCalledTimes(1);
     expect(revoke).toHaveBeenCalledWith('blob:mock');
+  });
+
+  test('groups by ZIP3 with county header rows', () => {
+    render(<ClaimsTable policies={[
+      { policy_id: 1, zip3: '337', tiv: 1e6, build_type: 'wood_frame', flood_zone: 'AE', severity: 'medium', expected_loss: 150_000 },
+      { policy_id: 2, zip3: '337', tiv: 2e6, build_type: 'masonry', flood_zone: 'AE', severity: 'medium', expected_loss: 300_000 },
+      { policy_id: 3, zip3: '342', tiv: 1.5e6, build_type: 'manufactured', flood_zone: 'VE', severity: 'high', expected_loss: 600_000 },
+    ]} />);
+    expect(screen.getByText(/Pinellas, FL/)).toBeInTheDocument();
+    expect(screen.getByText(/Sarasota, FL/)).toBeInTheDocument();
+  });
+
+  test('push button is disabled when the visible row set is empty', () => {
+    render(<ClaimsTable policies={[]} />);
+    const btn = screen.getByTestId('push-to-claims') as HTMLButtonElement;
+    expect(btn).toBeDisabled();
+  });
+
+  test('push button POSTs visible policy_ids and shows inline confirmation', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ received: 2, ids_preview: [2, 4] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+    render(<ClaimsTable policies={policies} />);
+    // Narrow to "high" → only ids 2 and 4 should be visible.
+    fireEvent.change(screen.getByLabelText('severity-filter'), { target: { value: 'high' } });
+    fireEvent.click(screen.getByTestId('push-to-claims'));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/claims/push');
+    expect(init.method).toBe('POST');
+    const body = JSON.parse(init.body as string);
+    expect(body.policy_ids).toEqual([2, 4]);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('push-toast')).toHaveTextContent('Pushed 2 policies'),
+    );
+  });
+
+  test('renders ↑ when current severity > prior + tolerance', () => {
+    render(<ClaimsTable policies={policiesWithDiff} priorSeverities={priorMap} />);
+    // policy_id 2: prior 100K → current 320K (large rise) → ↑.
+    const cell = screen.getByTestId('severity-diff-2');
+    expect(cell).toHaveTextContent('↑');
+  });
+
+  test('renders ↓ when current severity < prior - tolerance', () => {
+    render(<ClaimsTable policies={policiesWithDiff} priorSeverities={priorMap} />);
+    // policy_id 1: prior 320K → current 150K (large drop) → ↓.
+    const cell = screen.getByTestId('severity-diff-1');
+    expect(cell).toHaveTextContent('↓');
+  });
+
+  test('renders = when within tolerance', () => {
+    render(<ClaimsTable policies={policiesWithDiff} priorSeverities={priorMap} />);
+    // policy_id 3: prior 25,050 → current 25,000 (delta $50, < $500 = 2% of 25K).
+    const cell = screen.getByTestId('severity-diff-3');
+    expect(cell).toHaveTextContent('=');
+  });
+
+  test('renders — when no prior snapshot', () => {
+    render(<ClaimsTable policies={policiesWithDiff} priorSeverities={priorMap} />);
+    // policy_id 4 has no entry in the prior map.
+    const cell = screen.getByTestId('severity-diff-4');
+    expect(cell).toHaveTextContent('—');
+    // Tooltip / title attribute hints at "no prior snapshot".
+    expect(cell.getAttribute('title')).toMatch(/no prior snapshot/i);
+  });
+
+  test('renders — for every row when priorSeverities prop is omitted', () => {
+    render(<ClaimsTable policies={policiesWithDiff} />);
+    for (const p of policiesWithDiff) {
+      const cell = screen.getByTestId(`severity-diff-${p.policy_id}`);
+      expect(cell).toHaveTextContent('—');
+    }
+  });
+
+  test('renders — when the current expected_loss is null (cohort missing)', () => {
+    const withNull: PreflagPolicy[] = [
+      { policy_id: 99, zip3: '332', tiv: 1e6, build_type: 'masonry', flood_zone: 'AE', severity: 'medium', expected_loss: null },
+    ];
+    render(<ClaimsTable policies={withNull} priorSeverities={new Map([[99, 100_000]])} />);
+    const cell = screen.getByTestId('severity-diff-99');
+    // No comparable current severity → "—".
+    expect(cell).toHaveTextContent('—');
+  });
+
+  test('push button surfaces an error toast on non-OK response', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: 'policy_ids must be a non-empty array' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    render(<ClaimsTable policies={policies} />);
+    fireEvent.click(screen.getByTestId('push-to-claims'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('push-toast')).toHaveTextContent(/Push failed/),
+    );
   });
 });
 

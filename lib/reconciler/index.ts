@@ -19,10 +19,44 @@
  *     non-renewed (claims are coming and we need our adjusters) or the
  *     adjuster staging should be re-thought.
  *
+ * Task P2.31 — Notice-period filter. For each cohort the MIP voted to
+ * **non-renew**, check whether the carrier has enough days of statutory
+ * notice to non-renew at the upcoming renewal cycle. If not, the action is
+ * **downgraded** to ``non_renew_next_renewal`` and stamped with the next
+ * renewal cycle's effective date (+1 year). This is a post-solve artifact
+ * emitted alongside the original portfolio actions; the MIP itself never
+ * sees the new label.
+ *
+ * Task P2.32 — Per-(state, territory) regulatory caps. After P2.31 runs,
+ * the surviving non-renew cohorts are grouped into ``(state, territory)``
+ * buckets (FL:coastal, TX:tier_1, etc.). For each bucket the reconciler
+ * sums non-renew TIV; if the total exceeds the bucket's cap (see
+ * ``lib/regulatory/territory_caps.ts``), the smallest cohorts are downgraded
+ * one at a time (least customer disruption first) until the bucket fits,
+ * each emitting a ``non_renew_capped`` stamp. Precedence: a cohort already
+ * deferred by P2.31 does NOT count toward this year's bucket cap; it has
+ * already been pushed to next year's cycle.
+ *
+ * Task P2.34 — Agent-channel notification emit. After the pin / notice /
+ * cap passes finalize each non-renew cohort's action label, the reconciler
+ * emits an ``AgentNotification`` per non-renewed cohort summarizing the
+ * decision (cohort, final action label, policy / TIV totals, human-readable
+ * rationale, attached stamps for traceability). The reconciler does NOT
+ * make a network call — it just produces the array; a caller can then POST
+ * it to ``/api/notifications/agent`` which (Phase 2) logs the events to
+ * stdout and (Phase 3) will wire to a real channel.
+ *
  * The reconciler is intentionally pure: same input → same output, no I/O,
  * no DB access. Inputs come in as plain objects; outputs are a new
  * `ReconcileOutput` (the original inputs are not mutated).
  */
+
+import { noticeWindowForZip3 } from '@/lib/regulatory/notice_periods';
+import {
+  applyTerritoryCaps,
+  type TerritoryCapStamp,
+} from '@/lib/regulatory/territory_caps';
+import { ACTIONS, type ActionName } from '@/lib/portfolio-actions';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -31,8 +65,19 @@
 export interface PortfolioAction {
   cohort_id: string;
   retain: number;
-  reprice_up: number;
-  reprice_down: number;
+  /**
+   * P2.8 rate-grid reprice buckets (mirrors
+   * `api_py/optimize_portfolio.py::RATE_GRID`). The two pre-Phase-2
+   * scalars `reprice_up`/`reprice_down` were replaced by a 7-bucket
+   * discretized grid.
+   */
+  reprice_n20: number;
+  reprice_n10: number;
+  reprice_0: number;
+  reprice_p5: number;
+  reprice_p10: number;
+  reprice_p15: number;
+  reprice_p20: number;
   non_renew: number;
   cede_qs: number;
   cede_xs: number;
@@ -60,6 +105,53 @@ export interface ReconcileInput {
   cohort_zip3_map?: Record<string, string>;
   /** zone_id → zip3 prefix. */
   zone_zip3_map?: Record<number, string>;
+  /**
+   * P2.31 — cohort_id → next renewal effective date (ISO ``YYYY-MM-DD``).
+   * Optional; when missing, the reconciler defaults to ``today + 365 days``.
+   */
+  cohort_renewal_date_map?: Record<string, string>;
+  /**
+   * P2.31 — clock injection for deterministic tests. Defaults to ``new Date()``
+   * at call time.
+   */
+  today?: Date;
+  /**
+   * P2.32 — per-cohort total TIV, used to size the territory-cap denominator
+   * and to choose downgrade order (smallest-first). Cohorts whose TIV is
+   * unknown contribute zero to the bucket sum.
+   */
+  cohort_tiv_map?: Record<string, number>;
+  /**
+   * P2.32 — per-bucket total book TIV (e.g. ``{"FL:coastal": 1.2e9}``). When
+   * a bucket's denominator is missing, the cap-application pass falls back
+   * to the bucket's own non-renew TIV; see ``applyTerritoryCaps``.
+   */
+  bucket_total_tiv?: Record<string, number>;
+  /**
+   * P2.33 — operator pin overrides. Each pin forces a specific cohort's
+   * recommended action regardless of the MIP's vote. Pins are stored
+   * per-policy (see ``lib/db/pins.ts``); the reconciler maps each pinned
+   * ``policy_id`` to its ``cohort_id`` via ``policy_to_cohort_map`` and
+   * rewrites that cohort's action one-hot. Pinned cohorts are NOT exempt
+   * from the P2.31 / P2.32 filters — a pin to ``non_renew`` can still be
+   * downgraded by insufficient notice or an over-cap bucket.
+   */
+  pins?: ReadonlyArray<{
+    policy_id: number;
+    action: ActionName;
+    operator: string;
+    ts: string;
+    rationale: string;
+  }>;
+  /** P2.33 — ``policy_id → cohort_id`` lookup for pin resolution. */
+  policy_to_cohort_map?: Record<number, string>;
+  /**
+   * P2.34 — per-cohort policy count, used to populate the
+   * ``policy_count`` field of the emitted ``AgentNotification``. Optional;
+   * missing entries default to ``0`` (the reconciler is pure and does not
+   * hit the DB to compute this).
+   */
+  cohort_policy_count_map?: Record<string, number>;
 }
 
 export interface ReconcileConflict {
@@ -67,6 +159,117 @@ export interface ReconcileConflict {
   cohort_id: string;
   zone_id: number;
   details: string;
+}
+
+/**
+ * P2.31 / P2.32 — Reconciler-side action labels. The MIP only emits the six
+ * base actions in ``ActionName``; the reconciler emits these artifact labels
+ * when a ``non_renew`` action either (P2.31) fails the state's statutory
+ * notice window or (P2.32) exceeds a per-(state, territory) regulatory cap.
+ *
+ * A single cohort can carry both stamps simultaneously — they are surfaced
+ * as separate entries in ``stamped_actions``. The P2.31 (notice-period)
+ * downgrade takes precedence: a cohort already deferred to next year does
+ * not count toward this year's bucket cap.
+ */
+export type ReconciledActionName = 'non_renew_next_renewal' | 'non_renew_capped';
+
+/**
+ * P2.31 — A stamped reconciler-side action for a cohort whose non-renewal
+ * must be deferred to the next renewal cycle (notice-period filter).
+ */
+export interface NoticePeriodStamp {
+  cohort_id: string;
+  action: 'non_renew_next_renewal';
+  original_action: 'non_renew';
+  downgrade_reason: 'insufficient_notice_period';
+  /** ISO ``YYYY-MM-DD`` — next renewal date + 1 year. */
+  effective_date_stamp: string;
+  /** ZIP3 prefix that drove the state lookup (for traceability). */
+  zip3?: string;
+  /** Statutory notice window days for the state. */
+  notice_days: number;
+  /** Days from ``today`` to the renewal we would have non-renewed at. */
+  days_to_renewal: number;
+}
+
+/**
+ * P2.32 — A stamped reconciler-side action for a cohort the territory-cap
+ * filter downgraded because its (state, territory) bucket would otherwise
+ * exceed the regulatory annual non-renewal share.
+ */
+export interface TerritoryCapStampWithZip extends TerritoryCapStamp {
+  /** ZIP3 prefix that drove the territory lookup (for traceability). */
+  zip3?: string;
+}
+
+/**
+ * P2.33 — A stamped reconciler-side artifact for a cohort whose recommended
+ * action was forced by a human operator pin. The pin overrides the MIP's vote
+ * (the cohort's ``action_summary`` is rewritten one-hot to ``pinned_action``)
+ * and is surfaced separately from the P2.31 / P2.32 stamps so the UI / agent
+ * channel can attribute the override to its operator + rationale.
+ *
+ * A single cohort can carry both a ``PinStamp`` AND a follow-on P2.31 /
+ * P2.32 stamp — if the pin sets ``non_renew`` and the notice clock or
+ * territory cap binds, the downgrade still happens. Pins to non-non_renew
+ * actions (``retain``, ``reprice_*``, ``cede_*``) are immune to those
+ * downgrades because P2.31 / P2.32 only fire on ``non_renew``.
+ */
+export interface PinStamp {
+  cohort_id: string;
+  action: 'pin';
+  /** Policy whose pin forced the override. */
+  policy_id: number;
+  /** Action the operator pinned (one of the six MIP actions). */
+  pinned_action: ActionName;
+  /** Operator who set the pin (free-form string until Phase 3 auth). */
+  operator: string;
+  /** Operator's free-form justification (>=10 chars enforced upstream). */
+  rationale: string;
+  /** ISO-8601 timestamp the pin was last written. */
+  ts: string;
+  /** MIP's pre-pin dominant action — preserved so the audit trail is legible. */
+  original_action: ActionName;
+}
+
+/**
+ * P2.31 / P2.32 / P2.33 — Stamped reconciler artifact. Emitted alongside (not
+ * in place of) the original ``PortfolioAction[]``: downstream consumers can
+ * pick whichever matches their decision horizon.
+ *
+ * Precedence within a single ``reconcile()`` call:
+ *   1. P2.33 — pin override forces the cohort's action one-hot.
+ *   2. P2.31 — notice-period filter; downgrades a (possibly pinned) non_renew.
+ *   3. P2.32 — territory-cap filter; downgrades surviving non_renew cohorts.
+ */
+export type StampedAction = NoticePeriodStamp | TerritoryCapStampWithZip | PinStamp;
+
+/**
+ * P2.34 — Agent-channel notification event. Emitted once per cohort whose
+ * final action (after pin / notice / cap passes) lands in any of the
+ * three non-renew variants:
+ *   * ``non_renew``                — direct MIP non-renewal.
+ *   * ``non_renew_next_renewal``   — P2.31 deferred the call to next cycle.
+ *   * ``non_renew_capped``         — P2.32 downgraded the call (bucket cap).
+ *
+ * The rationale is a free-text string built from the attached stamps; the
+ * stamps themselves are also surfaced for callers (e.g. an LLM agent) that
+ * want the structured context. Phase 3 may swap the free-text rationale
+ * for a structured payload when wiring real channels.
+ */
+export interface AgentNotification {
+  type: 'non_renew_decision';
+  cohort_id: string;
+  action: 'non_renew' | 'non_renew_next_renewal' | 'non_renew_capped';
+  policy_count: number;
+  total_tiv: number;
+  /** Human-readable summary; e.g. "FL coastal cap exceeded (5.0% vs 3.0% cap)". */
+  rationale: string;
+  /** ISO-8601 timestamp at which the reconciler produced this event. */
+  ts: string;
+  /** Any P2.31 / P2.32 / P2.33 stamps attached to this cohort (for context). */
+  stamps: StampedAction[];
 }
 
 export interface ReconcileOutput {
@@ -78,6 +281,17 @@ export interface ReconcileOutput {
   vrp: { assignments: VRPAssignment[]; demand_adjustments: Record<number, number> };
   /** Cross-lever conflicts surfaced for the manager. */
   conflicts: ReconcileConflict[];
+  /**
+   * P2.31 — per-cohort downgrades of ``non_renew`` actions that fail the
+   * state notice-period clock. Empty when every non-renewal call had
+   * sufficient lead time.
+   */
+  stamped_actions: StampedAction[];
+  /**
+   * P2.34 — per-non-renewed-cohort agent-channel events. Empty when the
+   * reconciler made no non-renewal calls (e.g. every cohort retains).
+   */
+  notifications: AgentNotification[];
 }
 
 // ---------------------------------------------------------------------------
@@ -90,18 +304,130 @@ const NON_RENEW_THRESHOLD = 0.5;
 /** A zone counts as "heavily staffed" if it has at least this many adjuster-days. */
 const HIGH_ADJUSTER_DAYS = 2;
 
+/** P2.31 — milliseconds per day, used for date arithmetic. */
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * P2.31 — Parse an ISO ``YYYY-MM-DD`` date into a UTC ``Date``. Returns
+ * ``null`` if the input is not a recognizable ISO date.
+ */
+function parseISODate(iso: string): Date | null {
+  if (!iso) return null;
+  // Accept full ISO timestamps too, but normalize to the date-only boundary.
+  const ymd = iso.slice(0, 10);
+  const d = new Date(`${ymd}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** P2.31 — Format a UTC ``Date`` as ``YYYY-MM-DD``. */
+function formatISODate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/** P2.31 — Add ``days`` (integer) to a UTC ``Date`` and return a new Date. */
+function addDays(d: Date, days: number): Date {
+  return new Date(d.getTime() + days * MS_PER_DAY);
+}
+
+/** P2.31 — Add one calendar year to a UTC ``Date`` and return a new Date. */
+function addOneYear(d: Date): Date {
+  const r = new Date(d.getTime());
+  r.setUTCFullYear(r.getUTCFullYear() + 1);
+  return r;
+}
+
+/**
+ * P2.33 — Dominant action for a continuous-share PortfolioAction. Used by the
+ * pin pass to record the MIP's pre-pin vote on each ``PinStamp``. Iterates the
+ * canonical ``ACTIONS`` array (P2.8 11-action set) so reprice rate-grid
+ * buckets are eligible to win.
+ */
+function dominantOf(a: PortfolioAction): ActionName {
+  let best: ActionName = 'retain';
+  let bestVal = -Infinity;
+  for (const k of ACTIONS) {
+    const v = a[k] ?? 0;
+    if (v > bestVal) {
+      bestVal = v;
+      best = k;
+    }
+  }
+  return best;
+}
+
+/** P2.33 — One-hot PortfolioAction with all share on ``action``. */
+function oneHot(cohort_id: string, action: ActionName): PortfolioAction {
+  const shares = ACTIONS.reduce(
+    (acc, a) => {
+      acc[a] = a === action ? 1 : 0;
+      return acc;
+    },
+    {} as Record<ActionName, number>,
+  );
+  return { cohort_id, ...shares };
+}
+
 // ---------------------------------------------------------------------------
 // Reconciler
 // ---------------------------------------------------------------------------
 
 export function reconcile(input: ReconcileInput): ReconcileOutput {
   const {
-    portfolio,
     preflagged,
     vrp,
     cohort_zip3_map = {},
     zone_zip3_map = {},
+    cohort_renewal_date_map = {},
+    today = new Date(),
+    cohort_tiv_map = {},
+    bucket_total_tiv = {},
+    pins = [],
+    policy_to_cohort_map = {},
+    cohort_policy_count_map = {},
   } = input;
+
+  // ── 0. P2.33 — Apply operator pin overrides. ───────────────────────────
+  // Clone the input portfolio.actions so we never mutate the caller's
+  // object. Pins rewrite the cohort's action one-hot to ``pinned_action`` —
+  // the MIP's continuous shares are discarded for that cohort. A PinStamp
+  // is emitted per pin so consumers can attribute the override; the
+  // pre-pin dominant action is preserved on the stamp.
+  //
+  // The downstream filters (P2.31 / P2.32) read this cloned action list,
+  // so a pin to ``non_renew`` still flows through the notice-period and
+  // territory-cap passes — exactly the precedence the docstring above
+  // promises. A pin to ``retain`` (or any non-``non_renew`` action) is
+  // therefore implicitly immune to P2.31 / P2.32 because those filters
+  // only fire when ``non_renew > NON_RENEW_THRESHOLD``.
+  const clonedActions: PortfolioAction[] = input.portfolio.actions.map((a) => ({
+    ...a,
+  }));
+  const pinStamps: PinStamp[] = [];
+  if (pins.length > 0) {
+    const actionIndex = new Map<string, number>();
+    clonedActions.forEach((a, i) => actionIndex.set(a.cohort_id, i));
+    for (const pin of pins) {
+      const cohortId = policy_to_cohort_map[pin.policy_id];
+      if (!cohortId) continue; // unknown policy — skip, do not stamp
+      const idx = actionIndex.get(cohortId);
+      if (idx === undefined) continue; // unknown cohort — skip
+      const a = clonedActions[idx];
+      const originalAction = dominantOf(a);
+      const rewritten = oneHot(cohortId, pin.action);
+      clonedActions[idx] = rewritten;
+      pinStamps.push({
+        cohort_id: cohortId,
+        action: 'pin',
+        policy_id: pin.policy_id,
+        pinned_action: pin.action,
+        operator: pin.operator,
+        rationale: pin.rationale,
+        ts: pin.ts,
+        original_action: originalAction,
+      });
+    }
+  }
+  const portfolio = { actions: clonedActions };
 
   // ── 1. Build a quick lookup of cohort → action. ────────────────────────
   const actionByCohort = new Map<string, PortfolioAction>();
@@ -188,6 +514,148 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
     }
   }
 
+  // ── 5. P2.31 — Notice-period filter on non_renew actions. ──────────────
+  // A cohort flagged for non-renewal must clear the state's statutory notice
+  // window relative to its upcoming renewal effective date. If the carrier
+  // cannot give the required days of notice in time, the action is
+  // **downgraded** to ``non_renew_next_renewal`` with the next cycle's
+  // effective-date stamp; downstream consumers display the deferred decision.
+  //
+  // The original ``portfolio.actions`` are NOT mutated — the MIP's continuous
+  // shares are still useful for reporting. The stamps are emitted as a
+  // separate ``stamped_actions`` array so callers can join the two.
+  //
+  // Defaults: missing renewal date → today + 365 days. Unknown state →
+  // ``noticeWindowForZip3`` returns a conservative 60-day fallback.
+  const todayStart = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
+  );
+  const defaultRenewal = addDays(todayStart, 365);
+
+  // Seed the stamped-actions list with the pin overrides applied above.
+  // P2.31 / P2.32 will append their own entries below.
+  const stampedActions: StampedAction[] = [...pinStamps];
+  const noticeDeferredIds = new Set<string>();
+  for (const a of portfolio.actions) {
+    if (a.non_renew <= NON_RENEW_THRESHOLD) continue;
+    const zip3 = cohortZip3.get(a.cohort_id);
+    const renewalISO = cohort_renewal_date_map[a.cohort_id];
+    const renewal = (renewalISO && parseISODate(renewalISO)) || defaultRenewal;
+    const daysToRenewal = Math.round(
+      (renewal.getTime() - todayStart.getTime()) / MS_PER_DAY,
+    );
+    const noticeDays = noticeWindowForZip3(zip3 ?? '');
+    if (daysToRenewal < noticeDays) {
+      stampedActions.push({
+        cohort_id: a.cohort_id,
+        action: 'non_renew_next_renewal',
+        original_action: 'non_renew',
+        downgrade_reason: 'insufficient_notice_period',
+        effective_date_stamp: formatISODate(addOneYear(renewal)),
+        zip3,
+        notice_days: noticeDays,
+        days_to_renewal: daysToRenewal,
+      });
+      noticeDeferredIds.add(a.cohort_id);
+    }
+  }
+
+  // ── 6. P2.32 — Per-(state, territory) regulatory caps. ─────────────────
+  // After the notice-period pass, group the surviving non-renew cohorts by
+  // their (state, territory) bucket and check each bucket's annual cap.
+  // Cohorts already deferred by P2.31 are skipped — they roll to next cycle
+  // and do not consume this year's bucket capacity. Downgrades are stamped
+  // smallest-TIV-first (minimizes customer disruption per downgrade).
+  const territoryCohortInputs = portfolio.actions
+    .filter((a) => a.non_renew > NON_RENEW_THRESHOLD)
+    .map((a) => ({
+      cohort_id: a.cohort_id,
+      zip3: cohortZip3.get(a.cohort_id) ?? '',
+      total_tiv: cohort_tiv_map[a.cohort_id] ?? 0,
+      non_renew_share: a.non_renew,
+    }));
+  const territoryResult = applyTerritoryCaps({
+    non_renew_cohorts: territoryCohortInputs,
+    bucket_total_tiv,
+    already_deferred_cohort_ids: noticeDeferredIds,
+  });
+  for (const stamp of territoryResult.downgraded) {
+    const zip3 = cohortZip3.get(stamp.cohort_id);
+    stampedActions.push({ ...stamp, zip3 });
+  }
+
+  // ── 7. P2.34 — Emit agent-channel notifications. ───────────────────────
+  // For each cohort whose final non_renew action label (after the pin /
+  // notice / cap precedence chain) lands in one of the three non-renew
+  // variants, build an ``AgentNotification`` summarizing the decision. The
+  // reconciler does NOT make a network call — it just produces the array.
+  // A caller can POST it to ``/api/notifications/agent`` to deliver the
+  // events (Phase 2: log to stdout; Phase 3: real channel).
+  //
+  // Precedence resolution:
+  //   * ``non_renew_capped``        wins if a TerritoryCapStampWithZip exists
+  //   * ``non_renew_next_renewal``  wins next if a NoticePeriodStamp exists
+  //   * ``non_renew``               otherwise (the MIP / pin direct call)
+  //
+  // We only emit when the cohort's *cloned* action (which already reflects
+  // any pin override) has ``non_renew > NON_RENEW_THRESHOLD`` — pins to
+  // ``retain`` etc. correctly silence the channel.
+  const capStampByCohort = new Map<string, TerritoryCapStampWithZip>();
+  const noticeStampByCohort = new Map<string, NoticePeriodStamp>();
+  const stampsByCohort = new Map<string, StampedAction[]>();
+  for (const s of stampedActions) {
+    const arr = stampsByCohort.get(s.cohort_id) ?? [];
+    arr.push(s);
+    stampsByCohort.set(s.cohort_id, arr);
+    if (s.action === 'non_renew_capped') {
+      capStampByCohort.set(s.cohort_id, s as TerritoryCapStampWithZip);
+    } else if (s.action === 'non_renew_next_renewal') {
+      noticeStampByCohort.set(s.cohort_id, s as NoticePeriodStamp);
+    }
+  }
+
+  const tsNow = today.toISOString();
+  const notifications: AgentNotification[] = [];
+  for (const a of portfolio.actions) {
+    if (a.non_renew <= NON_RENEW_THRESHOLD) continue;
+    const cohortId = a.cohort_id;
+    const capStamp = capStampByCohort.get(cohortId);
+    const noticeStamp = noticeStampByCohort.get(cohortId);
+    let finalAction: AgentNotification['action'];
+    let rationale: string;
+    if (capStamp) {
+      finalAction = 'non_renew_capped';
+      const capPct = (capStamp.cap_fraction * 100).toFixed(1);
+      const obsPct = (capStamp.observed_fraction * 100).toFixed(1);
+      rationale =
+        `Territory cap exceeded for bucket ${capStamp.bucket}: observed ` +
+        `${obsPct}% non-renew TIV share vs ${capPct}% cap. Cohort ` +
+        `${cohortId} downgraded (smallest-first selection).`;
+    } else if (noticeStamp) {
+      finalAction = 'non_renew_next_renewal';
+      rationale =
+        `Insufficient notice period for cohort ${cohortId}: ` +
+        `${noticeStamp.days_to_renewal} day(s) to renewal vs ` +
+        `${noticeStamp.notice_days}-day statutory window. ` +
+        `Deferred to next renewal cycle (effective ${noticeStamp.effective_date_stamp}).`;
+    } else {
+      finalAction = 'non_renew';
+      rationale =
+        `MIP non-renew call for cohort ${cohortId}; notice window and ` +
+        `territory cap both cleared.`;
+    }
+    notifications.push({
+      type: 'non_renew_decision',
+      cohort_id: cohortId,
+      action: finalAction,
+      policy_count: cohort_policy_count_map[cohortId] ?? 0,
+      total_tiv: cohort_tiv_map[cohortId] ?? 0,
+      rationale,
+      ts: tsNow,
+      stamps: stampsByCohort.get(cohortId) ?? [],
+    });
+  }
+
   return {
     portfolio,
     preflagged: filteredPreflag,
@@ -196,5 +664,7 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
       demand_adjustments: demandAdjustments,
     },
     conflicts,
+    stamped_actions: stampedActions,
+    notifications,
   };
 }

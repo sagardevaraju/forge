@@ -63,6 +63,10 @@ eval/results/*.png
 # Playwright MCP traces
 .playwright-mcp/
 
+# Playwright e2e runtime artifacts (regenerate via `npm run e2e`)
+/test-results/
+/playwright-report/
+
 # Root-level dev screenshots (not docs)
 /*.png
 

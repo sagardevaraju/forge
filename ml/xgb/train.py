@@ -116,6 +116,26 @@ def train_all_quantiles(
         models[q] = m
         studies[q] = study
 
+    # Task P2.1: continuous CRPS over the predicted (p10, p50, p90) heads on a
+    # held-out slice. Pinball above is the training signal (one number per
+    # quantile); CRPS is the calibration metric an actuary will accept — it
+    # scores the *joint shape* of the quantile fan against realised losses.
+    # Local import: keeps scipy off the module-load path for callers that just want pinball.
+    from api_py.calibration import crps_from_quantiles
+
+    held = np.setdiff1d(np.arange(len(X)), sub_idx)[:2_000]  # 2k keeps eval <1 min
+    preds = {q: models[q].predict(X[held]) for q in (0.10, 0.50, 0.90)}
+    crps_vals = [
+        crps_from_quantiles(
+            y_true=float(y[held][i]),
+            quantiles={0.10: float(preds[0.10][i]),
+                       0.50: float(preds[0.50][i]),
+                       0.90: float(preds[0.90][i])},
+        )
+        for i in range(len(held))
+    ]
+    print(f"\n  CRPS over (p10,p50,p90) on 2k hold-out: mean={np.mean(crps_vals):.2f}")
+
     return models, studies
 
 

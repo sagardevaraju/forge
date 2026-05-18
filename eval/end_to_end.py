@@ -96,7 +96,7 @@ def aggregate_cohorts() -> list[dict[str, Any]]:
     Returns
     -------
     list[dict]
-        Each cohort carries id, zip3, build_type, tiv_decile,
+        Each cohort carries id, zip3, build_type, tiv_quintile,
         policy_count, total_tiv, total_premium, modal_flood_zone,
         avg_elevation_m, and the list of constituent policy ids
         (needed for the per-cohort realised-loss share calculation).
@@ -118,8 +118,8 @@ def aggregate_cohorts() -> list[dict[str, Any]]:
 
     buckets: dict[str, dict[str, Any]] = {}
     for (pid, state, zip3, build_type, tiv, premium, fz, elev, lat, lon) in rows:
-        decile = _tiv_bin(tiv, cuts)
-        key = f"{zip3}_{build_type}_d{decile}"
+        quintile = _tiv_bin(tiv, cuts)
+        key = f"{zip3}_{build_type}_q{quintile}"
         b = buckets.get(key)
         if b is None:
             b = {
@@ -127,7 +127,7 @@ def aggregate_cohorts() -> list[dict[str, Any]]:
                 "zip3": str(zip3),
                 "state": str(state) if state is not None else "",
                 "build_type": str(build_type),
-                "tiv_decile": int(decile),
+                "tiv_quintile": int(quintile),
                 "policy_count": 0,
                 "total_tiv": 0.0,
                 "total_premium": 0.0,
@@ -161,7 +161,7 @@ def aggregate_cohorts() -> list[dict[str, Any]]:
             "zip3": b["zip3"],
             "state": b["state"],
             "build_type": b["build_type"],
-            "tiv_decile": b["tiv_decile"],
+            "tiv_quintile": b["tiv_quintile"],
             "policy_count": b["policy_count"],
             "total_tiv": b["total_tiv"],
             "total_premium": b["total_premium"],

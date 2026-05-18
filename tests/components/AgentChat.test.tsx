@@ -4,6 +4,10 @@
  * Mocks global `fetch` so we don't need the API route live. Verifies that
  * typing into the input and pressing Send posts the running message list to
  * /api/agent/chat and appends the plain-text response to the rendered log.
+ *
+ * Also exercises the NDJSON citation breadcrumb extension: a `final` event
+ * carrying `citations: [{tool, args_hash, result_hash}]` is rendered as a
+ * "Sources: tool@hash" line beneath the assistant message.
  */
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
@@ -53,5 +57,82 @@ describe('AgentChat', () => {
     await waitFor(() => {
       expect(screen.getByText(/Error: network down/)).toBeInTheDocument();
     });
+  });
+});
+
+describe('AgentChat tool-call breadcrumb', () => {
+  test('shows tool sources under the assistant message', async () => {
+    // Build a synthetic NDJSON body that readChatStream will parse the same way
+    // the real /api/agent/chat route emits — one event per line, terminated by \n.
+    const events = [
+      { type: 'tool_call', name: 'query_book_exposure', arguments: {} },
+      {
+        type: 'tool_result',
+        name: 'query_book_exposure',
+        ok: true,
+        summary: '237 cohorts',
+        args_hash: 'a1',
+        result_hash: 'r1',
+      },
+      {
+        type: 'final',
+        text: 'Tampa exposure is $812M.',
+        citations: [
+          { tool: 'query_book_exposure', args_hash: 'a1', result_hash: 'r1' },
+        ],
+      },
+    ];
+    const body = events.map((e) => JSON.stringify(e)).join('\n') + '\n';
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 200 }));
+
+    render(<AgentChat />);
+    fireEvent.change(screen.getByLabelText('agent-input'), {
+      target: { value: 'tampa exposure?' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/Tampa exposure is \$812M/)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/Sources:/)).toBeInTheDocument();
+    expect(screen.getByText(/query_book_exposure/)).toBeInTheDocument();
+  });
+});
+
+describe('AgentChat iteration cap', () => {
+  test('status line surfaces "Iter N/6" while a tool call is in flight', async () => {
+    // Stream a tool_call event carrying iteration=1 and then pause indefinitely
+    // so the status line stays mounted long enough for assertions. We control
+    // the stream manually via a ReadableStream with an unresolved controller.
+    let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        controllerRef = c;
+      },
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(stream, { status: 200 }));
+
+    render(<AgentChat />);
+    fireEvent.change(screen.getByLabelText('agent-input'), {
+      target: { value: 'tampa exposure?' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    // Push a tool_call event with iteration 1.
+    const enc = new TextEncoder();
+    const ev = {
+      type: 'tool_call',
+      name: 'query_book_exposure',
+      arguments: {},
+      iteration: 1,
+    };
+    // Wait for the controller to be assigned, then enqueue.
+    await waitFor(() => expect(controllerRef).not.toBeNull());
+    controllerRef!.enqueue(enc.encode(JSON.stringify(ev) + '\n'));
+
+    const statusLine = await screen.findByTestId('agent-status-line');
+    await waitFor(() => expect(statusLine.textContent).toMatch(/iter 1\/6/i));
+
+    // Close the stream so the component finalizes (avoids hanging test).
+    controllerRef!.close();
   });
 });

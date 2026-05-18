@@ -33,6 +33,12 @@ pytest -q           # python tests — should pass
 
 ---
 
+## Grammar primitives (Phase 1 redesign)
+
+Every view now composes from a small set of shared primitives, and the panel will likely ask about them. **`ExecCard`** is the KPI tile used for the four landing-dashboard metrics and the portfolio header strip — one number, one label, an optional `TrustTierBadge`, and a freshness timestamp. **`TrustTierBadge`** renders one of five tiers (`LIVE_FEED`, `MODEL_OUTPUT`, `SYNTHETIC_SCAFFOLD`, `RECOMMENDATION`, `MANUAL_OVERRIDE`) so the reader can tell at a glance where a number came from. **`ProvenanceFootnote`** is the three-line source/method/confidence block sitting under every chart and panel. **`ThreatBanner`** is the top-of-page strip that names the active scenario set the views are coupled to. **`PersonaToggle`** is the layout-level switch between `cat-ops` (the only live persona in Phase 1) and the Phase 2 personas (`actuary`, `field-ops`, `executive`). Together they enforce the demo's central claim: every number on screen is labeled with what it is, where it came from, and how confident we are in it. Full defense at [`docs/methodology.md`](docs/methodology.md) and `/methodology` in-app.
+
+---
+
 ## Current state of the build
 
 What works today, what's stubbed:
@@ -77,7 +83,7 @@ Click **Portfolio Map**.
 - Click a hot ZIP3 (Florida coast) → drill-down panel shows action fractions per cohort and the dominant recommendation.
 
 Talk-track:
-> *"570 cohorts. The MIP recommends repricing 197 cohorts up and ceding 373 cohorts via excess-of-loss reinsurance. It chose this allocation to maximize expected margin subject to a capital VaR-99 cap, a 15% non-renew cap, and a $5.3M cession premium budget. All four constraints came from the carrier's policy team — none are baked into the model."*
+> *"570 cohorts. The MIP recommends repricing 197 cohorts up the rate grid and ceding 373 cohorts via excess-of-loss reinsurance. It chose this allocation to maximize expected margin subject to a capital TVaR-99 cap (mean of the top 1% of scenarios), a 15% non-renew cap, and a $5.3M cession premium budget. All four constraints came from the carrier's policy team — none are baked into the model."*
 
 ### 3. Event Console + Agent (90s)
 
@@ -151,7 +157,7 @@ Note: the headline number depends on the synthetic book; in slide commentary fra
 - **~570** cohorts after `(zip3, build_type, TIV quintile)` aggregation
 - **$3.19B** total TIV in the book · **$52.7M** annual premium
 - **$44.5M** MIP objective at the current budgets
-- **6** portfolio actions: retain · reprice_up · reprice_down · non_renew · cede_qs · cede_xs
+- **11** portfolio actions: retain · 7-bucket reprice rate grid (`reprice_n20`…`reprice_p20`) · non_renew · cede_qs · cede_xs
 - **7** agent tools, each with a mock fallback
 - **1,000** Monte Carlo scenarios per active threat
 - **5** holdout events, **$372M mean** improvement vs naive baseline
