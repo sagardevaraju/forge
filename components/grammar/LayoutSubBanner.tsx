@@ -43,6 +43,7 @@ export function LayoutSubBanner() {
       <nav className="flex gap-3 text-zinc-600">
         <Link href="/portfolio" className="hover:text-zinc-900">Portfolio</Link>
         <Link href="/events" className="hover:text-zinc-900">Events</Link>
+        <Link href="/simulate" className="hover:text-zinc-900">Simulate</Link>
         <Link href="/claims" className="hover:text-zinc-900">Claims</Link>
         <Link href="/calibration" className="hover:text-zinc-900">Calibration</Link>
         <Link href="/treaty" className="hover:text-zinc-900">Treaty</Link>
