@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from api_py.sim_loss import generate_sim_losses, peril_decay, perturbation_sigmas
+from api_py.cohort_keys import cohort_key as _cohort_key, policy_quintile_lookup
 
 
 SAMPLE_POLICIES = [
@@ -13,6 +14,16 @@ SAMPLE_POLICIES = [
     (2, 27.8, -82.2, 800_000.0, "masonry", "337"),
     (3, 30.0, -85.0, 400_000.0, "mobile_home", "325"),
 ]
+
+
+def _canonical_keyer(policies):
+    """Return a cohort_keyer using the full quintile-aware cohort key.
+
+    Pins to the same cuts as policy_quintile_lookup so the key format
+    matches what _solve_stdin._handle_sim_loss and the MIP precompute emit.
+    """
+    quintile_by_id = policy_quintile_lookup(policies)
+    return lambda p: _cohort_key(p, quintile_by_id[int(p[0])])
 
 TAMPA_POLY = {
     "type": "Polygon",
@@ -42,6 +53,35 @@ def test_generate_returns_cohort_x_K_array():
     assert result["losses"].shape[1] == 100
     # Two cohorts are inside (337_wood_frame, 337_masonry); 325_mobile_home is outside.
     assert result["losses"].shape[0] >= 1
+
+
+def test_canonical_quintile_keyer_emits_full_key():
+    """Regression: generate_sim_losses with the full quintile-aware keyer must
+    produce cohort_keys in the canonical ``{zip3}_{build_type}_q{N}`` format.
+
+    This locks in the format that _solve_stdin._handle_sim_loss emits after
+    the cohort-key mismatch fix (bug: promote path used prefix-only keys,
+    causing every sim loss lookup in precompute to miss silently).
+    """
+    keyer = _canonical_keyer(SAMPLE_POLICIES)
+    result = generate_sim_losses(
+        sim_id="1234567890123_abcdef01",
+        footprint=_footprint(),
+        policies=SAMPLE_POLICIES,
+        cohort_keyer=keyer,
+        K=100,
+    )
+    # All cohort_keys must match the canonical pattern.
+    for key in result["cohort_keys"]:
+        parts = key.split("_")
+        # Format: zip3 _ build_type[s] _ q{N}
+        assert parts[-1].startswith("q"), (
+            f"cohort key '{key}' does not end with q{{quintile}} suffix — "
+            "prefix-only key would silently miss MIP cohort lookup"
+        )
+        assert parts[-1][1:].isdigit(), f"quintile suffix in '{key}' is not numeric"
+        q = int(parts[-1][1:])
+        assert 0 <= q <= 4, f"quintile {q} out of range 0..4 in key '{key}'"
 
 
 def test_seed_is_deterministic():

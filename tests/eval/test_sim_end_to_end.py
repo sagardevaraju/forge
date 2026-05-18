@@ -18,6 +18,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
+from api_py.cohort_keys import cohort_key as _cohort_key, policy_quintile_lookup  # noqa: E402
 from api_py.sim_loss import generate_sim_losses, write_artifact  # noqa: E402
 
 TAMPA_HAIL = {
@@ -46,11 +47,16 @@ def _book_policies():
 def test_end_to_end_hail_tampa(tmp_path):
     policies = _book_policies()
     sim_id = "9999999999999_endtoend"
+    # Use the production-path keyer (quintile-aware) so this test exercises
+    # the same code path as _solve_stdin._handle_sim_loss.  The old prefix-
+    # only keyer (``{zip3}_{build_type}``) is what caused the cohort-key
+    # mismatch bug — using the canonical helper here locks in the fix.
+    quintile_by_id = policy_quintile_lookup(policies)
     result = generate_sim_losses(
         sim_id=sim_id,
         footprint=TAMPA_HAIL,
         policies=policies,
-        cohort_keyer=lambda p: f"{p[5]}_{p[4]}",
+        cohort_keyer=lambda p: _cohort_key(p, quintile_by_id[int(p[0])]),
         K=200,
     )
     assert result["losses"].shape[1] == 200

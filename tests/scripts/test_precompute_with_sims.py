@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
@@ -16,7 +17,6 @@ SIMS_DIR = ARTIFACTS / "simulations"
 
 def _write_sim_artifact(sim_id: str, cohort_keys: list[str], K: int = 50) -> None:
     """Write a tiny synthetic sim parquet so the precompute script can join it."""
-    import pyarrow as pa
     SIMS_DIR.mkdir(parents=True, exist_ok=True)
     losses = np.full((len(cohort_keys), K), 1_000_000.0)
     table = pa.table({
@@ -52,3 +52,69 @@ def test_include_sims_writes_meta_with_sim_ids(tmp_path, monkeypatch):
     finally:
         (SIMS_DIR / f"{fixture_id}.parquet").unlink(missing_ok=True)
         (SIMS_DIR / f"{fixture_id}.meta.json").unlink(missing_ok=True)
+
+
+@pytest.mark.skipif(not (ROOT / "forge-local.db").exists(), reason="needs seeded DB")
+def test_include_sims_actually_modifies_cohort_losses(tmp_path):
+    """Regression for the cohort-key mismatch bug: when --include-sims is
+    used, the resulting portfolio_optimization.json must show a non-zero
+    delta in at least one cohort's loss_scenarios length vs the baseline.
+
+    Before the fix, the promote path emitted prefix-only cohort keys
+    (``{zip3}_{build_type}``) while the MIP cohort store uses
+    ``{zip3}_{build_type}_q{N}``. Every lookup missed → sim contributed
+    zero loss → joint TVaR-99 == hurricane-only TVaR-99.
+    """
+    # Step 1: baseline run — record per-cohort loss_scenarios length.
+    subprocess.run(
+        [sys.executable, "-m", "scripts.precompute_portfolio_optimization"],
+        cwd=ROOT, check=True, capture_output=True, text=True,
+    )
+    baseline = json.loads((ARTIFACTS / "portfolio_optimization.json").read_text())
+    # Pick a real cohort with a substantial scenario set to detect the delta.
+    target_cohort = next(
+        c for c in baseline["cohorts"]
+        if len(c.get("loss_scenarios", [])) >= 100
+    )
+    target_id = target_cohort["id"]
+    baseline_len = len(target_cohort["loss_scenarios"])
+
+    # Step 2: write a sim parquet keyed against the *real* cohort id from step 1.
+    fixture_id = "9999999999999_cohortfx"
+    SIMS_DIR.mkdir(parents=True, exist_ok=True)
+    K = 25
+    losses = np.full((1, K), 500_000.0)
+    table = pa.table({
+        "cohort_key": [target_id],
+        **{f"k{i:04d}": losses[:, i] for i in range(K)},
+    })
+    pq.write_table(table, SIMS_DIR / f"{fixture_id}.parquet")
+    (SIMS_DIR / f"{fixture_id}.meta.json").write_text(json.dumps({
+        "sim_id": fixture_id, "K": K, "cohort_keys": [target_id],
+        "peril": "hail", "intensity": "severe", "beta": 0.2, "sigma": 0.4,
+    }))
+
+    try:
+        # Step 3: run with --include-sims pointing at the fixture.
+        subprocess.run(
+            [sys.executable, "-m", "scripts.precompute_portfolio_optimization",
+             "--include-sims", fixture_id],
+            cwd=ROOT, check=True, capture_output=True, text=True,
+        )
+        merged = json.loads((ARTIFACTS / "portfolio_optimization.json").read_text())
+        target_after = next(c for c in merged["cohorts"] if c["id"] == target_id)
+
+        # Step 4: the cohort's loss_scenarios must have grown by exactly K.
+        assert len(target_after["loss_scenarios"]) == baseline_len + K, (
+            f"expected {baseline_len + K} loss draws for cohort '{target_id}', "
+            f"got {len(target_after['loss_scenarios'])} — cohort-key mismatch "
+            "bug may have recurred (promote keys not matching MIP cohort store)"
+        )
+    finally:
+        (SIMS_DIR / f"{fixture_id}.parquet").unlink(missing_ok=True)
+        (SIMS_DIR / f"{fixture_id}.meta.json").unlink(missing_ok=True)
+        # Restore the baseline artifact so other tests see a clean state.
+        subprocess.run(
+            [sys.executable, "-m", "scripts.precompute_portfolio_optimization"],
+            cwd=ROOT, check=True, capture_output=True, text=True,
+        )

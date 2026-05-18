@@ -82,8 +82,16 @@ def _handle_optimize_portfolio(args: dict) -> int:
 
 
 def _handle_sim_loss(payload: dict) -> int:
-    """Dispatch for the K=1000 cohort loss generator (Task SIM.11)."""
+    """Dispatch for the K=1000 cohort loss generator (Task SIM.11).
+
+    Builds a per-policy quintile lookup over the *full* policy list so that
+    the cohort_keyer emits the canonical ``{zip3}_{build_type}_q{N}`` keys
+    that match the MIP cohort store in precompute_portfolio_optimization.py.
+    Using prefix-only keys (``{zip3}_{build_type}``) caused every sim lookup
+    to miss, making the joint TVaR-99 equal the hurricane-only TVaR-99.
+    """
     try:
+        from api_py.cohort_keys import cohort_key as _cohort_key, policy_quintile_lookup
         from api_py.sim_loss import generate_sim_losses, write_artifact
     except Exception as e:  # noqa: BLE001
         print(json.dumps({"error": f"import failed: {e}"}), flush=True)
@@ -91,11 +99,15 @@ def _handle_sim_loss(payload: dict) -> int:
         return 1
 
     try:
+        policies = [tuple(p) for p in payload.get("policies", [])]
+        # Build the quintile lookup over the full book so cuts are book-wide,
+        # matching the algorithm in _aggregate_cohorts_from_sqlite.
+        quintile_by_id = policy_quintile_lookup(policies)
         result = generate_sim_losses(
             sim_id=payload["sim_id"],
             footprint=payload["footprint"],
-            policies=[tuple(p) for p in payload.get("policies", [])],
-            cohort_keyer=lambda p: f"{p[5]}_{p[4]}",
+            policies=policies,
+            cohort_keyer=lambda p: _cohort_key(p, quintile_by_id[int(p[0])]),
             K=int(payload.get("K") or 1000),
         )
         parquet_path, _ = write_artifact(payload["sim_id"], result)

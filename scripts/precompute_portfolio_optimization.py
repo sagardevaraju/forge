@@ -62,6 +62,7 @@ def _load_sim_losses(sim_id: str) -> tuple[dict[str, list[float]], dict]:
     }
     return losses_by_cohort, json.loads(meta.read_text())
 
+from api_py.cohort_keys import cohort_key as _cohort_key, policy_quintile_lookup  # noqa: E402
 from api_py.optimize_portfolio import ACTIONS, solve  # noqa: E402
 
 # Task P2.0 — Monte-Carlo scenario count per cohort. Sized so that the
@@ -167,42 +168,36 @@ def _aggregate_cohorts_from_sqlite(db_path: Path) -> list[dict]:
 
     Mirrors the JS aggregation in lib/db/cohorts.ts (same cohort key, quintile
     TIV bucket) so the JS-rendered map matches the Python-side MIP keys 1:1.
+
+    The quintile cut-point logic is delegated to
+    ``api_py.cohort_keys.policy_quintile_lookup`` so that the promote path
+    (``api_py._solve_stdin._handle_sim_loss``) uses bit-identical cuts and
+    emits keys that match the MIP cohort store directly.
     """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT zip3, build_type, tiv, premium_annual, flood_zone, elevation_m FROM policies"
+        "SELECT id, zip3, build_type, tiv, premium_annual, flood_zone, elevation_m FROM policies"
     ).fetchall()
     conn.close()
 
     if not rows:
         return []
 
-    tivs = sorted(float(r["tiv"]) for r in rows)
-    # Quintile cut-points using linear interpolation (matches lib/db/cohorts.ts).
-    cuts: list[float] = []
-    n = len(tivs)
-    for q in range(1, 5):
-        rank = (q / 5) * (n - 1)
-        lo, hi = int(rank), int(rank) + (0 if rank.is_integer() else 1)
-        if lo == hi or hi >= n:
-            cuts.append(tivs[lo])
-        else:
-            w = rank - lo
-            cuts.append(tivs[lo] * (1 - w) + tivs[hi] * w)
-
-    def bucket(t: float) -> int:
-        for i, c in enumerate(cuts):
-            if t < c:
-                return i
-        return 4
+    # Build (id, lat=0, lon=0, tiv, build_type, zip3) tuples — lat/lon not
+    # needed for quintile computation; only id and tiv are used by the helper.
+    policy_tuples = [
+        (int(r["id"]), 0.0, 0.0, float(r["tiv"]), str(r["build_type"]), str(r["zip3"]))
+        for r in rows
+    ]
+    quintile_by_id = policy_quintile_lookup(policy_tuples)
 
     buckets: dict[str, dict] = {}
     for r in rows:
         zip3 = str(r["zip3"])
         bt = str(r["build_type"])
-        quintile = bucket(float(r["tiv"]))
-        key = f"{zip3}_{bt}_q{quintile}"
+        quintile = quintile_by_id[int(r["id"])]
+        key = _cohort_key((int(r["id"]), 0.0, 0.0, float(r["tiv"]), bt, zip3), quintile)
         b = buckets.setdefault(
             key,
             {

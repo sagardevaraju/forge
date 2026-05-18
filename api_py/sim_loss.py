@@ -305,11 +305,15 @@ class handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "sim_id and footprint required"})
             return
 
+        policy_tuples = [tuple(p) for p in policies]
+        # Build book-wide quintile lookup so keys match the MIP cohort store.
+        from api_py.cohort_keys import cohort_key as _cohort_key, policy_quintile_lookup
+        quintile_by_id = policy_quintile_lookup(policy_tuples)
         result = generate_sim_losses(
             sim_id=sim_id,
             footprint=footprint,
-            policies=[tuple(p) for p in policies],
-            cohort_keyer=lambda p: f"{p[5]}_{p[4]}",
+            policies=policy_tuples,
+            cohort_keyer=lambda p: _cohort_key(p, quintile_by_id[int(p[0])]),
             K=K,
         )
         parquet_path, _ = write_artifact(sim_id, result)
