@@ -81,6 +81,7 @@ Every commit in the original plan tags a `Task N` from `docs/superpowers/plans/2
 | Change the policy book schema | `lib/db/schema.sql` + `lib/book/csv.ts` (CSV validators) + `scripts/seed_policy_book.py` (seed) |
 | Add a route to cron refresh | `app/api/cron/refresh/route.ts` + verify `crons` in `vercel.json` |
 | Add a new simulation peril | `lib/sim/severity.ts` (HAZUS row) + `api_py/sim_loss.py` (decay + perturbation) + `SimulationFootprint` union in `lib/sim/footprint.ts` |
+| Touch the simulate flow | `/simulate` route (`app/simulate/page.tsx` + `components/sim/*`); loss compute in `api_py/sim_loss.py`; banner in `components/grammar/SimulationBanner.tsx` mounted on `/portfolio` |
 
 ## Build / test cheatsheet
 
