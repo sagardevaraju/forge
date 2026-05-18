@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 import numpy as np
+import shapely
 from shapely.geometry import Point, Polygon, shape
 
 # Re-implements lib/sim/severity.ts: keep numbers in sync. v2 = lift to JSON.
@@ -208,27 +209,42 @@ def generate_sim_losses(
 
     sigma_deg = perturb.get("vertex_deg", 0.003)
 
+    # Pre-compute per-policy arrays for vectorized inner loop (Task SIM.11 perf).
+    lons_arr = np.array([p[2] for p in policy_list], dtype=float)
+    lats_arr = np.array([p[1] for p in policy_list], dtype=float)
+    tivs_arr = np.array([p[3] for p in policy_list], dtype=float)
+    cohort_row_arr = np.array([key_to_idx[cohort_keyer(p)] for p in policy_list], dtype=int)
+    dr_arr = np.array([_damage_ratio(peril, p[4], intensity) for p in policy_list], dtype=float)
+    # Effective peril width used for decay (zero → uniform 1.0 for all perils except tornado/hail-with-core).
+    _decay_width = width_km or inner_radius_km
+
     for k in range(K):
-        # Step 1: perturb geometry.
+        # Step 1: perturb geometry — same RNG call as original scalar loop.
         poly = _perturbed_polygon(base_geom, sigma_deg, rng)
-        # Step 2: common-factor residual ε for this draw.
+        # Step 2: common-factor residual ε — same RNG call order as original.
         epsilon = rng.normal(0.0, sigma)
-        factor_residual = 1.0 + beta * epsilon
-        # Step 3: per-policy loss inside the perturbed polygon.
-        for p in policy_list:
-            pid, lat, lon, tiv, build_type, _zip3 = p
-            point = Point(lon, lat)
-            if not poly.contains(point):
-                continue
-            # Distance-based decay — only meaningful for tornado / hail.
-            d_km = 0.0
-            if peril in ("tornado", "hail"):
-                d_km = poly.exterior.distance(point) * 111.0  # deg → km approx
-            decay = peril_decay(peril, distance_km=d_km, width_km=(width_km or inner_radius_km))
-            dr = _damage_ratio(peril, build_type, intensity)
-            loss = tiv * dr * decay * max(0.0, factor_residual)
-            row = key_to_idx[cohort_keyer(p)]
-            losses[row, k] += loss
+        factor_residual = max(0.0, 1.0 + beta * epsilon)
+
+        # Step 3: vectorized point-in-polygon via shapely 2.x contains_xy.
+        inside_mask = shapely.contains_xy(poly, lons_arr, lats_arr)
+        if not inside_mask.any():
+            continue
+
+        # Distance-based decay — only tornado / hail with a non-zero width need it.
+        if peril in ("tornado", "hail") and _decay_width > 0.0:
+            inside_idx = np.where(inside_mask)[0]
+            decay_vals = np.array([
+                peril_decay(peril,
+                            distance_km=poly.exterior.distance(Point(lons_arr[i], lats_arr[i])) * 111.0,
+                            width_km=_decay_width)
+                for i in inside_idx
+            ], dtype=float)
+        else:
+            inside_idx = np.where(inside_mask)[0]
+            decay_vals = np.ones(inside_idx.size, dtype=float)
+
+        loss_vals = tivs_arr[inside_idx] * dr_arr[inside_idx] * decay_vals * factor_residual
+        np.add.at(losses[:, k], cohort_row_arr[inside_idx], loss_vals)
 
     return {
         "K": K,
