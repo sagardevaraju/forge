@@ -9,10 +9,16 @@
  * inside the map container.
  *
  * Policy overlay: when showPolicies is true, fetches /api/policies/points once
- * (cached in a ref), splits them inside/outside the current footprint using
- * @turf/boolean-point-in-polygon, and renders two MapLibre circle layers:
+ * (cached in a ref), aggregates raw points to ZIP3 centroid bubbles (count,
+ * mean lat/lon, total tiv), classifies each centroid as inside/outside the
+ * current footprint using @turf/boolean-point-in-polygon, and renders two
+ * MapLibre circle layers sized by policy count:
  *   - inside footprint:  red (#ef4444), rendered BEFORE terra-draw's layer
- *   - outside footprint: gray (#94a3b8), rendered BEFORE terra-draw's layer
+ *   - outside footprint: slate (#94a3b8), rendered BEFORE terra-draw's layer
+ *
+ * Aggregating to ~570 ZIP3 centroids instead of rendering 10k individual dots
+ * communicates exposure density correctly and avoids confusing synthetic point
+ * locations that fall in the ocean (the seed uses per-state Gaussian sampling).
  *
  * Task 20: SimMap + SimWorkspace.
  */
@@ -80,20 +86,47 @@ export function SimMap(props: SimMapProps) {
       });
   }, [showPolicies]);
 
-  // Split policies into inside/outside the current footprint.
-  // Memoized on [policies, currentFootprint] so it doesn't recompute on every render.
+  // Aggregate raw policy points to ZIP3 centroid bubbles.
+  // Memoized on [policies] — only recomputes when the fetched data changes.
+  const zipBubbles = useMemo(() => {
+    type Acc = { latSum: number; lonSum: number; count: number; tiv: number };
+    const acc: Record<string, Acc> = {};
+    for (const p of policies) {
+      if (acc[p.zip3]) {
+        acc[p.zip3].latSum += p.lat;
+        acc[p.zip3].lonSum += p.lon;
+        acc[p.zip3].count += 1;
+        acc[p.zip3].tiv += p.tiv;
+      } else {
+        acc[p.zip3] = { latSum: p.lat, lonSum: p.lon, count: 1, tiv: p.tiv };
+      }
+    }
+    return Object.entries(acc)
+      .filter(([, g]) => g.count > 0)
+      .map(([zip3, g]) => ({
+        zip3,
+        lat: g.latSum / g.count,
+        lon: g.lonSum / g.count,
+        count: g.count,
+        tiv: g.tiv,
+      }));
+  }, [policies]);
+
+  // Split ZIP3 bubbles into inside/outside the current footprint using each
+  // centroid for the point-in-polygon test — one classification per zip3.
+  // Memoized on [zipBubbles, currentFootprint].
   const { insideGeoJSON, outsideGeoJSON } = useMemo(() => {
     const inside: GeoJSON.Feature[] = [];
     const outside: GeoJSON.Feature[] = [];
-    for (const p of policies) {
+    for (const b of zipBubbles) {
       const feat: GeoJSON.Feature = {
         type: 'Feature',
-        geometry: { type: 'Point', coordinates: [p.lon, p.lat] },
-        properties: { id: p.id },
+        geometry: { type: 'Point', coordinates: [b.lon, b.lat] },
+        properties: { zip3: b.zip3, count: b.count, tiv: b.tiv },
       };
       if (
         props.currentFootprint &&
-        booleanPointInPolygon(point([p.lon, p.lat]), {
+        booleanPointInPolygon(point([b.lon, b.lat]), {
           type: 'Feature',
           geometry: props.currentFootprint.geometry,
           properties: {},
@@ -107,7 +140,7 @@ export function SimMap(props: SimMapProps) {
     const insideGeoJSON: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: inside };
     const outsideGeoJSON: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: outside };
     return { insideGeoJSON, outsideGeoJSON };
-  }, [policies, props.currentFootprint]);
+  }, [zipBubbles, props.currentFootprint]);
 
   // Recreate the draw instance whenever peril changes (or map first becomes ready).
   useEffect(() => {
@@ -190,9 +223,12 @@ export function SimMap(props: SimMapProps) {
                 id="policies-outside-circles"
                 type="circle"
                 paint={{
-                  'circle-radius': 2.5,
+                  'circle-radius': ['interpolate', ['linear'], ['get', 'count'], 1, 4, 50, 8, 200, 14, 500, 22],
                   'circle-color': '#94a3b8',
-                  'circle-opacity': 0.7,
+                  'circle-opacity': 0.55,
+                  'circle-stroke-width': 1,
+                  'circle-stroke-color': '#0f172a',
+                  'circle-stroke-opacity': 0.6,
                 }}
               />
             </Source>
@@ -201,9 +237,12 @@ export function SimMap(props: SimMapProps) {
                 id="policies-inside-circles"
                 type="circle"
                 paint={{
-                  'circle-radius': 2.5,
+                  'circle-radius': ['interpolate', ['linear'], ['get', 'count'], 1, 4, 50, 8, 200, 14, 500, 22],
                   'circle-color': '#ef4444',
-                  'circle-opacity': 0.7,
+                  'circle-opacity': 0.55,
+                  'circle-stroke-width': 1,
+                  'circle-stroke-color': '#0f172a',
+                  'circle-stroke-opacity': 0.6,
                 }}
               />
             </Source>
