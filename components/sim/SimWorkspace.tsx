@@ -44,6 +44,9 @@ export function SimWorkspace(props: SimWorkspaceProps) {
   const [simId, setSimId] = useState<string | null>(props.initialSimId);
   const [impact, setImpact] = useState<PreviewImpact | null>(props.initialImpact ?? null);
   const [sims, setSims] = useState(props.initialSims);
+  const [currentFootprint, setCurrentFootprint] = useState<SimulationFootprint | null>(
+    props.initialFootprint ?? null,
+  );
   const [promoted, setPromoted] = useState(
     props.initialSimId
       ? !!(props.initialSims.find((s) => s.id === props.initialSimId)?.promoted)
@@ -57,6 +60,7 @@ export function SimWorkspace(props: SimWorkspaceProps) {
   }, [search]);
 
   async function onFootprintChange(fp: SimulationFootprint) {
+    setCurrentFootprint(fp);
     // v1: always POST — creates a new draft. PATCH path is out of scope.
     const res = await fetch('/api/sim', {
       method: 'POST',
@@ -103,6 +107,7 @@ export function SimWorkspace(props: SimWorkspaceProps) {
           effectiveDate={effectiveDate}
           onEffectiveDateChange={setEffectiveDate}
           onFootprintChange={onFootprintChange}
+          currentFootprint={currentFootprint}
         />
       </main>
 
