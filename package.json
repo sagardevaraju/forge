@@ -13,11 +13,16 @@
   "dependencies": {
     "@libsql/client": "^0.17.3",
     "@react-pdf/renderer": "^4.5.1",
+    "@turf/boolean-point-in-polygon": "^7.3.5",
+    "@turf/buffer": "^7.3.5",
+    "@turf/helpers": "^7.3.5",
     "maplibre-gl": "^5.24.0",
     "next": "^16.2.6",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-map-gl": "^8.1.1"
+    "react-map-gl": "^8.1.1",
+    "terra-draw": "^1.30.0",
+    "terra-draw-maplibre-gl-adapter": "^1.4.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

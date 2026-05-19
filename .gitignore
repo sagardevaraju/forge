@@ -75,3 +75,4 @@ eval/results/*.png
 
 # Brainstorming visual companion sessions
 .superpowers/
+artifacts/simulations/

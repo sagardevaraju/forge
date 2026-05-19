@@ -236,6 +236,7 @@ def _scenarios_from_ensemble(
             dist_km = _min_distance_to_track_km(meta["lat"], meta["lon"], path)
             surge_grid[zip3] = _surge_depth(dist_km, peak_wind, meta["elev_m"])
         scenario: dict = {
+            "kind": "hurricane",
             "id": f"{storm_id}_{i + 1:04d}",
             "path": path,
             "peak_wind": peak_wind,
@@ -400,6 +401,7 @@ def generate_scenarios(
             surge_grid[zip3] = _surge_depth(dist_km, peak_wind, meta["elev_m"])
 
         scenario = {
+            "kind": "hurricane",
             "id": f"{storm_id}_{i + 1:04d}",
             "path": path,
             "peak_wind": peak_wind,

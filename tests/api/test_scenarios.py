@@ -39,3 +39,10 @@ def test_peak_wind_within_reasonable_range():
     winds = [s["peak_wind"] for s in scs]
     assert min(winds) > 60   # Even with perturbation, a 130mph base shouldn't go below 60
     assert max(winds) < 220  # Cap to physically reasonable
+
+
+def test_scenario_has_kind_hurricane_discriminator():
+    """SIM.8: peril-agnostic discriminator on hurricane scenarios."""
+    out = generate_scenarios("AL092024", n=2)
+    for s in out:
+        assert s.get("kind") == "hurricane"

@@ -2,6 +2,7 @@ numpy>=1.26
 pytest>=8.0
 requests>=2.31
 scipy>=1.11  # Task P2.1: continuous CRPS (PchipInterpolator + quad)
+shapely>=2.0  # Task SIM.6: polygon containment + perturbation for sim loss generator
 
 # Task 10-11: loss synthesis + XGBoost quantile training
 pandas>=2.0

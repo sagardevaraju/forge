@@ -57,6 +57,7 @@ Every commit in the original plan tags a `Task N` from `docs/superpowers/plans/2
 - **`force-dynamic`**: the three view pages set `export const dynamic = 'force-dynamic'` because they read live DB state. Don't remove this — Vercel will otherwise ISR-cache the page across deploys.
 - **`forge-local.db` is gitignored**. Never check it in. Same for `artifacts/*.parquet`, `artifacts/*.joblib`, `artifacts/chips/`, `eval/results/*`.
 - **`artifacts/portfolio_optimization.json`, `artifacts/calibration.json`, `artifacts/treaty.json`, `artifacts/regime/*.parquet`, and `artifacts/hurdat2/*.parquet` ARE tracked** (Phase 1 P2.0 / Phase 2 P2.2 / P2.17 / P2.3 / P2.10). Pages and tests read them at render/run time; never re-run the precompute in serverless. Regenerate locally with `python -m scripts.precompute_portfolio_optimization`, `python -m scripts.precompute_calibration`, `python -m scripts.precompute_treaty`, `python -m ml.scenarios.regime --refresh`, and `python -m ml.scenarios.hurdat2 --refresh`.
+- **`artifacts/simulations/*.parquet` is gitignored** (regenerated on promote). The `simulations` DB table IS the source of truth; the parquet is a derived K=1000 cohort-loss cache.
 - **Mapbox token**: the basemap needs `NEXT_PUBLIC_MAPBOX_TOKEN`. Without it, MapLibre falls back to its style which is fine for dev but looks bare.
 - **Python imports inside `api_py/`**: must work both as a Vercel function (where `api_py/` is the package root) and as `from api_py.optimize_portfolio import solve` from `tests/api/`. Use relative imports sparingly; the test layout assumes absolute `api_py.*` paths.
 - **Pre-commit hook lint**: `npm run build` runs `next lint` implicitly. Lint warnings about `any` are deliberate in the chat route (see the `eslint-disable` comments) — leave them.
@@ -79,6 +80,8 @@ Every commit in the original plan tags a `Task N` from `docs/superpowers/plans/2
 | Change a page's data shape | The server-component page (`app/<view>/page.tsx`) + the client component (`components/<View>.tsx`) |
 | Change the policy book schema | `lib/db/schema.sql` + `lib/book/csv.ts` (CSV validators) + `scripts/seed_policy_book.py` (seed) |
 | Add a route to cron refresh | `app/api/cron/refresh/route.ts` + verify `crons` in `vercel.json` |
+| Add a new simulation peril | `lib/sim/severity.ts` (HAZUS row) + `api_py/sim_loss.py` (decay + perturbation) + `SimulationFootprint` union in `lib/sim/footprint.ts` |
+| Touch the simulate flow | `/simulate` route (`app/simulate/page.tsx` + `components/sim/*`); loss compute in `api_py/sim_loss.py`; banner in `components/grammar/SimulationBanner.tsx` mounted on `/portfolio` |
 
 ## Build / test cheatsheet
 

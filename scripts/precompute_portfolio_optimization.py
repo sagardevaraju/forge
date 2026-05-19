@@ -17,6 +17,7 @@ Re-run after seeding policies or changing budgets:
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import os
@@ -25,11 +26,43 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pyarrow.parquet as _pq
 
 # Make ``api_py`` importable when this script is run as ``python -m`` or directly.
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+ARTIFACTS_ROOT = ROOT / "artifacts"
+SIMS_ROOT = ARTIFACTS_ROOT / "simulations"
+
+
+def _resolve_sim_ids(include: str | None) -> list[str]:
+    """Expand the --include-sims argument to a list of sim_id strings."""
+    if not include:
+        return []
+    if include == "all":
+        if not SIMS_ROOT.exists():
+            return []
+        return sorted({p.stem for p in SIMS_ROOT.glob("*.parquet")})
+    return [s.strip() for s in include.split(",") if s.strip()]
+
+
+def _load_sim_losses(sim_id: str) -> tuple[dict[str, list[float]], dict]:
+    """Read a sim parquet and return (losses_by_cohort, meta_dict)."""
+    parquet = SIMS_ROOT / f"{sim_id}.parquet"
+    meta = SIMS_ROOT / f"{sim_id}.meta.json"
+    if not parquet.exists():
+        raise FileNotFoundError(f"sim parquet missing: {parquet}")
+    table = _pq.read_table(parquet)
+    cohort_col = table.column("cohort_key").to_pylist()
+    k_cols = [c for c in table.column_names if c.startswith("k")]
+    losses_by_cohort = {
+        cohort_col[i]: [float(table.column(c)[i].as_py()) for c in k_cols]
+        for i in range(len(cohort_col))
+    }
+    return losses_by_cohort, json.loads(meta.read_text())
+
+from api_py.cohort_keys import cohort_key as _cohort_key, policy_quintile_lookup  # noqa: E402
 from api_py.optimize_portfolio import ACTIONS, solve  # noqa: E402
 
 # Task P2.0 — Monte-Carlo scenario count per cohort. Sized so that the
@@ -135,42 +168,36 @@ def _aggregate_cohorts_from_sqlite(db_path: Path) -> list[dict]:
 
     Mirrors the JS aggregation in lib/db/cohorts.ts (same cohort key, quintile
     TIV bucket) so the JS-rendered map matches the Python-side MIP keys 1:1.
+
+    The quintile cut-point logic is delegated to
+    ``api_py.cohort_keys.policy_quintile_lookup`` so that the promote path
+    (``api_py._solve_stdin._handle_sim_loss``) uses bit-identical cuts and
+    emits keys that match the MIP cohort store directly.
     """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT zip3, build_type, tiv, premium_annual, flood_zone, elevation_m FROM policies"
+        "SELECT id, zip3, build_type, tiv, premium_annual, flood_zone, elevation_m FROM policies"
     ).fetchall()
     conn.close()
 
     if not rows:
         return []
 
-    tivs = sorted(float(r["tiv"]) for r in rows)
-    # Quintile cut-points using linear interpolation (matches lib/db/cohorts.ts).
-    cuts: list[float] = []
-    n = len(tivs)
-    for q in range(1, 5):
-        rank = (q / 5) * (n - 1)
-        lo, hi = int(rank), int(rank) + (0 if rank.is_integer() else 1)
-        if lo == hi or hi >= n:
-            cuts.append(tivs[lo])
-        else:
-            w = rank - lo
-            cuts.append(tivs[lo] * (1 - w) + tivs[hi] * w)
-
-    def bucket(t: float) -> int:
-        for i, c in enumerate(cuts):
-            if t < c:
-                return i
-        return 4
+    # Build (id, lat=0, lon=0, tiv, build_type, zip3) tuples — lat/lon not
+    # needed for quintile computation; only id and tiv are used by the helper.
+    policy_tuples = [
+        (int(r["id"]), 0.0, 0.0, float(r["tiv"]), str(r["build_type"]), str(r["zip3"]))
+        for r in rows
+    ]
+    quintile_by_id = policy_quintile_lookup(policy_tuples)
 
     buckets: dict[str, dict] = {}
     for r in rows:
         zip3 = str(r["zip3"])
         bt = str(r["build_type"])
-        quintile = bucket(float(r["tiv"]))
-        key = f"{zip3}_{bt}_q{quintile}"
+        quintile = quintile_by_id[int(r["id"])]
+        key = _cohort_key((int(r["id"]), 0.0, 0.0, float(r["tiv"]), bt, zip3), quintile)
         b = buckets.setdefault(
             key,
             {
@@ -238,13 +265,47 @@ def _aggregate_cohorts_from_sqlite(db_path: Path) -> list[dict]:
     return out
 
 
-def main() -> None:
+def _build_cohorts() -> list[dict]:
+    """Load the policy book from forge-local.db and return aggregated cohorts.
+
+    Extracted from ``main()`` (Task 7) so ``main(argv)`` can call it cleanly
+    before optionally merging in sim losses.
+    """
     db_path = ROOT / "forge-local.db"
     if not db_path.exists():
         raise SystemExit(f"forge-local.db not found at {db_path}")
-
     cohorts = _aggregate_cohorts_from_sqlite(db_path)
     print(f"Aggregated {len(cohorts)} cohorts from {db_path.name}")
+    return cohorts
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        description="Pre-compute Portfolio MIP result and cache artifacts."
+    )
+    parser.add_argument(
+        "--include-sims",
+        default=None,
+        help=(
+            "Comma-separated sim_ids, or 'all'. Concatenates their K-loss "
+            "draws onto the per-cohort hurricane scenario set before TVaR-99."
+        ),
+    )
+    args = parser.parse_args(argv)
+
+    cohorts = _build_cohorts()
+
+    # Task 7: merge simulated event losses into the joint scenario set.
+    sim_ids = _resolve_sim_ids(args.include_sims)
+    sim_meta_records: list[dict] = []
+    if sim_ids:
+        for sim_id in sim_ids:
+            losses_by_cohort, sim_meta = _load_sim_losses(sim_id)
+            sim_meta_records.append(sim_meta)
+            for c in cohorts:
+                extra = losses_by_cohort.get(c["id"])
+                if extra:
+                    c["loss_scenarios"] = list(c.get("loss_scenarios", [])) + extra
 
     total_tiv = sum(c["total_tiv"] for c in cohorts)
     total_premium = sum(c["total_premium"] for c in cohorts)
@@ -278,6 +339,7 @@ def main() -> None:
         cession_budget=cession_budget,
         horizon_start=HORIZON_START,
         horizon_end=HORIZON_END,
+        risk_measure="tvar_99" if sim_ids else "var_99",
     )
     print(
         f"MIP status: {result['status']}  "
@@ -381,6 +443,18 @@ def main() -> None:
     for a, s in action_summary.items():
         share = s["tiv"] / total_tiv * 100 if total_tiv else 0.0
         print(f"  {a:14s}  {s['count']:4d} cohorts  ${s['tiv']:>14,.0f} TIV  ({share:5.1f}%)")
+
+    # Task 7: write sidecar meta artifact so the UI and downstream scripts know
+    # which simulations were folded in and which risk measure was used.
+    import datetime as _dt
+    meta_out = ARTIFACTS_ROOT / "portfolio_optimization.meta.json"
+    meta_out.write_text(json.dumps({
+        "hurricane_scenario_set": "AL092024",
+        "included_sims": sim_ids,
+        "simulations_log": sim_meta_records,
+        "solved_at": _dt.datetime.utcnow().isoformat() + "Z",
+    }, indent=2))
+    print(f"Wrote {meta_out.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":
