@@ -150,3 +150,15 @@ describe('tornadoWidthM', () => {
     expect(tornadoWidthM('ef5')).toBe(550);
   });
 });
+
+describe('damageRatio with per-peril severity', () => {
+  test('a continuous severity drives the ratio (hail 45 mm -> multiplier 1.0)', () => {
+    expect(damageRatio('hail', 'wood_frame', 45)).toBeCloseTo(0.18, 4);
+  });
+  test('a discrete severity drives the ratio (tornado EF1 -> multiplier 0.55)', () => {
+    expect(damageRatio('tornado', 'wood_frame', 'ef1')).toBeCloseTo(0.42 * 0.55, 4);
+  });
+  test('a legacy tier string still resolves via the fallback', () => {
+    expect(damageRatio('tornado', 'wood_frame', 'severe')).toBeCloseTo(0.42, 4);
+  });
+});

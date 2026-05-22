@@ -151,11 +151,11 @@ export const PERIL_SCALES: Record<Peril, PerilScale> = {
 export function damageRatio(
   peril: Peril,
   buildType: BuildType | string,
-  intensity: Intensity,
+  severity: SeverityValue,
 ): number {
   const row = HAZUS_MATRIX[buildType as BuildType] ?? HAZUS_MATRIX.wood_frame;
   const base = row[peril];
-  const scaled = base * INTENSITY_SCALE[intensity];
+  const scaled = base * damageMultiplier(peril, severity);
   return Math.min(1, Math.max(0, scaled));
 }
 
