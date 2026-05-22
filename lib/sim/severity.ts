@@ -158,3 +158,68 @@ export function damageRatio(
   const scaled = base * INTENSITY_SCALE[intensity];
   return Math.min(1, Math.max(0, scaled));
 }
+
+/**
+ * Per-peril damage multiplier. For a continuous peril `severity` is a number;
+ * for a discrete peril it is a level id. A legacy tier string ('moderate' |
+ * 'severe' | 'catastrophic') falls back to INTENSITY_SCALE so footprints
+ * stored before the per-peril scales still resolve.
+ */
+export function damageMultiplier(peril: Peril, severity: SeverityValue): number {
+  const scale = PERIL_SCALES[peril];
+  if (scale.kind === 'continuous') {
+    if (typeof severity === 'number') return scale.multiplier(severity);
+    return INTENSITY_SCALE[severity as Intensity] ?? 1.0;
+  }
+  const level = scale.levels.find((l) => l.id === severity);
+  if (level) return level.multiplier;
+  return INTENSITY_SCALE[severity as Intensity] ?? 1.0;
+}
+
+/** Human-readable label for a severity value (e.g. 'M7.2', '45 mm', 'EF3'). */
+export function severityLabel(peril: Peril, severity: SeverityValue): string {
+  const scale = PERIL_SCALES[peril];
+  if (scale.kind === 'continuous') {
+    return typeof severity === 'number' ? scale.label(severity) : String(severity);
+  }
+  const level = scale.levels.find((l) => l.id === severity);
+  return level ? level.label : String(severity);
+}
+
+/**
+ * Bucket a severity value into the legacy three-tier Intensity enum. Used to
+ * fill the NOT NULL `simulations.intensity` column — the column is no longer
+ * an operator input, just a derived label. Thresholds sit at the midpoints of
+ * the INTENSITY_SCALE spine (0.775, 1.225).
+ */
+export function legacyTier(peril: Peril, severity: SeverityValue): Intensity {
+  const m = damageMultiplier(peril, severity);
+  if (m < 0.775) return 'moderate';
+  if (m < 1.225) return 'severe';
+  return 'catastrophic';
+}
+
+/**
+ * Derive a representative severity value from a legacy Intensity tier — used
+ * to normalise footprints stored before the per-peril scales. The result is
+ * the scale value whose multiplier equals INTENSITY_SCALE[intensity], so it
+ * round-trips back through legacyTier().
+ */
+export function severityFromLegacy(peril: Peril, intensity: Intensity): SeverityValue {
+  const m = INTENSITY_SCALE[intensity];
+  const scale = PERIL_SCALES[peril];
+  if (scale.kind === 'discrete') {
+    const level = scale.levels.find((l) => l.multiplier === m);
+    return (level ?? scale.levels.find((l) => l.id === scale.default)!).id;
+  }
+  // Continuous — invert multiplier(v) = m (research.md S2c, S3b).
+  if (peril === 'earthquake') return 7.0 + (m - 1.0) / 0.45;
+  return 25 + (m - 0.55) / 0.0225; // hail
+}
+
+/** Tornado swath corridor width (m) for an EF level id (Brooks 2004). */
+export function tornadoWidthM(severity: SeverityValue): number {
+  const scale = PERIL_SCALES.tornado;
+  if (scale.kind !== 'discrete') return 240;
+  return scale.levels.find((l) => l.id === severity)?.width_m ?? 240;
+}
