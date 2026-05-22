@@ -37,6 +37,17 @@ interface WhatIfControlProps {
   ariaLabel?: string;
   disabled?: boolean;
   onCommit: (proposed: number) => void;
+  /**
+   * Display scale for the numeric input only. `display = raw / inputScale`
+   * and the input commits `Number(text) * inputScale` as the raw value
+   * passed to `onCommit`. Use 1e6 for millions, 0.01 for percentage points,
+   * etc. Defaults to 1 (no rescaling — input shows raw values).
+   */
+  inputScale?: number;
+  /** Decimal places shown in the numeric input. Defaults to 0 when `inputScale === 1`, else 2. */
+  inputDecimals?: number;
+  /** Optional unit suffix rendered next to the numeric input (e.g. "M", "%"). */
+  inputSuffix?: string;
 }
 
 const clamp = (v: number, min: number, max: number) =>
@@ -60,9 +71,21 @@ export function WhatIfControl({
   ariaLabel,
   disabled,
   onCommit,
+  inputScale = 1,
+  inputDecimals,
+  inputSuffix,
 }: WhatIfControlProps) {
+  const resolvedDecimals = inputDecimals ?? (inputScale === 1 ? 0 : 2);
+  const formatForInput = (raw: number): string => {
+    const display = raw / inputScale;
+    if (resolvedDecimals === 0) return String(Math.round(display));
+    // Strip trailing zeros so 31.40 → 31.4 (less digit noise) while keeping
+    // precision for finer slider steps.
+    return parseFloat(display.toFixed(resolvedDecimals)).toString();
+  };
+
   const [proposed, setProposed] = useState<number>(current);
-  const [draftText, setDraftText] = useState<string>(String(current));
+  const [draftText, setDraftText] = useState<string>(formatForInput(current));
   const lastCommittedRef = useRef<number>(current);
 
   // When the parent updates `current` (e.g. after a successful solve), the
@@ -70,8 +93,9 @@ export function WhatIfControl({
   // for further what-ifs.
   useEffect(() => {
     setProposed(current);
-    setDraftText(String(current));
+    setDraftText(formatForInput(current));
     lastCommittedRef.current = current;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current]);
 
   const fmt = format ?? defaultFormatter(unit);
@@ -85,7 +109,7 @@ export function WhatIfControl({
     if (clamped === lastCommittedRef.current) return;
     lastCommittedRef.current = clamped;
     setProposed(clamped);
-    setDraftText(String(clamped));
+    setDraftText(formatForInput(clamped));
     onCommit(clamped);
   };
 
@@ -93,7 +117,7 @@ export function WhatIfControl({
     const next = Number(e.target.value);
     if (Number.isFinite(next)) {
       setProposed(next);
-      setDraftText(String(next));
+      setDraftText(formatForInput(next));
     }
   };
 
@@ -103,17 +127,17 @@ export function WhatIfControl({
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setDraftText(e.target.value);
-    const next = Number(e.target.value);
-    if (Number.isFinite(next) && e.target.value.trim() !== '') {
-      setProposed(clamp(next, min, max));
+    const parsed = Number(e.target.value);
+    if (Number.isFinite(parsed) && e.target.value.trim() !== '') {
+      setProposed(clamp(parsed * inputScale, min, max));
     }
   };
 
   const commitFromInput = () => {
     if (draftText.trim() === '') return;
-    const next = Number(draftText);
-    if (!Number.isFinite(next)) return;
-    commit(next);
+    const parsed = Number(draftText);
+    if (!Number.isFinite(parsed)) return;
+    commit(parsed * inputScale);
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -131,7 +155,7 @@ export function WhatIfControl({
     <div
       data-testid="whatif-control"
       className={[
-        'flex flex-col gap-2 p-3 border rounded bg-white',
+        'flex flex-col gap-2.5 py-3',
         disabled ? 'opacity-60' : '',
       ]
         .filter(Boolean)
@@ -140,25 +164,38 @@ export function WhatIfControl({
       <div className="flex items-center justify-between gap-2">
         <label
           htmlFor={`whatif-${label}`}
-          className="text-xs text-zinc-600 uppercase tracking-wide"
+          className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-zinc-500"
         >
           {label}
         </label>
-        <input
-          id={`whatif-${label}`}
-          type="number"
-          role="spinbutton"
-          value={draftText}
-          min={min}
-          max={max}
-          step={resolvedStep}
-          disabled={disabled}
-          onChange={handleInputChange}
-          onKeyDown={handleInputKeyDown}
-          onBlur={commitFromInput}
-          aria-label={`${resolvedAriaLabel} numeric input`}
-          className="w-24 text-xs border rounded px-1.5 py-1 text-right text-zinc-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:cursor-not-allowed"
-        />
+        <div className="relative flex items-center">
+          <input
+            id={`whatif-${label}`}
+            type="number"
+            role="spinbutton"
+            value={draftText}
+            min={min / inputScale}
+            max={max / inputScale}
+            step={resolvedStep / inputScale}
+            disabled={disabled}
+            onChange={handleInputChange}
+            onKeyDown={handleInputKeyDown}
+            onBlur={commitFromInput}
+            aria-label={`${resolvedAriaLabel} numeric input`}
+            className={[
+              'w-20 text-[12px] tabular-nums ring-1 ring-zinc-200 rounded-md py-0.5 text-right text-zinc-900 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/70 disabled:cursor-not-allowed',
+              inputSuffix ? 'pl-2 pr-5' : 'px-2',
+            ].join(' ')}
+          />
+          {inputSuffix && (
+            <span
+              aria-hidden="true"
+              className="absolute right-2 text-[11px] text-zinc-500 pointer-events-none tabular-nums"
+            >
+              {inputSuffix}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="relative h-8">

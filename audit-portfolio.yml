@@ -1,0 +1,225 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]: No active named storm — Atlantic basin quiet.
+  - generic [ref=e3]:
+    - link "FORGE" [ref=e4] [cursor=pointer]:
+      - /url: /
+    - navigation [ref=e5]:
+      - link "Portfolio" [ref=e6] [cursor=pointer]:
+        - /url: /portfolio
+      - link "Events" [ref=e7] [cursor=pointer]:
+        - /url: /events
+      - link "Claims" [ref=e8] [cursor=pointer]:
+        - /url: /claims
+    - group "persona-toggle" [ref=e10]:
+      - button "Cat-ops" [pressed] [ref=e11] [cursor=pointer]
+      - button "Actuary" [ref=e12] [cursor=pointer]
+      - button "Reinsurance" [ref=e13] [cursor=pointer]
+      - button "Field-ops" [ref=e14] [cursor=pointer]
+      - button "Academic" [ref=e15] [cursor=pointer]
+  - main [ref=e16]:
+    - generic [ref=e30]:
+      - heading "Portfolio Map" [level=1] [ref=e31]
+      - generic [ref=e32]:
+        - group "persona-toggle" [ref=e34]:
+          - button "Cat-ops" [pressed] [ref=e35] [cursor=pointer]
+          - button "Actuary" [ref=e36] [cursor=pointer]
+          - button "Reinsurance" [ref=e37] [cursor=pointer]
+          - button "Field-ops" [ref=e38] [cursor=pointer]
+          - button "Academic" [ref=e39] [cursor=pointer]
+        - generic [ref=e40]:
+          - generic [ref=e42]:
+            - paragraph [ref=e43]: "Treaty year: Jul 2026 – Jun 2027"
+            - generic [ref=e44]:
+              - generic [ref=e45]:
+                - generic [ref=e46]:
+                  - generic [ref=e47]: Total TIV
+                  - generic "Synthetic scaffold — demo data shown when no live source is available." [ref=e48]: Demo
+                - generic [ref=e49]: $3.19B
+              - generic [ref=e50]:
+                - generic [ref=e51]:
+                  - generic [ref=e52]: Expected margin
+                  - generic "Recommendation — a suggested action awaiting operator review." [ref=e53]: Recommend
+                - generic [ref=e54]: $41.6M
+              - generic [ref=e55]:
+                - generic [ref=e56]:
+                  - generic [ref=e57]: Capital used / budget
+                  - generic "Model output — produced by an internal optimizer or ML model." [ref=e58]: Model
+                - generic [ref=e59]: $78.4M / $31.4M
+              - generic [ref=e60]:
+                - generic [ref=e61]:
+                  - generic [ref=e62]: Non-renew used / cap
+                  - generic "Recommendation — a suggested action awaiting operator review." [ref=e63]: Recommend
+                - generic [ref=e64]: $196.0M / $477.9M
+              - generic [ref=e65]:
+                - generic [ref=e66]:
+                  - generic [ref=e67]: Cession spend / budget
+                  - generic "Model output — produced by an internal optimizer or ML model." [ref=e68]: Model
+                - generic [ref=e69]: $0.0M / $5.3M
+          - complementary "What-if budget controls" [ref=e70]:
+            - generic [ref=e71]:
+              - heading "What-if" [level=2] [ref=e72]
+              - generic "Model output — produced by an internal optimizer or ML model." [ref=e74]: Model
+            - generic [ref=e75]:
+              - generic [ref=e76]:
+                - generic [ref=e77]: Capital budget
+                - spinbutton "Capital budget ($) numeric input" [ref=e78]: "31360316.051665742"
+              - slider "Capital budget ($)" [ref=e84] [cursor=pointer]: "31858658.1445586"
+              - generic [ref=e85]:
+                - generic [ref=e86]: baseline $31.4M
+                - generic [ref=e88]: current $31.4M
+                - generic [ref=e90]: proposed $31.4M
+            - generic [ref=e92]:
+              - generic [ref=e93]:
+                - generic [ref=e94]: Max non-renew %
+                - spinbutton "Max non-renew fraction numeric input" [ref=e95]: "0.15"
+              - slider "Max non-renew fraction" [ref=e101] [cursor=pointer]: "0.15"
+              - generic [ref=e102]:
+                - generic [ref=e103]: baseline 15%
+                - generic [ref=e105]: current 15%
+                - generic [ref=e107]: proposed 15%
+            - generic [ref=e109]:
+              - generic [ref=e110]:
+                - generic [ref=e111]: Cession budget
+                - spinbutton "Cession budget ($) numeric input" [ref=e112]: "5274104.193121027"
+              - slider "Cession budget ($)" [ref=e118] [cursor=pointer]: "5256678.59385216"
+              - generic [ref=e119]:
+                - generic [ref=e120]: baseline $5.27M
+                - generic [ref=e122]: current $5.27M
+                - generic [ref=e124]: proposed $5.27M
+            - button "Reset to baseline" [disabled] [ref=e126]
+            - paragraph [ref=e127]:
+              - text: Re-solve via
+              - code [ref=e128]: /api/optimize/portfolio
+              - text: — invokes the same PuLP/CBC solver as the precompute. Server-side cache (5 min TTL) deduplicates identical budget triples.
+      - generic [ref=e130]:
+        - button "Compare current vs recommended portfolio" [ref=e132] [cursor=pointer]: Compare current vs recommended
+        - region "Portfolio map" [ref=e133]:
+          - generic [ref=e134]:
+            - region "Map" [ref=e135]
+            - group [ref=e136]:
+              - generic "Toggle attribution" [ref=e137] [cursor=pointer]
+              - generic [ref=e138]:
+                - link "MapLibre" [ref=e139] [cursor=pointer]:
+                  - /url: https://maplibre.org/
+                - text: "|"
+                - link "OpenFreeMap" [ref=e140] [cursor=pointer]:
+                  - /url: https://openfreemap.org
+                - link "© OpenMapTiles" [ref=e141] [cursor=pointer]:
+                  - /url: https://www.openmaptiles.org/
+                - text: Data from
+                - link "OpenStreetMap" [ref=e142] [cursor=pointer]:
+                  - /url: https://www.openstreetmap.org/copyright
+          - list "ZIP3 cohorts in the recommended portfolio" [ref=e144]:
+            - listitem [ref=e145]:
+              - 'button "Inspect cohorts in ZIP3 275, Wake, NC — 117 policies, recommended action: Cede (excess of loss)" [ref=e146] [cursor=pointer]': ZIP3 275 — Wake, NC
+            - listitem [ref=e147]:
+              - 'button "Inspect cohorts in ZIP3 280, Mecklenburg, NC — 159 policies, recommended action: Cede (excess of loss)" [ref=e148] [cursor=pointer]': ZIP3 280 — Mecklenburg, NC
+            - listitem [ref=e149]:
+              - 'button "Inspect cohorts in ZIP3 281, Mecklenburg, NC — 148 policies, recommended action: Cede (excess of loss)" [ref=e150] [cursor=pointer]': ZIP3 281 — Mecklenburg, NC
+            - listitem [ref=e151]:
+              - 'button "Inspect cohorts in ZIP3 282, Mecklenburg, NC — 150 policies, recommended action: Cede (excess of loss)" [ref=e152] [cursor=pointer]': ZIP3 282 — Mecklenburg, NC
+            - listitem [ref=e153]:
+              - 'button "Inspect cohorts in ZIP3 283, Guilford, NC — 146 policies, recommended action: Cede (excess of loss)" [ref=e154] [cursor=pointer]': ZIP3 283 — Guilford, NC
+            - listitem [ref=e155]:
+              - 'button "Inspect cohorts in ZIP3 284, Cabarrus, NC — 138 policies, recommended action: Cede (excess of loss)" [ref=e156] [cursor=pointer]': ZIP3 284 — Cabarrus, NC
+            - listitem [ref=e157]:
+              - 'button "Inspect cohorts in ZIP3 285, Wilson, NC — 159 policies, recommended action: Cede (excess of loss)" [ref=e158] [cursor=pointer]': ZIP3 285 — Wilson, NC
+            - listitem [ref=e159]:
+              - 'button "Inspect cohorts in ZIP3 286, Wayne, NC — 140 policies, recommended action: Cede (excess of loss)" [ref=e160] [cursor=pointer]': ZIP3 286 — Wayne, NC
+            - listitem [ref=e161]:
+              - 'button "Inspect cohorts in ZIP3 287, Buncombe, NC — 157 policies, recommended action: Cede (excess of loss)" [ref=e162] [cursor=pointer]': ZIP3 287 — Buncombe, NC
+            - listitem [ref=e163]:
+              - 'button "Inspect cohorts in ZIP3 289, New Hanover, NC — 151 policies, recommended action: Cede (excess of loss)" [ref=e164] [cursor=pointer]': ZIP3 289 — New Hanover, NC
+            - listitem [ref=e165]:
+              - 'button "Inspect cohorts in ZIP3 320, Duval, FL — 346 policies, recommended action: Cede (excess of loss)" [ref=e166] [cursor=pointer]': ZIP3 320 — Duval, FL
+            - listitem [ref=e167]:
+              - 'button "Inspect cohorts in ZIP3 330, Miami-Dade, FL — 342 policies, recommended action: Cede (excess of loss)" [ref=e168] [cursor=pointer]': ZIP3 330 — Miami-Dade, FL
+            - listitem [ref=e169]:
+              - 'button "Inspect cohorts in ZIP3 331, Miami-Dade, FL — 354 policies, recommended action: Cede (excess of loss)" [ref=e170] [cursor=pointer]': ZIP3 331 — Miami-Dade, FL
+            - listitem [ref=e171]:
+              - 'button "Inspect cohorts in ZIP3 332, Miami-Dade, FL — 368 policies, recommended action: Cede (excess of loss)" [ref=e172] [cursor=pointer]': ZIP3 332 — Miami-Dade, FL
+            - listitem [ref=e173]:
+              - 'button "Inspect cohorts in ZIP3 334, Polk, FL — 309 policies, recommended action: Cede (excess of loss)" [ref=e174] [cursor=pointer]': ZIP3 334 — Polk, FL
+            - listitem [ref=e175]:
+              - 'button "Inspect cohorts in ZIP3 335, Hillsborough, FL — 338 policies, recommended action: Cede (excess of loss)" [ref=e176] [cursor=pointer]': ZIP3 335 — Hillsborough, FL
+            - listitem [ref=e177]:
+              - 'button "Inspect cohorts in ZIP3 337, Pinellas, FL — 340 policies, recommended action: Cede (excess of loss)" [ref=e178] [cursor=pointer]': ZIP3 337 — Pinellas, FL
+            - listitem [ref=e179]:
+              - 'button "Inspect cohorts in ZIP3 338, Polk, FL — 331 policies, recommended action: Cede (excess of loss)" [ref=e180] [cursor=pointer]': ZIP3 338 — Polk, FL
+            - listitem [ref=e181]:
+              - 'button "Inspect cohorts in ZIP3 339, Lee, FL — 341 policies, recommended action: Cede (excess of loss)" [ref=e182] [cursor=pointer]': ZIP3 339 — Lee, FL
+            - listitem [ref=e183]:
+              - 'button "Inspect cohorts in ZIP3 341, Sarasota, FL — 344 policies, recommended action: Cede (excess of loss)" [ref=e184] [cursor=pointer]': ZIP3 341 — Sarasota, FL
+            - listitem [ref=e185]:
+              - 'button "Inspect cohorts in ZIP3 342, Sarasota, FL — 363 policies, recommended action: Cede (excess of loss)" [ref=e186] [cursor=pointer]': ZIP3 342 — Sarasota, FL
+            - listitem [ref=e187]:
+              - 'button "Inspect cohorts in ZIP3 346, Hernando, FL — 363 policies, recommended action: Cede (excess of loss)" [ref=e188] [cursor=pointer]': ZIP3 346 — Hernando, FL
+            - listitem [ref=e189]:
+              - 'button "Inspect cohorts in ZIP3 349, St. Lucie, FL — 369 policies, recommended action: Cede (excess of loss)" [ref=e190] [cursor=pointer]': ZIP3 349 — St. Lucie, FL
+            - listitem [ref=e191]:
+              - 'button "Inspect cohorts in ZIP3 703, Orleans, LA — 189 policies, recommended action: Cede (excess of loss)" [ref=e192] [cursor=pointer]': ZIP3 703 — Orleans, LA
+            - listitem [ref=e193]:
+              - 'button "Inspect cohorts in ZIP3 704, Jefferson, LA — 236 policies, recommended action: Cede (excess of loss)" [ref=e194] [cursor=pointer]': ZIP3 704 — Jefferson, LA
+            - listitem [ref=e195]:
+              - 'button "Inspect cohorts in ZIP3 705, Tangipahoa, LA — 212 policies, recommended action: Cede (excess of loss)" [ref=e196] [cursor=pointer]': ZIP3 705 — Tangipahoa, LA
+            - listitem [ref=e197]:
+              - 'button "Inspect cohorts in ZIP3 706, Calcasieu, LA — 234 policies, recommended action: Cede (excess of loss)" [ref=e198] [cursor=pointer]': ZIP3 706 — Calcasieu, LA
+            - listitem [ref=e199]:
+              - 'button "Inspect cohorts in ZIP3 707, Livingston, LA — 228 policies, recommended action: Cede (excess of loss)" [ref=e200] [cursor=pointer]': ZIP3 707 — Livingston, LA
+            - listitem [ref=e201]:
+              - 'button "Inspect cohorts in ZIP3 708, Ascension, LA — 249 policies, recommended action: Cede (excess of loss)" [ref=e202] [cursor=pointer]': ZIP3 708 — Ascension, LA
+            - listitem [ref=e203]:
+              - 'button "Inspect cohorts in ZIP3 714, Beauregard, LA — 212 policies, recommended action: Cede (excess of loss)" [ref=e204] [cursor=pointer]': ZIP3 714 — Beauregard, LA
+            - listitem [ref=e205]:
+              - 'button "Inspect cohorts in ZIP3 770, Harris, TX — 293 policies, recommended action: Cede (excess of loss)" [ref=e206] [cursor=pointer]': ZIP3 770 — Harris, TX
+            - listitem [ref=e207]:
+              - 'button "Inspect cohorts in ZIP3 774, Galveston, TX — 343 policies, recommended action: Cede (excess of loss)" [ref=e208] [cursor=pointer]': ZIP3 774 — Galveston, TX
+            - listitem [ref=e209]:
+              - 'button "Inspect cohorts in ZIP3 775, Galveston, TX — 302 policies, recommended action: Cede (excess of loss)" [ref=e210] [cursor=pointer]': ZIP3 775 — Galveston, TX
+            - listitem [ref=e211]:
+              - 'button "Inspect cohorts in ZIP3 776, Jefferson, TX — 308 policies, recommended action: Cede (excess of loss)" [ref=e212] [cursor=pointer]': ZIP3 776 — Jefferson, TX
+            - listitem [ref=e213]:
+              - 'button "Inspect cohorts in ZIP3 777, Jefferson, TX — 302 policies, recommended action: Cede (excess of loss)" [ref=e214] [cursor=pointer]': ZIP3 777 — Jefferson, TX
+            - listitem [ref=e215]:
+              - 'button "Inspect cohorts in ZIP3 778, Brazoria, TX — 314 policies, recommended action: Cede (excess of loss)" [ref=e216] [cursor=pointer]': ZIP3 778 — Brazoria, TX
+            - listitem [ref=e217]:
+              - 'button "Inspect cohorts in ZIP3 783, Nueces, TX — 300 policies, recommended action: Cede (excess of loss)" [ref=e218] [cursor=pointer]': ZIP3 783 — Nueces, TX
+            - listitem [ref=e219]:
+              - 'button "Inspect cohorts in ZIP3 784, Nueces, TX — 305 policies, recommended action: Cede (excess of loss)" [ref=e220] [cursor=pointer]': ZIP3 784 — Nueces, TX
+        - generic [ref=e221]:
+          - generic [ref=e222]: Book exposure by ZIP3
+          - generic [ref=e223]: "Total TIV: $3,185,865,814"
+          - generic [ref=e224]: "Total policies: 10,000"
+          - generic [ref=e225]: "ZIP3s: 38"
+          - generic [ref=e226]:
+            - generic [ref=e227]: MIP recommendation
+            - generic [ref=e228]: "Expected margin: $41.6M"
+            - generic [ref=e229]: "Annual loss (p50): $19.6M · p99 $78.4M"
+            - generic [ref=e230]:
+              - generic [ref=e231]:
+                - img "Cede (excess of loss)" [ref=e232]
+                - generic [ref=e233]: Cede (excess of loss)
+                - generic [ref=e234]: 66.5%
+              - generic [ref=e235]:
+                - img "Reprice +20%" [ref=e236]
+                - generic [ref=e237]: Reprice +20%
+                - generic [ref=e238]: 27.3%
+              - generic [ref=e239]:
+                - img "Non-renew" [ref=e240]
+                - generic [ref=e241]: Non-renew
+                - generic [ref=e242]: 6.2%
+            - paragraph [ref=e243]: Color = MIP's dominant recommendation by TIV-weighted share.
+          - generic [ref=e244]: Click a circle to inspect its cohorts and recommended actions.
+      - region "Pareto sweep" [ref=e246]:
+        - generic [ref=e247]:
+          - generic [ref=e248]:
+            - heading "Pareto sweep" [level=2] [ref=e249]
+            - generic "Model output — produced by an internal optimizer or ML model." [ref=e250]: Model
+          - button "Show Pareto sweep" [ref=e251] [cursor=pointer]
+      - generic [ref=e252]:
+        - generic [ref=e253]: "Source: policies table (synthetic seed via scripts/seed_policy_book.py)"
+        - generic [ref=e254]: "Method: lib/db/cohorts::aggregateCohorts + api_py/optimize_portfolio::solve"
+        - generic [ref=e255]: "Confidence: MIP status Optimal · objective $41.6M"
+  - button "Open Next.js Dev Tools" [ref=e25] [cursor=pointer]:
+    - img [ref=e26]
+  - alert [ref=e29]

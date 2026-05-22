@@ -30,7 +30,7 @@ export const fetchStormEvents = {
       state: { type: 'string', description: '2-letter US state code (e.g., FL)' },
       since: {
         type: 'string',
-        description: "Optional year filter; either 'YYYY' or 'YYYY-MM-DD' — only the year is used.",
+        description: "Optional year filter, either 'YYYY' or 'YYYY-MM-DD'. Only the year is used.",
       },
     },
     required: ['state'],

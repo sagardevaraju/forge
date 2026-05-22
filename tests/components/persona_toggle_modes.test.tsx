@@ -225,7 +225,7 @@ describe('PortfolioPersonaScope — per-persona content', () => {
     expect(screen.queryByTestId('persona-quick-links')).toBeNull();
     // The headline cat-ops cards are present.
     expect(within(header).getByText('Expected margin')).toBeInTheDocument();
-    expect(within(header).getByText('Cession spend / budget')).toBeInTheDocument();
+    expect(within(header).getByText('Cession spend')).toBeInTheDocument();
   });
 
   test('?persona=actuary swaps margin → VaR-99 proxy + adds CRPS + shows /calibration', () => {
@@ -248,7 +248,7 @@ describe('PortfolioPersonaScope — per-persona content', () => {
     const header = screen.getByTestId('portfolio-header');
     expect(header.getAttribute('data-persona')).toBe('reinsurance');
     expect(within(header).getByText('RoL by layer')).toBeInTheDocument();
-    expect(within(header).queryByText('Cession spend / budget')).toBeNull();
+    expect(within(header).queryByText('Cession spend')).toBeNull();
     expect(within(header).getByText('Retained tail (post-XS)')).toBeInTheDocument();
     const links = screen.getByTestId('persona-quick-links');
     const treatyLink = within(links).getByText('Treaty layers');

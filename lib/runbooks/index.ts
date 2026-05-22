@@ -219,9 +219,9 @@ export const RUNBOOKS: Runbook[] = [
           threat_id: requireStormId(ctx),
           posture_summary:
             `T-24 final pre-landfall pass for ${requireStormId(ctx)}. ` +
-            `1,000-scenario ensemble built; staging + reinsurance triggers in scope.`,
+            `1,000-scenario ensemble built. Staging and reinsurance triggers in scope.`,
         }),
-        description: 'Draft the T-24 SITREP — staging + reinsurance triggers',
+        description: 'Draft the T-24 SITREP for staging and reinsurance triggers',
       },
     ],
   },
@@ -289,7 +289,7 @@ export const RUNBOOKS: Runbook[] = [
             `T+24 post-landfall for ${requireStormId(ctx)}. FEMA declarations in, ` +
             `historical analogs pulled, book exposure re-cut for claims staging.`,
         }),
-        description: 'Draft the T+24 SITREP — recovery-mode posture',
+        description: 'Draft the T+24 SITREP, recovery-mode posture',
       },
     ],
   },
@@ -303,7 +303,7 @@ export const RUNBOOKS: Runbook[] = [
       {
         tool: 'fetch_fema_declarations',
         args: (ctx) => ({ state: coneStates(ctx)[0] ?? 'FL' }),
-        description: 'Refresh FEMA declarations — new counties added since T+24',
+        description: 'Refresh FEMA declarations for new counties added since T+24',
       },
       {
         tool: 'fetch_storm_events',
@@ -315,10 +315,10 @@ export const RUNBOOKS: Runbook[] = [
         args: (ctx) => ({
           threat_id: requireStormId(ctx),
           posture_summary:
-            `T+72 post-landfall for ${requireStormId(ctx)}. Claims flow established; ` +
-            `FEMA roster expanding; storm-event log re-pulled for damage-cost tracking.`,
+            `T+72 post-landfall for ${requireStormId(ctx)}. Claims flow established. ` +
+            `FEMA roster expanding. Storm-event log re-pulled for damage-cost tracking.`,
         }),
-        description: 'Draft the T+72 SITREP — claims-flow posture',
+        description: 'Draft the T+72 SITREP, claims-flow posture',
       },
     ],
   },
@@ -350,7 +350,7 @@ export const RUNBOOKS: Runbook[] = [
           threat_id: ctx.storm_id ?? 'post_mortem',
           posture_summary:
             `Post-storm post-mortem${ctx.storm_id ? ` for ${ctx.storm_id}` : ''}. ` +
-            `Full FEMA roster + multi-year storm history reviewed; book exposure re-cut.`,
+            `Full FEMA roster and multi-year storm history reviewed. Book exposure re-cut.`,
         }),
         description: 'Draft the post-mortem SITREP',
       },

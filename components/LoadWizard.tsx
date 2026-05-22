@@ -270,7 +270,7 @@ export function LoadWizard() {
                     className="border border-zinc-300 rounded px-2 py-1 text-sm bg-white"
                     data-testid={`select-${f.id}`}
                   >
-                    <option value="">— not mapped —</option>
+                    <option value="">(not mapped)</option>
                     {file.header.map((h) => {
                       const pii = isPII(h);
                       return (
@@ -284,7 +284,7 @@ export function LoadWizard() {
                           }
                         >
                           {h}
-                          {pii ? '  (refused — PII)' : ''}
+                          {pii ? '  (refused, PII)' : ''}
                         </option>
                       );
                     })}

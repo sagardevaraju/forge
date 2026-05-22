@@ -49,7 +49,7 @@ export default async function CalibrationPage() {
       <p className="text-sm text-zinc-600 mb-4">
         Reliability diagrams for the XGB quantile heads, the scenario generator&rsquo;s PIT
         histogram, and per-dim learning curves for the CV head. All three live downstream of
-        the same scenario set the Portfolio MIP and Operational LP consume — calibration here
+        the same scenario set the Portfolio MIP and Operational LP consume. Calibration here
         is what the Decision Reconciler relies on.
       </p>
       {data ? (

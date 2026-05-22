@@ -65,9 +65,9 @@ function makeCone(): FetchNhcConeResult {
 }
 
 /**
- * A wide rectangular cone covering most of Florida. Picked so the FL ZIP3
- * centroids (Miami 330, Tampa 335, Jacksonville 320, ...) fall INSIDE and
- * the TX/LA/NC centroids fall OUTSIDE — gives us a clean "inside vs outside"
+ * A wide rectangular cone covering most of Florida (lon -83..-79.5, lat
+ * 24.5..31). Paired with TEST_CENTROIDS below, the FL cohort ZIP3s land
+ * INSIDE and the NC ZIP3s land OUTSIDE — a clean "inside vs outside"
  * partition the assertions can rely on.
  */
 function floridaCone(): FetchNhcConeResult {
@@ -95,6 +95,19 @@ function floridaCone(): FetchNhcConeResult {
     source: 'mock',
   };
 }
+
+/**
+ * Per-ZIP3 [lon, lat] centroids for the cone-exposure tests — the prop
+ * EventConsole forwards to the mini-map. In production these come from
+ * lib/db/zip3_centroids.ts (mean policy lat/lon per ZIP3); here they are
+ * chosen so FL ZIP3s sit inside floridaCone() and NC ZIP3s sit outside.
+ */
+const TEST_CENTROIDS: Record<string, [number, number]> = {
+  '330': [-82.0, 28.0], '335': [-82.3, 27.9], '339': [-81.8, 26.6],
+  '275': [-78.6, 35.8], '280': [-80.8, 35.2], '281': [-80.8, 35.3],
+  '282': [-82.5, 35.6], '283': [-78.9, 34.2], '284': [-77.9, 34.2],
+  '285': [-77.0, 35.6],
+};
 
 describe('EventConsole', () => {
   test('renders the storm summary banner when a cone is provided', () => {
@@ -337,7 +350,14 @@ describe('EventConsole · cone exposure mini-map', () => {
       { id: 'nc-6', zip3: '284', total_tiv: 1_000_000, policy_count: 1 },
       { id: 'nc-7', zip3: '285', total_tiv: 1_000_000, policy_count: 1 },
     ];
-    render(<EventConsole cone={floridaCone()} fires={[]} cohorts={cohorts} />);
+    render(
+      <EventConsole
+        cone={floridaCone()}
+        fires={[]}
+        cohorts={cohorts}
+        zip3Centroids={TEST_CENTROIDS}
+      />,
+    );
     expect(screen.getByTestId('cone-exposure-bars')).toBeInTheDocument();
     expect(screen.getByTestId('cone-exposure-row-inside')).toBeInTheDocument();
     expect(screen.getByTestId('cone-exposure-row-outside')).toBeInTheDocument();
@@ -360,7 +380,14 @@ describe('EventConsole · cone exposure mini-map', () => {
       { id: 'nc-6', zip3: '284', total_tiv: 1_000_000, policy_count: 1 },
       { id: 'nc-7', zip3: '285', total_tiv: 1_000_000, policy_count: 1 },
     ];
-    render(<EventConsole cone={floridaCone()} fires={[]} cohorts={cohorts} />);
+    render(
+      <EventConsole
+        cone={floridaCone()}
+        fires={[]}
+        cohorts={cohorts}
+        zip3Centroids={TEST_CENTROIDS}
+      />,
+    );
     const insideLabel = screen.getByTestId('cone-exposure-inside-label');
     const outsideLabel = screen.getByTestId('cone-exposure-outside-label');
     // 3 of 10 inside ⇒ 30% by count, also 30% by TIV since each cohort is $1M.
@@ -377,7 +404,14 @@ describe('EventConsole · cone exposure mini-map', () => {
       { id: 'fl-big', zip3: '330', total_tiv: 9_000_000, policy_count: 1 },
       { id: 'nc-small', zip3: '275', total_tiv: 1_000_000, policy_count: 1 },
     ];
-    render(<EventConsole cone={floridaCone()} fires={[]} cohorts={cohorts} />);
+    render(
+      <EventConsole
+        cone={floridaCone()}
+        fires={[]}
+        cohorts={cohorts}
+        zip3Centroids={TEST_CENTROIDS}
+      />,
+    );
     const insideLabel = screen.getByTestId('cone-exposure-inside-label');
     expect(insideLabel.getAttribute('data-inside-tiv')).toBe('9000000');
     expect(insideLabel.getAttribute('data-inside-count')).toBe('1');

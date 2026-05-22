@@ -27,11 +27,12 @@
  * emitted alongside the original portfolio actions; the MIP itself never
  * sees the new label.
  *
- * Task P2.32 — Per-(state, territory) regulatory caps. After P2.31 runs,
- * the surviving non-renew cohorts are grouped into ``(state, territory)``
- * buckets (FL:coastal, TX:tier_1, etc.). For each bucket the reconciler
- * sums non-renew TIV; if the total exceeds the bucket's cap (see
- * ``lib/regulatory/territory_caps.ts``), the smallest cohorts are downgraded
+ * Task P2.32 — Per-(state, territory) modeled territory caps. After P2.31
+ * runs, the surviving non-renew cohorts are grouped into ``(state,
+ * territory)`` buckets (FL:coastal, TX:tier_1, etc.). For each bucket the
+ * reconciler sums non-renew TIV; if the total exceeds the bucket's cap (a
+ * model assumption — see ``lib/regulatory/territory_caps.ts``), the
+ * smallest cohorts are downgraded
  * one at a time (least customer disruption first) until the bucket fits,
  * each emitting a ``non_renew_capped`` stamp. Precedence: a cohort already
  * deferred by P2.31 does NOT count toward this year's bucket cap; it has
@@ -165,7 +166,8 @@ export interface ReconcileConflict {
  * P2.31 / P2.32 — Reconciler-side action labels. The MIP only emits the six
  * base actions in ``ActionName``; the reconciler emits these artifact labels
  * when a ``non_renew`` action either (P2.31) fails the state's statutory
- * notice window or (P2.32) exceeds a per-(state, territory) regulatory cap.
+ * notice window or (P2.32) exceeds a per-(state, territory) modeled
+ * territory cap (a model assumption, not a regulatory limit).
  *
  * A single cohort can carry both stamps simultaneously — they are surfaced
  * as separate entries in ``stamped_actions``. The P2.31 (notice-period)
@@ -196,7 +198,7 @@ export interface NoticePeriodStamp {
 /**
  * P2.32 — A stamped reconciler-side action for a cohort the territory-cap
  * filter downgraded because its (state, territory) bucket would otherwise
- * exceed the regulatory annual non-renewal share.
+ * exceed the modeled annual non-renewal share (a model assumption).
  */
 export interface TerritoryCapStampWithZip extends TerritoryCapStamp {
   /** ZIP3 prefix that drove the territory lookup (for traceability). */
@@ -560,7 +562,7 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
     }
   }
 
-  // ── 6. P2.32 — Per-(state, territory) regulatory caps. ─────────────────
+  // ── 6. P2.32 — Per-(state, territory) modeled territory caps. ──────────
   // After the notice-period pass, group the surviving non-renew cohorts by
   // their (state, territory) bucket and check each bucket's annual cap.
   // Cohorts already deferred by P2.31 are skipped — they roll to next cycle
@@ -628,9 +630,9 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
       const capPct = (capStamp.cap_fraction * 100).toFixed(1);
       const obsPct = (capStamp.observed_fraction * 100).toFixed(1);
       rationale =
-        `Territory cap exceeded for bucket ${capStamp.bucket}: observed ` +
-        `${obsPct}% non-renew TIV share vs ${capPct}% cap. Cohort ` +
-        `${cohortId} downgraded (smallest-first selection).`;
+        `Modeled territory cap exceeded for bucket ${capStamp.bucket}: ` +
+        `observed ${obsPct}% non-renew TIV share vs ${capPct}% assumed ` +
+        `cap. Cohort ${cohortId} downgraded (smallest-first selection).`;
     } else if (noticeStamp) {
       finalAction = 'non_renew_next_renewal';
       rationale =

@@ -15,7 +15,7 @@ interface TrustTierBadgeProps {
 export function TrustTierBadge({ tier, className }: TrustTierBadgeProps) {
   const meta = TRUST_TIER_META[tier];
   const classes = [
-    'inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium',
+    'inline-flex items-center gap-1 px-1.5 py-px text-[10px] font-medium uppercase tracking-[0.06em] rounded-sm',
     meta.className,
     className,
   ]
@@ -23,6 +23,7 @@ export function TrustTierBadge({ tier, className }: TrustTierBadgeProps) {
     .join(' ');
   return (
     <span data-testid="trust-tier-badge" title={meta.tooltip} className={classes}>
+      <span aria-hidden="true" className="h-1 w-1 rounded-full bg-current opacity-70" />
       {meta.label}
     </span>
   );

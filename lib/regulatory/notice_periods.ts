@@ -9,9 +9,11 @@
  *
  * Statute references are encoded as comments next to each entry. For ZIP3s
  * outside the seeded book we fall back to a conservative 60-day default so
- * the UI never renders an empty cell. The ZIP3→state mapping covers all 38
- * ZIP3s in `lib/regulatory/zip3_to_county.ts`.
+ * the UI never renders an empty cell. ZIP3→state resolution uses
+ * `lib/regulatory/zip3_geo.ts`, the canonical (DB-verified) ZIP3 reference.
  */
+import { zip3State } from './zip3_geo';
+
 const NOTICE_PERIOD_DAYS: Record<string, number> = {
   FL: 120, // per Fla. Stat. §627.4133 (homeowners cancellation / non-renewal notice)
   TX: 60,  // per Tex. Ins. Code §551.105
@@ -24,13 +26,6 @@ export function noticeWindowDays(state: string): number {
   return NOTICE_PERIOD_DAYS[state.toUpperCase()] ?? DEFAULT;
 }
 
-const ZIP3_TO_STATE: Record<string, string> = {
-  '320':'FL','330':'FL','331':'FL','332':'FL','334':'FL','335':'FL','337':'FL','338':'FL','339':'FL','341':'FL','342':'FL','346':'FL','349':'FL',
-  '770':'TX','774':'TX','775':'TX','776':'TX','777':'TX','778':'TX','783':'TX','784':'TX',
-  '703':'LA','704':'LA','705':'LA','706':'LA','707':'LA','708':'LA','714':'LA',
-  '275':'NC','280':'NC','281':'NC','282':'NC','283':'NC','284':'NC','285':'NC','286':'NC','287':'NC','289':'NC',
-};
-
 export function noticeWindowForZip3(zip3: string): number {
-  return noticeWindowDays(ZIP3_TO_STATE[zip3] ?? 'XX');
+  return noticeWindowDays(zip3State(zip3) ?? 'XX');
 }

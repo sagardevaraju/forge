@@ -30,8 +30,9 @@
  * server-side download endpoint for the demo.
  *
  * Rows are grouped by ZIP3. Each group is preceded by a header row that
- * shows the county label (from `lib/regulatory/zip3_to_county.ts`), the
- * ZIP3, a policy count, and a TIV rollup. Severity filtering hides
+ * shows the ZIP3, its real county (from `lib/regulatory/zip3_geo.ts`, which
+ * the seed places every policy to match), a policy count, and a TIV
+ * rollup. Severity filtering hides
  * individual policies; when a group has zero visible policies after the
  * filter is applied, the header is omitted as well so the table doesn't
  * render empty section banners.
@@ -42,7 +43,7 @@
  * feasible against the regulatory clock.
  */
 import { useState, useMemo, useEffect, useRef, Fragment } from 'react';
-import { zip3ToCounty } from '@/lib/regulatory/zip3_to_county';
+import { zip3CountyLabel } from '@/lib/regulatory/zip3_geo';
 import { noticeWindowForZip3 } from '@/lib/regulatory/notice_periods';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
 
@@ -116,8 +117,8 @@ interface Zip3Group {
 /**
  * Group the filtered policy list by ZIP3, preserving the first-seen order
  * so the table doesn't reshuffle when the severity filter changes. Returns
- * one entry per ZIP3 with the resolved county label, the policies in that
- * ZIP3, and a TIV rollup for the header row.
+ * one entry per ZIP3 with its real county, the policies in that ZIP3, and a
+ * TIV rollup for the header row.
  */
 function groupByZip3(policies: PreflagPolicy[]): Zip3Group[] {
   const order: string[] = [];
@@ -127,7 +128,7 @@ function groupByZip3(policies: PreflagPolicy[]): Zip3Group[] {
       order.push(p.zip3);
       groups[p.zip3] = {
         zip3: p.zip3,
-        county: zip3ToCounty(p.zip3),
+        county: zip3CountyLabel(p.zip3),
         policies: [],
         tivRollup: 0,
       };
@@ -296,7 +297,7 @@ export function ClaimsTable({ policies, priorSeverities }: Props) {
                   colSpan={9}
                   className="p-2 font-semibold text-zinc-800 text-xs uppercase tracking-wide"
                 >
-                  {g.county} · ZIP3 {g.zip3} · {g.policies.length}{' '}
+                  ZIP3 {g.zip3} · {g.county} · {g.policies.length}{' '}
                   {g.policies.length === 1 ? 'policy' : 'policies'} · $
                   {(g.tivRollup / 1e6).toLocaleString(undefined, {
                     maximumFractionDigits: 1,

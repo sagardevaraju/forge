@@ -26,7 +26,14 @@ import {
   ACTION_COLORS,
   ACTION_LABELS,
 } from '@/lib/portfolio-actions';
-import { zip3ToCounty } from '@/lib/regulatory/zip3_to_county';
+import { zip3CountyLabel } from '@/lib/regulatory/zip3_geo';
+import type { PolygonLike } from '@/lib/geo/point_in_polygon';
+import type { NwsAlert } from '@/app/api/agent/tools/fetch_nws_alerts';
+import {
+  ALERT_FILL_COLOR,
+  ALERT_LINE_COLOR,
+  alertColorMatchExpression,
+} from '@/lib/grammar/alert-colors';
 
 /**
  * Pane mode flags which color encoding the pane applies. In `'current'` mode
@@ -40,56 +47,15 @@ export type PaneMode = 'current' | 'recommended';
 const CURRENT_COLOR = ACTION_COLORS.retain;
 
 /**
- * Centroids for the 38 ZIP3s seeded by scripts/seed_policy_book.py.
- * Values are approximate centers of each ZIP3 in [lon, lat] order.
- * If a cohort references a ZIP3 not in this map we fall back to a Gulf
- * centroid so it still renders on-screen rather than dropping silently.
+ * ZIP3 bubble centroids arrive via the `zip3Centroids` prop — the live
+ * mean(lat, lon) per ZIP3 computed from the policy book by
+ * `lib/db/zip3_centroids.ts`. This replaced a hand-coded table that had
+ * drifted ~100-460 km from where the seed actually places policies (the
+ * seed samples each state from one Gaussian blob and assigns `zip3` as an
+ * unrelated label). `FALLBACK_CENTROID` is a Gulf point used only if a
+ * cohort references a ZIP3 with no policy coordinates, so the circle still
+ * renders on-screen rather than dropping silently.
  */
-const ZIP3_CENTROIDS: Record<string, [number, number]> = {
-  // FL
-  '320': [-82.0, 29.5],
-  '330': [-80.2, 26.0],
-  '331': [-80.3, 25.8],
-  '332': [-80.5, 26.1],
-  '334': [-81.8, 27.5],
-  '335': [-82.5, 28.0],
-  '337': [-82.7, 27.4],
-  '338': [-81.9, 28.0],
-  '339': [-81.9, 26.5],
-  '341': [-81.7, 26.7],
-  '342': [-81.7, 26.6],
-  '346': [-82.5, 28.7],
-  '349': [-80.8, 27.0],
-  // TX
-  '770': [-95.4, 29.7],
-  '774': [-94.9, 29.4],
-  '775': [-94.8, 29.6],
-  '776': [-94.5, 30.0],
-  '777': [-94.0, 30.2],
-  '778': [-95.5, 28.9],
-  '783': [-97.4, 27.7],
-  '784': [-97.5, 27.5],
-  // LA
-  '703': [-90.0, 30.0],
-  '704': [-90.5, 30.1],
-  '705': [-90.8, 30.2],
-  '707': [-91.1, 30.4],
-  '708': [-91.3, 30.5],
-  '706': [-93.2, 30.2],
-  '714': [-93.8, 30.3],
-  // NC
-  '275': [-78.5, 35.6],
-  '280': [-80.8, 35.2],
-  '281': [-80.9, 35.3],
-  '282': [-80.5, 35.4],
-  '283': [-79.0, 35.0],
-  '284': [-80.0, 35.3],
-  '285': [-77.8, 35.0],
-  '286': [-78.0, 35.2],
-  '287': [-82.5, 35.6],
-  '289': [-77.0, 34.5],
-};
-
 const FALLBACK_CENTROID: [number, number] = [-82, 28];
 
 export interface ZipRow {
@@ -104,6 +70,12 @@ interface PortfolioMapPaneProps {
   mode: PaneMode;
   /** Pre-aggregated per-ZIP3 rows shared with the sibling pane. */
   zipRows: ZipRow[];
+  /**
+   * Per-ZIP3 `[lon, lat]` map centroids derived from the live policy book
+   * (`lib/db/zip3_centroids.ts`). A ZIP3 absent from this map falls back to
+   * `FALLBACK_CENTROID` so its circle still renders.
+   */
+  zip3Centroids: Record<string, [number, number]>;
   /** Currently-hovered ZIP3, shared between panes via parent state. */
   hoveredZip3: string | null;
   /** Lift hover changes back to the parent. */
@@ -114,20 +86,58 @@ interface PortfolioMapPaneProps {
   ariaLabel: string;
   /** Stable test handle so the test suite can scope queries per-pane. */
   testId: string;
+  /**
+   * Optional in-pane heading chip. Rendered top-left so the user can tell
+   * which pane is the "current" view vs the MIP-recommended one in compare
+   * mode. Omit on the single-pane view where the global legend already
+   * carries the orientation.
+   */
+  paneTitle?: string;
+  /** Optional sub-line under the title chip — e.g. "Snapshot · MIP solve". */
+  paneSubtitle?: string;
+  /**
+   * Task P2.20+ — active NHC cone polygon to overlay on the map. Renders as a
+   * subtle rose-toned fill with a stronger stroke so it reads as "active
+   * threat envelope" without overwhelming the per-ZIP3 circles. Pass through
+   * the raw GeoJSON Feature; the pane wraps it in a MapLibre Source.
+   */
+  conePolygon?: PolygonLike;
+  /**
+   * Task P2.20+ — which ZIP3s' centroids fall inside `conePolygon`. Circles
+   * for these ZIP3s get a danger-tinted stroke so the eye lands on at-risk
+   * exposure immediately. Computed once by the parent and shared with both
+   * panes so the highlight stays consistent in compare mode.
+   */
+  zip3sUnderCone?: Set<string>;
+  /**
+   * Live NWS active alerts (tornado / flood / severe thunderstorm /
+   * tropical / storm surge / hurricane) scoped to the book's footprint.
+   * Each alert with non-null geometry renders as a category-coloured
+   * polygon beneath the cone and zip3 circles. County-coded alerts
+   * (null geometry) are silently skipped — the LiveEventStrip still
+   * counts them via `alertCounts`.
+   */
+  alerts?: NwsAlert[];
 }
 
 export function PortfolioMapPane({
   mode,
   zipRows,
+  zip3Centroids,
   hoveredZip3,
   onHoverChange,
   onSelectZip3,
   ariaLabel,
   testId,
+  paneTitle,
+  paneSubtitle,
+  conePolygon,
+  zip3sUnderCone,
+  alerts,
 }: PortfolioMapPaneProps) {
   const geojson = useMemo(() => {
     const features = zipRows.map((row) => {
-      const centroid = ZIP3_CENTROIDS[row.zip3] ?? FALLBACK_CENTROID;
+      const centroid = zip3Centroids[row.zip3] ?? FALLBACK_CENTROID;
       const color =
         mode === 'current'
           ? CURRENT_COLOR
@@ -136,6 +146,7 @@ export function PortfolioMapPane({
             : '#9ca3af';
       const paneAction: ActionName =
         mode === 'current' ? 'retain' : (row.action ?? 'retain');
+      const underCone = zip3sUnderCone?.has(row.zip3) ?? false;
       return {
         type: 'Feature' as const,
         geometry: { type: 'Point' as const, coordinates: centroid },
@@ -146,11 +157,78 @@ export function PortfolioMapPane({
           log_tiv: Math.log10(row.tiv + 1),
           color,
           action: paneAction,
+          under_cone: underCone,
         },
       };
     });
     return { type: 'FeatureCollection' as const, features };
-  }, [zipRows, mode]);
+  }, [zipRows, zip3Centroids, mode, zip3sUnderCone]);
+
+  /**
+   * Build a single GeoJSON FeatureCollection from the NWS alerts that
+   * carry polygon geometry. Each feature gets a `category` property so
+   * MapLibre's data-driven `match` expression can pick the right colour
+   * per peril. County-coded alerts (null geometry) are skipped — the
+   * LiveEventStrip still counts them via `alertCounts`.
+   */
+  const alertsGeoJson = useMemo<GeoJSON.FeatureCollection | null>(() => {
+    if (!alerts || alerts.length === 0) return null;
+    const features: GeoJSON.Feature[] = alerts
+      .filter((a): a is NwsAlert & { geometry: NonNullable<NwsAlert['geometry']> } =>
+        a.geometry !== null,
+      )
+      .map((a) => ({
+        type: 'Feature',
+        geometry: a.geometry,
+        properties: {
+          id: a.id,
+          event: a.event,
+          category: a.category,
+          severity: a.severity,
+          expires: a.expires,
+        },
+      }));
+    if (features.length === 0) return null;
+    return { type: 'FeatureCollection', features };
+  }, [alerts]);
+  const alertFillExpr = useMemo(
+    () => alertColorMatchExpression(ALERT_FILL_COLOR),
+    [],
+  );
+  const alertLineExpr = useMemo(
+    () => alertColorMatchExpression(ALERT_LINE_COLOR),
+    [],
+  );
+
+  /**
+   * Wrap the cone GeoJSON Feature in a FeatureCollection so the MapLibre
+   * Source accepts it directly. The cone tool returns a Feature already; we
+   * just package it. Returns null when no cone is active so the Source
+   * collapses to nothing and the rose layers don't render at all.
+   */
+  const coneGeojson = useMemo(() => {
+    if (!conePolygon) return null;
+    if (
+      (conePolygon as { type?: string }).type === 'Feature' &&
+      (conePolygon as { geometry?: unknown }).geometry
+    ) {
+      return {
+        type: 'FeatureCollection' as const,
+        features: [conePolygon as unknown as GeoJSON.Feature],
+      };
+    }
+    // Raw geometry: synthesise a Feature wrapper.
+    return {
+      type: 'FeatureCollection' as const,
+      features: [
+        {
+          type: 'Feature' as const,
+          properties: {},
+          geometry: conePolygon as unknown as GeoJSON.Geometry,
+        },
+      ],
+    };
+  }, [conePolygon]);
 
   const handleMapClick = useCallback(
     (e: MapMouseEvent) => {
@@ -186,11 +264,84 @@ export function PortfolioMapPane({
       role="region"
       style={{ position: 'relative', width: '100%', height: '100%' }}
     >
+      {paneTitle && (
+        <div
+          data-testid={`${testId}-title`}
+          className="absolute top-3 left-1/2 -translate-x-1/2 z-[3] pointer-events-none rounded-md bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 ring-1 ring-zinc-200/70 shadow-[0_1px_2px_rgba(24,24,27,0.06)] px-3 py-1.5 text-center whitespace-nowrap"
+        >
+          <div className="flex items-center justify-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className={[
+                'inline-block h-1.5 w-1.5 rounded-full',
+                mode === 'current' ? 'bg-zinc-400' : 'bg-emerald-500',
+              ].join(' ')}
+            />
+            <span className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-zinc-800">
+              {paneTitle}
+            </span>
+          </div>
+          {paneSubtitle && (
+            <div className="text-[10px] text-zinc-500 leading-snug mt-0.5">
+              {paneSubtitle}
+            </div>
+          )}
+        </div>
+      )}
       <MapBase
         interactiveLayerIds={['zip3-circles']}
         onClick={handleMapClick}
         onMouseMove={handleMapMove}
       >
+        {/* NWS active alerts — tornado / flood / severe thunderstorm / etc.
+            Painted BEFORE the hurricane cone so the cone stays the visually
+            dominant element when both are present. Within the layer the fill
+            opacity stays low so overlapping warning polygons remain legible
+            and the zip3 exposure circles read on top. */}
+        {alertsGeoJson && (
+          <Source id="portfolio-nws-alerts" type="geojson" data={alertsGeoJson}>
+            <Layer
+              id="portfolio-nws-alerts-fill"
+              type="fill"
+              paint={{
+                'fill-color': alertFillExpr,
+                'fill-opacity': 0.28,
+                'fill-outline-color': 'transparent',
+              }}
+            />
+            <Layer
+              id="portfolio-nws-alerts-line"
+              type="line"
+              paint={{
+                'line-color': alertLineExpr,
+                'line-width': 1.25,
+                'line-opacity': 0.85,
+              }}
+            />
+          </Source>
+        )}
+        {coneGeojson && (
+          <Source id="cone-polygon" type="geojson" data={coneGeojson}>
+            <Layer
+              id="cone-fill"
+              type="fill"
+              paint={{
+                'fill-color': '#f43f5e', // rose-500 — read as "threat envelope"
+                'fill-opacity': 0.08,
+              }}
+            />
+            <Layer
+              id="cone-outline"
+              type="line"
+              paint={{
+                'line-color': '#e11d48', // rose-600
+                'line-width': 1.5,
+                'line-opacity': 0.55,
+                'line-dasharray': [2, 2],
+              }}
+            />
+          </Source>
+        )}
         <Source id="zip3-points" type="geojson" data={geojson}>
           <Layer
             id="zip3-circles"
@@ -216,9 +367,16 @@ export function PortfolioMapPane({
                 'case',
                 ['==', ['get', 'zip3'], hoverMatch],
                 3.5,
+                ['==', ['get', 'under_cone'], true],
+                2.5,
                 1.5,
               ],
-              'circle-stroke-color': '#1f2937',
+              'circle-stroke-color': [
+                'case',
+                ['==', ['get', 'under_cone'], true],
+                '#e11d48', // rose-600 — at-risk ring
+                '#1f2937',
+              ],
             }}
           />
         </Source>
@@ -265,9 +423,9 @@ export function PortfolioMapPane({
                 onFocus={() => onHoverChange(row.zip3)}
                 onBlur={() => onHoverChange(null)}
                 onClick={() => onSelectZip3(row.zip3)}
-                aria-label={`Inspect cohorts in ZIP3 ${row.zip3}, ${zip3ToCounty(row.zip3)} — ${row.policies.toLocaleString()} policies, recommended action: ${actionLabel}`}
+                aria-label={`Inspect cohorts in ZIP3 ${row.zip3}, ${zip3CountyLabel(row.zip3)}, ${row.policies.toLocaleString()} policies, recommended action: ${actionLabel}`}
               >
-                ZIP3 {row.zip3} — {zip3ToCounty(row.zip3)}
+                ZIP3 {row.zip3}, {zip3CountyLabel(row.zip3)}
               </button>
             </li>
           );

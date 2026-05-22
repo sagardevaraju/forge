@@ -26,41 +26,24 @@
  *     action. A cohort the territory cap downgrades gets a SEPARATE stamp;
  *     stamps are additive (a single cohort can carry both stamps).
  *
- * Cap calibration — public regulatory sources (cited per row):
+ * Cap calibration — THESE ARE MODEL ASSUMPTIONS, NOT REGULATORY LIMITS.
  *
- *   * **FL:coastal (3%)** — Florida OIR has historically constrained
- *     consolidated coastal non-renewal activity to ~3% per year (see
- *     OIR-22-04M and the Citizens depopulation program rules, which cap
- *     take-out + non-renewal churn at low single digits in coastal counties).
- *   * **FL:inland (5%)** — FL OIR market conduct guidance treats inland
- *     non-renewals more permissively; 5% is a defensible mid-single-digit
- *     ceiling consistent with §627.4133 reporting practice.
- *   * **TX:tier_1 (4%)** — Tier 1 windstorm market (28 TAC §5.4801) imposes
- *     stricter availability requirements on the coastal "designated
- *     catastrophe area"; a 4% annual non-renewal share is consistent with
- *     TWIA depopulation pressure.
- *   * **TX:tier_2 (7%)** — Tex. Ins. Code §551.105 sets the notice clock but
- *     does not specifically cap inland non-renewal volume; 7% is a defensible
- *     ceiling tied to TDI market-share reporting.
- *   * **LA:coastal (4%)** — La. Rev. Stat. §22:1265 read with LDI Bulletin
- *     2020-08 (post-Laura) effectively constrained coastal non-renewals; 4%
- *     is a defensible cap consistent with the moratorium-era guidance.
- *   * **LA:inland (6%)** — outside the bulletin's geographic scope; 6% is a
- *     defensible inland ceiling.
- *   * **NC:coastal (5%)** — N.C. Gen. Stat. §58-41-15 plus the Beach Plan
- *     (NCJUA/NCIUA) ceding-company rules cap coastal non-renewal churn; 5%
- *     is consistent with the statutory framework.
- *   * **NC:inland (8%)** — no specific cap in statute; 8% is a defensible
- *     ceiling tied to NCDOI market-conduct expectations.
- *   * **__default__ (5%)** — conservative fallback for any ZIP3 that does
- *     not classify into a known (state, territory) bucket.
+ * The cap fractions in ``TERRITORY_CAPS`` are tunable model parameters,
+ * hand-picked to be directionally plausible (coastal tighter than inland) so
+ * the reconciler has a concrete book-shrink ceiling to enforce in the demo.
+ * They are NOT drawn from statute, regulator guidance, or counsel, and must
+ * never be presented to a user as regulatory limits or legal advice. An
+ * earlier version of this file carried a specific statute citation per row
+ * (§627.4133, 28 TAC §5.4801, LDI Bulletin 2020-08, §58-41-15, …); those
+ * were removed because they lent invented numbers false authority.
  *
- * Citations are demo-defensible, not legal advice — the numbers are tuned to
- * be plausible and consistent with each statute's structure. A production
- * deployment would replace these with values produced by counsel.
+ * A production deployment must replace every value in ``TERRITORY_CAPS``
+ * with figures produced by counsel / compliance for each jurisdiction, and
+ * replace the coastal/inland (and TX tier_1/tier_2) classification below —
+ * itself a modeling simplification — with real territory definitions.
  */
 
-import { ZIP3_TO_COUNTY } from '@/lib/regulatory/zip3_to_county';
+import { zip3State } from '@/lib/regulatory/zip3_geo';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -131,18 +114,18 @@ export interface TerritoryCapsOutput {
 
 /**
  * Maximum annual non-renewal TIV share per ``(state, territory)`` bucket.
- * See module docstring for per-row regulatory citations.
+ * MODEL ASSUMPTIONS, not regulatory limits — see the module docstring.
  */
 export const TERRITORY_CAPS: Record<TerritoryBucket, number> = {
-  'FL:coastal': 0.03, // FL OIR — coastal depopulation / OIR-22-04M, §627.4133
-  'FL:inland': 0.05, // FL OIR — inland market-conduct guidance
-  'TX:tier_1': 0.04, // TDI — 28 TAC §5.4801 (Tier 1 windstorm market)
-  'TX:tier_2': 0.07, // TDI — Tex. Ins. Code §551.105 (inland)
-  'LA:coastal': 0.04, // LDI Bulletin 2020-08 + La. Rev. Stat. §22:1265
-  'LA:inland': 0.06, // LDI — inland (outside Bulletin 2020-08 scope)
-  'NC:coastal': 0.05, // NCDOI — §58-41-15 + Beach Plan rules
-  'NC:inland': 0.08, // NCDOI — inland market-conduct expectations
-  __default__: 0.05, // conservative fallback for unclassified ZIP3s
+  'FL:coastal': 0.03, // assumption — coastal tighter than inland
+  'FL:inland': 0.05, // assumption
+  'TX:tier_1': 0.04, // assumption — windstorm-exposed coast tighter
+  'TX:tier_2': 0.07, // assumption — inland
+  'LA:coastal': 0.04, // assumption — coastal tighter than inland
+  'LA:inland': 0.06, // assumption
+  'NC:coastal': 0.05, // assumption — coastal tighter than inland
+  'NC:inland': 0.08, // assumption — inland
+  __default__: 0.05, // assumption — fallback for unclassified ZIP3s
 };
 
 // ---------------------------------------------------------------------------
@@ -150,9 +133,9 @@ export const TERRITORY_CAPS: Record<TerritoryBucket, number> = {
 // ---------------------------------------------------------------------------
 
 /**
- * Florida ZIP3 prefixes whose dominant county is first-row coastal or
- * directly Atlantic/Gulf exposed. Inland FL ZIP3s in the seed (334 Polk,
- * 338 Polk, 346 Hernando) sit outside this set.
+ * Florida ZIP3s placed in the tighter (coastal) cap bucket — directly
+ * Atlantic/Gulf-exposed metros. A modeling simplification, not a statutory
+ * territory. The demo book's inland FL ZIP3s (334, 338, 346) sit outside it.
  */
 const FL_COASTAL_ZIP3S = new Set<string>([
   '320', // Duval (Atlantic — Jacksonville)
@@ -168,14 +151,11 @@ const FL_COASTAL_ZIP3S = new Set<string>([
 ]);
 
 /**
- * Texas Tier 1 windstorm-designated coastal counties (per 28 TAC §5.4801 and
- * TWIA territory definition): Jefferson, Orange, Chambers, Galveston,
- * Brazoria, Matagorda, Calhoun, Aransas, Refugio, San Patricio, Nueces,
- * Kleberg, Kenedy, Willacy, Cameron.
- *
- * Mapped here by ZIP3 prefix using the lookup in ``zip3_to_county.ts`` —
- * the demo book covers Galveston (774, 775), Jefferson (776, 777), Brazoria
- * (778), and Nueces (783, 784). Harris (770) is NOT Tier 1.
+ * Texas ZIP3s placed in the tighter (windstorm-exposed coast) cap bucket.
+ * Texas has a real Tier 1 / TWIA coastal designation, but the ZIP3-level set
+ * below is our own modeling approximation of it, not the statutory territory.
+ * The demo book's coastal TX ZIP3s are 774–778 and 783–784; Houston (770) is
+ * treated as inland.
  */
 const TX_TIER1_ZIP3S = new Set<string>([
   '774', // Galveston
@@ -188,13 +168,10 @@ const TX_TIER1_ZIP3S = new Set<string>([
 ]);
 
 /**
- * Louisiana coastal parishes (per LDI Bulletin 2020-08 geographic scope):
- * Cameron, Calcasieu, Vermilion, Iberia, St. Mary, Terrebonne, Lafourche,
- * Jefferson, Orleans, St. Bernard, Plaquemines.
- *
- * Demo book covers Orleans (703), Jefferson (704), Calcasieu (706); the
- * other LA ZIP3s in the seed (705 Tangipahoa, 707 Livingston, 708 Ascension,
- * 714 Beauregard) are classified as inland.
+ * Louisiana ZIP3s placed in the tighter (coastal) cap bucket — a modeling
+ * simplification, not a statutory parish list. The demo book's coastal LA
+ * ZIP3s are 703, 704, 706; the remaining LA ZIP3s (705, 707, 708, 714) are
+ * treated as inland.
  */
 const LA_COASTAL_ZIP3S = new Set<string>([
   '703', // Orleans
@@ -203,33 +180,21 @@ const LA_COASTAL_ZIP3S = new Set<string>([
 ]);
 
 /**
- * North Carolina coastal counties (per Beach Plan / NCIUA territory):
- * Dare, Hyde, Tyrrell, Currituck, Beaufort, Pamlico, Carteret, Brunswick,
- * New Hanover, Pender, Onslow.
- *
- * Demo book covers New Hanover (289); the other NC ZIP3s in the seed
- * (275 Wake, 280–282 Mecklenburg, 283 Guilford, 284 Cabarrus, 285 Wilson,
- * 286 Wayne, 287 Buncombe) are inland.
+ * North Carolina ZIP3s placed in the tighter (coastal) cap bucket — a
+ * modeling simplification, not the statutory Beach Plan / NCIUA territory.
+ * The demo book's coastal NC ZIP3 is 289; the remaining NC ZIP3s
+ * (275, 280–287) are treated as inland.
  */
 const NC_COASTAL_ZIP3S = new Set<string>(['289']);
-
-/** Resolve a ZIP3 prefix to its state code by consulting ``ZIP3_TO_COUNTY``. */
-function zip3ToState(zip3: string): string | null {
-  const label = ZIP3_TO_COUNTY[zip3];
-  if (!label) return null;
-  // Labels look like "Miami-Dade, FL" — split on the last comma.
-  const comma = label.lastIndexOf(',');
-  if (comma < 0) return null;
-  return label.slice(comma + 1).trim().toUpperCase();
-}
 
 /**
  * Classify a ZIP3 prefix into a ``(state, territory)`` bucket. Returns the
  * literal ``"__default__"`` sentinel for ZIP3s that do not classify (so the
- * caller can still look up a conservative cap).
+ * caller can still look up a conservative cap). State comes from the
+ * verified `zip3_geo` reference.
  */
 export function classifyTerritory(zip3: string): TerritoryBucket {
-  const state = zip3ToState(zip3);
+  const state = zip3State(zip3);
   if (!state) return '__default__';
   switch (state) {
     case 'FL':

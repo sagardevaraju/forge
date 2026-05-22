@@ -4,12 +4,54 @@
 
 :root {
   color-scheme: light;
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #f7f7f6;
+  --surface: #ffffff;
+  --hairline: rgba(24, 24, 27, 0.08);
+  --hairline-strong: rgba(24, 24, 27, 0.14);
+  --ink: #18181b;
+  --ink-muted: #52525b;
+  --ink-faint: #71717a;
+  --accent: #047857;
+  --accent-soft: rgba(4, 120, 87, 0.12);
 }
 
+html,
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-family:
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    "Inter",
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Hairline utility for subtle dividers and edges that read more like
+   architecture than browser default borders. */
+.hairline {
+  border-color: var(--hairline);
+}
+.hairline-strong {
+  border-color: var(--hairline-strong);
+}
+
+/* Display ink + tracking for headline metrics. */
+.metric {
+  font-feature-settings: "tnum", "ss01", "cv11";
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+}
+.metric-hero {
+  font-feature-settings: "tnum", "ss01", "cv11";
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
 }

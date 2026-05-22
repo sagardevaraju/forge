@@ -121,7 +121,7 @@ function LadderSvg({ stack, yMax }: LadderSvgProps) {
       viewBox={`0 0 ${CHART_W} ${CHART_H}`}
       className="w-full h-auto"
       role="img"
-      aria-label="Treaty ladder — attachment / exhaustion per layer with book p99 reference"
+      aria-label="Treaty ladder, attachment / exhaustion per layer with book p99 reference"
     >
       {/* Plot frame */}
       <rect
@@ -183,7 +183,7 @@ function LadderSvg({ stack, yMax }: LadderSvgProps) {
               normalization can differ between server and client, which
               produced the QS-band hydration mismatch on /treaty.
             */}
-            <title>{`QS — ${(qsLayer.share * 100).toFixed(0)}% share${
+            <title>{`QS, ${(qsLayer.share * 100).toFixed(0)}% share${
               qsLayer.rol !== undefined
                 ? ` · RoL ${(qsLayer.rol * 100).toFixed(0)}%`
                 : ''
@@ -240,7 +240,7 @@ function LadderSvg({ stack, yMax }: LadderSvgProps) {
               stroke="#064e3b"
               strokeWidth={1}
             >
-              <title>{`XS ${roundToMillion(layer.attachment)} – ${roundToMillion(
+              <title>{`XS ${roundToMillion(layer.attachment)} to ${roundToMillion(
                 layer.exhaustion,
               )} · RoL ${(layer.rol * 100).toFixed(0)}% · ${
                 layer.reinstatements_remaining
@@ -270,7 +270,7 @@ function LadderSvg({ stack, yMax }: LadderSvgProps) {
               fill="#ffffff"
               fontWeight={500}
             >
-              {`${roundToMillion(layer.attachment)} – ${roundToMillion(layer.exhaustion)}`}
+              {`${roundToMillion(layer.attachment)} to ${roundToMillion(layer.exhaustion)}`}
             </text>
             <text
               x={PAD_L + PLOT_W / 2}
@@ -356,7 +356,7 @@ function LayerTable({ layers }: LayerTableProps) {
             <tr key={`xs-${idx}`} className="border-b border-zinc-100">
               <td className="py-1 pr-3 font-medium">XS</td>
               <td className="py-1 pr-3">
-                {`${roundToMillion(layer.attachment)} – ${roundToMillion(layer.exhaustion)}`}
+                {`${roundToMillion(layer.attachment)} to ${roundToMillion(layer.exhaustion)}`}
               </td>
               <td className="py-1 pr-3">{`${Math.round(layer.rol * 100)}%`}</td>
               <td className="py-1 pr-3">{layer.reinstatements_remaining}</td>
@@ -421,7 +421,7 @@ export function TreatyLadder({ stack }: TreatyLadderProps) {
         <TrustTierBadge tier={trustTier} />
       </div>
       <p className="text-xs text-zinc-600">
-        Layer ladder — QS at the bottom plus each XS layer drawn from
+        Layer ladder, QS at the bottom plus each XS layer drawn from
         attachment to exhaustion. The dashed red line marks the carrier&rsquo;s
         book p99 ({formatMoneyM(stack.book_p99)}); layers above it cover the
         tail, layers below it provide working-loss relief.

@@ -14,6 +14,33 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 ARTIFACTS = ROOT / "artifacts"
 SIMS_DIR = ARTIFACTS / "simulations"
 
+# The git-tracked artifacts the precompute script overwrites on every run.
+_TRACKED_ARTIFACTS = [
+    ARTIFACTS / "portfolio_optimization.json",
+    ARTIFACTS / "portfolio_optimization.meta.json",
+]
+
+
+@pytest.fixture(autouse=True)
+def _preserve_tracked_artifacts():
+    """Snapshot the tracked portfolio artifacts and restore their exact bytes
+    after each test.
+
+    These tests run `precompute_portfolio_optimization` as a subprocess, which
+    writes the real `artifacts/portfolio_optimization.json` / `.meta.json`
+    paths (a fresh `solved_at` timestamp + solver float jitter). Without this
+    fixture the suite would leave git-tracked files dirty.
+    """
+    saved = {p: (p.read_bytes() if p.exists() else None) for p in _TRACKED_ARTIFACTS}
+    try:
+        yield
+    finally:
+        for p, data in saved.items():
+            if data is None:
+                p.unlink(missing_ok=True)
+            else:
+                p.write_bytes(data)
+
 
 def _write_sim_artifact(sim_id: str, cohort_keys: list[str], K: int = 50) -> None:
     """Write a tiny synthetic sim parquet so the precompute script can join it."""
@@ -113,8 +140,5 @@ def test_include_sims_actually_modifies_cohort_losses(tmp_path):
     finally:
         (SIMS_DIR / f"{fixture_id}.parquet").unlink(missing_ok=True)
         (SIMS_DIR / f"{fixture_id}.meta.json").unlink(missing_ok=True)
-        # Restore the baseline artifact so other tests see a clean state.
-        subprocess.run(
-            [sys.executable, "-m", "scripts.precompute_portfolio_optimization"],
-            cwd=ROOT, check=True, capture_output=True, text=True,
-        )
+        # The autouse _preserve_tracked_artifacts fixture restores the
+        # baseline artifact bytes — no precompute re-run needed here.

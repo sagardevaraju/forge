@@ -12,6 +12,31 @@ The codebase is a **single Next.js 16 monorepo** that mixes runtimes on Vercel:
 - Python optimizers + scenario generator live in `api_py/*.py` and run on **Vercel's Python 3.12 runtime**. Each module exposes a module-level `solve()` (importable + unit-testable) and a `class handler(BaseHTTPRequestHandler)` that wraps it for Vercel. Keep both.
 - Offline ML training lives in `ml/`. **Never bundle `ml/` deps into Vercel functions** — they go in `requirements-train.txt`, not `requirements.txt`. `requirements.txt` is what Vercel installs.
 
+## Data integrity — every value traces to a real source
+
+**No fictional, fabricated, or "cooked up" data.** Any number or lookup shown
+in the UI or fed into decision logic must be **computed from a real source** —
+the SQLite DB, a tracked `artifacts/*.json`, or a live feed — never hand-coded
+to merely look plausible.
+
+- Prefer a DB/artifact-derived value over a hardcoded constant. A hand-coded
+  table silently drifts from the data and lies: the old `ZIP3_CENTROIDS` table
+  claimed to be "derived from the seed" but plotted map markers 100–460 km from
+  where policies actually sit. Map centroids now come from
+  `lib/db/zip3_centroids.ts` (`AVG(lat),AVG(lon) GROUP BY zip3`).
+- Treat any "hand-coded", "approximate", or "derived from the seed" docstring
+  as a smell — verify it against the live data before trusting it.
+- If a placeholder is genuinely unavoidable, label it honestly **in the UI**
+  (not just a buried docstring) and use the correct trust tier — a `LIVE_FEED`
+  badge over mock data is a bug. Check `source === 'mock'` and downgrade.
+- The seed (`scripts/seed_policy_book.py`) samples each policy's lat/lon from a
+  single per-state Gaussian and assigns `zip3` independently — so a `zip3` is a
+  label with **no real-world geographic meaning**. Never map a `zip3` to a
+  real-world place; derive its position from the policy coordinates.
+- Acceptable: the synthetic seed itself, and the agent-tool mock fallbacks
+  (mandated below — they surface a "Mock" chip). Fabricated values
+  *masquerading* as real or computed are not.
+
 ## DB
 
 - `lib/db/client.ts` resolves `TURSO_URL` → libSQL remote, falling back to `file:./forge-local.db` when unset. Local dev uses the file; prod uses Turso. **Both code paths must work** — don't write SQL that depends on libSQL-only features.
@@ -69,6 +94,7 @@ Every commit in the original plan tags a `Task N` from `docs/superpowers/plans/2
 - Don't add a new Python runtime version. Vercel pins `python3.12` in `vercel.json` and every script is tested against it.
 - Don't add `pnpm` / `bun` / `yarn` lockfiles. The project commits `package-lock.json` only.
 - Don't break the cohort key format (`{zip3}_{build_type}_q{N}`) — it's a join key between TS and Python.
+- Don't hand-code data that should be derived from a real source — see **Data integrity** above. No fabricated values masquerading as real or computed.
 
 ## Where things live
 

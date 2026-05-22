@@ -154,7 +154,7 @@ function buildStub(state: Record<string, unknown>): string[] {
   if (budgets && typeof budgets === 'object') {
     const cap = formatMoney((budgets as { capital_budget?: unknown }).capital_budget);
     if (cap) {
-      lines.push(`Capital budget set at ${cap}; review binding constraints.`);
+      lines.push(`Capital budget set at ${cap}. Review binding constraints.`);
     }
   }
 

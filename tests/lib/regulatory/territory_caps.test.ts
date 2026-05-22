@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * Task P2.32 — Tests for per-(state, territory) regulatory non-renew caps.
+ * Task P2.32 — Tests for per-(state, territory) modeled non-renew caps.
  *
  * Six tests:
  *   1. Territory classification: ZIP3 → (state, territory) labels.

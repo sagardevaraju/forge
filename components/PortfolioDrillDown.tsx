@@ -110,7 +110,7 @@ function economicsTooltip(a: ActionName, fracPct?: string): string {
     `premium ×${row.reprice.toFixed(2)}`,
     `loss ×${row.loss.toFixed(2)}`,
     `cession ${row.cession.toFixed(2)}`,
-    `source: ${row.source} — ${row.note}`,
+    `source: ${row.source}, ${row.note}`,
   ].join('\n');
 }
 
@@ -597,67 +597,69 @@ export function PortfolioDrillDown({
           data-testid="property-features"
           style={{ marginTop: 18 }}
         >
-          <h4 style={{ marginBottom: 6, fontWeight: 600 }}>Property features</h4>
-          <table
-            style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: 12,
-              tableLayout: 'fixed',
-            }}
-          >
-            <tbody>
-              {(Object.keys(CV_DIM_LABELS) as Array<keyof CvFeatures>).map((d) => {
-                const f = propertyFeatures[d];
-                const pct = Math.round(f.value * 100);
-                return (
-                  <tr key={d} style={{ borderBottom: '1px solid #f3f4f6' }}>
-                    <td
+          <h4 style={{ marginBottom: 8, fontWeight: 600 }}>Property features</h4>
+          {/*
+            Earlier render used a 3-col fixed-layout table where the label
+            column got squeezed to ~0px and the nowrap label overflowed *into*
+            the bar's column — labels rendered on top of the dark fill,
+            illegible. Now each row is a vertical stack: label + value on a
+            single justified line, full-width track underneath. Reads cleanly
+            at any width and matches the rest of the redesign's tile rhythm.
+          */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {(Object.keys(CV_DIM_LABELS) as Array<keyof CvFeatures>).map((d) => {
+              const f = propertyFeatures[d];
+              const pct = Math.round(f.value * 100);
+              return (
+                <div
+                  key={d}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      fontSize: 12,
+                    }}
+                  >
+                    <span style={{ color: '#3f3f46' }}>{CV_DIM_LABELS[d]}</span>
+                    <span
                       style={{
-                        padding: '4px 6px 4px 0',
-                        color: '#3f3f46',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {CV_DIM_LABELS[d]}
-                    </td>
-                    <td style={{ padding: 4, width: '100%' }}>
-                      <div
-                        role="img"
-                        aria-label={`${CV_DIM_LABELS[d]} ${pct} percent`}
-                        style={{
-                          height: 6,
-                          background: '#f3f4f6',
-                          borderRadius: 2,
-                          overflow: 'hidden',
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: `${pct}%`,
-                            height: '100%',
-                            background: '#3f3f46',
-                          }}
-                        />
-                      </div>
-                    </td>
-                    <td
-                      style={{
-                        padding: 4,
-                        textAlign: 'right',
+                        color: '#18181b',
                         fontVariantNumeric: 'tabular-nums',
-                        color: '#52525b',
-                        width: 44,
+                        fontWeight: 500,
                       }}
                     >
                       {f.value.toFixed(2)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <p style={{ marginTop: 8, fontSize: 11, color: '#6b7280' }}>
+                    </span>
+                  </div>
+                  <div
+                    role="img"
+                    aria-label={`${CV_DIM_LABELS[d]} ${pct} percent`}
+                    style={{
+                      height: 6,
+                      background: '#f3f4f6',
+                      borderRadius: 999,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${pct}%`,
+                        height: '100%',
+                        background: '#3f3f46',
+                        borderRadius: 999,
+                        transition: 'width 240ms ease-out',
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p style={{ marginTop: 12, fontSize: 11, color: '#6b7280', lineHeight: 1.45 }}>
             Three CV dims ({UNMODELED_CV_DIMS.join(', ')}) are unmodeled in
             this build; Phase 2 swaps in NLCD + OSM weak labels.
           </p>
@@ -665,7 +667,7 @@ export function PortfolioDrillDown({
       )}
       {!hasOptimization && (
         <p style={{ marginTop: 12, fontSize: 11, color: '#6b7280' }}>
-          Optimization cache not available — run{' '}
+          Optimization cache not available, run{' '}
           <code>scripts/precompute_portfolio_optimization.py</code>.
         </p>
       )}

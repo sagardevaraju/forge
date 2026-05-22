@@ -342,11 +342,11 @@ export function CalibrationView({ data }: CalibrationViewProps) {
       {/* ---------------- Reliability diagrams (p10 / p50 / p90) ---------------- */}
       <section data-testid="reliability-section" className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">Reliability — XGB quantile heads</h2>
+          <h2 className="text-lg font-semibold">Reliability, XGB quantile heads</h2>
           <TrustTierBadge tier={trustTier} />
         </div>
         <p className="text-xs text-zinc-600">
-          Each dot is one forecast-value bin; the dashed line marks the target probability
+          Each dot is one forecast-value bin. The dashed line marks the target probability
           (perfect calibration). Dots above the line over-cover, dots below under-cover.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -369,7 +369,7 @@ export function CalibrationView({ data }: CalibrationViewProps) {
       {/* ---------------- PIT histogram ---------------- */}
       <section data-testid="pit-section" className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">PIT histogram — scenario generator</h2>
+          <h2 className="text-lg font-semibold">PIT histogram, scenario generator</h2>
           <TrustTierBadge tier={pitTier} />
         </div>
         <p className="text-xs text-zinc-600">
@@ -397,14 +397,14 @@ export function CalibrationView({ data }: CalibrationViewProps) {
             <div className="font-medium text-zinc-700 mb-1">Awaiting CV training history.</div>
             <div className="text-xs">
               Per-dim learning curves for the CV head land in <span className="font-mono">P2.37</span>{' '}
-              (weak-label retraining sub-plan). This section is intentionally empty until then —
-              the artifact does not yet carry CV training history.
+              (weak-label retraining sub-plan). This section is intentionally empty until then.
+              The artifact does not yet carry CV training history.
             </div>
           </div>
         </div>
         <ProvenanceFootnote
           source="artifacts/calibration.json (no CV section in schema_version 1)"
-          method="deferred — P2.37 (weak-label retraining sub-plan) will extend the artifact"
+          method="deferred. P2.37 (weak-label retraining sub-plan) will extend the artifact"
           confidence="not yet measured"
         />
       </section>

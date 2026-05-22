@@ -28,3 +28,26 @@ export async function computeBookTotals(): Promise<BookTotals> {
     policies: Number(r.rows[0]?.n ?? 0),
   };
 }
+
+/**
+ * Distinct US state codes that the book has exposure in. Used by the
+ * Events + Portfolio pages to scope NWS active-alert lookups to wherever
+ * policies actually live, rather than hardcoding Florida. Returns an
+ * empty array on a fresh DB (no policies seeded yet) so callers can fall
+ * back to a sensible default without throwing.
+ *
+ * The query is trivial (a single index-friendly distinct on a 10k-row
+ * table) so we don't bother with caching — the page is `force-dynamic`
+ * and this is cheaper than the alert fetch itself.
+ */
+export async function getBookStates(): Promise<string[]> {
+  const r = await db.execute({
+    // SQLite treats double-quoted string literals as identifiers — use
+    // single quotes for the empty-string check.
+    sql: "SELECT DISTINCT state FROM policies WHERE state IS NOT NULL AND state != '' ORDER BY state",
+    args: [],
+  });
+  return r.rows
+    .map((row) => (typeof row.state === 'string' ? row.state.trim().toUpperCase() : ''))
+    .filter((s) => s.length > 0);
+}

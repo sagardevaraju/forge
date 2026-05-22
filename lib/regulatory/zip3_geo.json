@@ -1,0 +1,268 @@
+{
+  "275": {
+    "state": "NC",
+    "county": "Wake",
+    "city": "Cary",
+    "lat": 35.7819,
+    "lon": -78.8200
+  },
+  "280": {
+    "state": "NC",
+    "county": "Gaston",
+    "city": "Gastonia",
+    "lat": 35.2492,
+    "lon": -81.1856
+  },
+  "281": {
+    "state": "NC",
+    "county": "Union",
+    "city": "Monroe",
+    "lat": 34.9889,
+    "lon": -80.5497
+  },
+  "282": {
+    "state": "NC",
+    "county": "Mecklenburg",
+    "city": "Charlotte",
+    "lat": 35.2272,
+    "lon": -80.8431
+  },
+  "283": {
+    "state": "NC",
+    "county": "Cumberland",
+    "city": "Fayetteville",
+    "lat": 35.0850,
+    "lon": -78.9772
+  },
+  "284": {
+    "state": "NC",
+    "county": "New Hanover",
+    "city": "Wilmington",
+    "lat": 34.2257,
+    "lon": -77.9447
+  },
+  "285": {
+    "state": "NC",
+    "county": "Lenoir",
+    "city": "Kinston",
+    "lat": 35.2747,
+    "lon": -77.5936
+  },
+  "286": {
+    "state": "NC",
+    "county": "Catawba",
+    "city": "Hickory",
+    "lat": 35.7406,
+    "lon": -81.3222
+  },
+  "287": {
+    "state": "NC",
+    "county": "Henderson",
+    "city": "Hendersonville",
+    "lat": 35.3247,
+    "lon": -82.4572
+  },
+  "289": {
+    "state": "NC",
+    "county": "Cherokee",
+    "city": "Murphy",
+    "lat": 35.0933,
+    "lon": -84.0281
+  },
+  "320": {
+    "state": "FL",
+    "county": "St. Johns",
+    "city": "St. Augustine",
+    "lat": 29.8892,
+    "lon": -81.3042
+  },
+  "330": {
+    "state": "FL",
+    "county": "Broward",
+    "city": "Hollywood",
+    "lat": 26.0303,
+    "lon": -80.1564
+  },
+  "331": {
+    "state": "FL",
+    "county": "Miami-Dade",
+    "city": "Miami",
+    "lat": 25.7742,
+    "lon": -80.1936
+  },
+  "332": {
+    "state": "FL",
+    "county": "Miami-Dade",
+    "city": "Miami",
+    "lat": 25.7742,
+    "lon": -80.1936
+  },
+  "334": {
+    "state": "FL",
+    "county": "Palm Beach",
+    "city": "West Palm Beach",
+    "lat": 26.7469,
+    "lon": -80.1314
+  },
+  "335": {
+    "state": "FL",
+    "county": "Hillsborough",
+    "city": "Plant City",
+    "lat": 28.0186,
+    "lon": -82.1126
+  },
+  "337": {
+    "state": "FL",
+    "county": "Pinellas",
+    "city": "St. Petersburg",
+    "lat": 27.8222,
+    "lon": -82.6706
+  },
+  "338": {
+    "state": "FL",
+    "county": "Polk",
+    "city": "Lakeland",
+    "lat": 28.0556,
+    "lon": -81.9544
+  },
+  "339": {
+    "state": "FL",
+    "county": "Lee",
+    "city": "Fort Myers",
+    "lat": 26.6233,
+    "lon": -81.8556
+  },
+  "341": {
+    "state": "FL",
+    "county": "Collier",
+    "city": "Naples",
+    "lat": 26.1420,
+    "lon": -81.7948
+  },
+  "342": {
+    "state": "FL",
+    "county": "Sarasota",
+    "city": "Sarasota",
+    "lat": 27.3583,
+    "lon": -82.5436
+  },
+  "346": {
+    "state": "FL",
+    "county": "Hernando",
+    "city": "Brooksville",
+    "lat": 28.5106,
+    "lon": -82.3886
+  },
+  "349": {
+    "state": "FL",
+    "county": "St. Lucie",
+    "city": "Fort Pierce",
+    "lat": 27.4042,
+    "lon": -80.3911
+  },
+  "703": {
+    "state": "LA",
+    "county": "Terrebonne",
+    "city": "Houma",
+    "lat": 29.5875,
+    "lon": -90.7161
+  },
+  "704": {
+    "state": "LA",
+    "county": "St. Tammany",
+    "city": "Mandeville",
+    "lat": 30.3692,
+    "lon": -90.0781
+  },
+  "705": {
+    "state": "LA",
+    "county": "Lafayette",
+    "city": "Lafayette",
+    "lat": 30.2081,
+    "lon": -92.0325
+  },
+  "706": {
+    "state": "LA",
+    "county": "Calcasieu",
+    "city": "Lake Charles",
+    "lat": 30.1972,
+    "lon": -93.2367
+  },
+  "707": {
+    "state": "LA",
+    "county": "Livingston",
+    "city": "Denham Springs",
+    "lat": 30.4797,
+    "lon": -90.9542
+  },
+  "708": {
+    "state": "LA",
+    "county": "East Baton Rouge",
+    "city": "Baton Rouge",
+    "lat": 30.4475,
+    "lon": -91.1786
+  },
+  "714": {
+    "state": "LA",
+    "county": "Vernon",
+    "city": "Leesville",
+    "lat": 31.1150,
+    "lon": -93.2528
+  },
+  "770": {
+    "state": "TX",
+    "county": "Harris",
+    "city": "Houston",
+    "lat": 29.7567,
+    "lon": -95.3653
+  },
+  "774": {
+    "state": "TX",
+    "county": "Fort Bend",
+    "city": "Sugar Land",
+    "lat": 29.5994,
+    "lon": -95.6142
+  },
+  "775": {
+    "state": "TX",
+    "county": "Harris",
+    "city": "Pasadena",
+    "lat": 29.6761,
+    "lon": -95.1739
+  },
+  "776": {
+    "state": "TX",
+    "county": "Jefferson",
+    "city": "Port Arthur",
+    "lat": 29.8683,
+    "lon": -93.8900
+  },
+  "777": {
+    "state": "TX",
+    "county": "Jefferson",
+    "city": "Beaumont",
+    "lat": 30.0800,
+    "lon": -94.1267
+  },
+  "778": {
+    "state": "TX",
+    "county": "Brazos",
+    "city": "Bryan",
+    "lat": 30.6744,
+    "lon": -96.3700
+  },
+  "783": {
+    "state": "TX",
+    "county": "Nueces",
+    "city": "Corpus Christi",
+    "lat": 27.7428,
+    "lon": -97.4019
+  },
+  "784": {
+    "state": "TX",
+    "county": "Nueces",
+    "city": "Corpus Christi",
+    "lat": 27.7428,
+    "lon": -97.4019
+  }
+}

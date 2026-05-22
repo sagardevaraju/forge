@@ -7,6 +7,7 @@ The script is idempotent: it truncates the policies table before inserting
 so repeated runs always produce the same deterministic dataset (random.seed=42).
 """
 
+import json
 import random
 import sqlite3
 from pathlib import Path
@@ -24,29 +25,37 @@ STATE_CONFIG = {
         "weight": 0.45,
         "zip3s": ["330", "331", "332", "334", "335", "337", "338", "339",
                   "341", "342", "346", "349", "320"],
-        "lat_mu": 28.0, "lat_sig": 1.5, "lat_min": 24.5, "lat_max": 30.5,
-        "lon_mu": -82.0, "lon_sig": 1.5, "lon_min": -87.5, "lon_max": -80.0,
     },
     "TX": {
         "weight": 0.25,
         "zip3s": ["770", "774", "775", "776", "777", "778", "783", "784"],
-        "lat_mu": 29.5, "lat_sig": 0.8, "lat_min": 25.8, "lat_max": 30.5,
-        "lon_mu": -95.0, "lon_sig": 1.5, "lon_min": -97.5, "lon_max": -93.5,
     },
     "LA": {
         "weight": 0.15,
         "zip3s": ["703", "704", "705", "706", "707", "708", "714"],
-        "lat_mu": 30.0, "lat_sig": 0.6, "lat_min": 28.9, "lat_max": 31.2,
-        "lon_mu": -91.0, "lon_sig": 1.0, "lon_min": -93.9, "lon_max": -88.8,
     },
     "NC": {
         "weight": 0.15,
         "zip3s": ["275", "280", "281", "282", "283", "284", "285", "286",
                   "287", "289"],
-        "lat_mu": 34.5, "lat_sig": 0.8, "lat_min": 33.8, "lat_max": 36.6,
-        "lon_mu": -77.5, "lon_sig": 1.2, "lon_min": -79.0, "lon_max": -75.4,
     },
 }
+
+# Real ZIP3 geography — one anchor {state, county, city, lat, lon} per ZIP3
+# prefix, sourced from USPS SCF tables + Census/Wikipedia (see
+# lib/regulatory/zip3_geo.json). Each policy's lat/lon is jittered around its
+# ZIP3's real anchor and its county is that anchor's real county, so every
+# policy's (zip3, county, lat, lon) is mutually coherent and real — no more
+# per-state Gaussian blob with an unrelated zip3 label.
+ZIP3_GEO_PATH = (
+    Path(__file__).resolve().parent.parent / "lib" / "regulatory" / "zip3_geo.json"
+)
+ZIP3_GEO = json.loads(ZIP3_GEO_PATH.read_text())
+
+# Gaussian jitter (degrees) around a ZIP3's real centroid. ~0.06° ≈ 6-7 km —
+# tight enough that a policy stays within its anchor city's county.
+GEO_JITTER_SIG = 0.06
+GEO_JITTER_MAX = 0.18
 
 STATES = list(STATE_CONFIG.keys())
 STATE_WEIGHTS = [STATE_CONFIG[s]["weight"] for s in STATES]
@@ -79,13 +88,17 @@ def generate_policy():
     cfg = STATE_CONFIG[state]
 
     zip3 = random.choice(cfg["zip3s"])
-    county = f"{state}-{zip3}"
+    geo = ZIP3_GEO[zip3]
+    county = geo["county"]  # real county of the ZIP3's anchor city
 
-    # Lat/lon sampled from per-state Gaussian, clipped to coastal bounding box
-    lat = clamp(random.gauss(cfg["lat_mu"], cfg["lat_sig"]),
-                cfg["lat_min"], cfg["lat_max"])
-    lon = clamp(random.gauss(cfg["lon_mu"], cfg["lon_sig"]),
-                cfg["lon_min"], cfg["lon_max"])
+    # Lat/lon: small Gaussian jitter around the ZIP3's real centroid so the
+    # policy's location is coherent with its zip3 and county. Exactly two
+    # random.gauss calls — same as the old per-state sampling — so the random
+    # stream (and thus tiv / build_type / cohorts) is byte-identical.
+    lat = clamp(random.gauss(geo["lat"], GEO_JITTER_SIG),
+                geo["lat"] - GEO_JITTER_MAX, geo["lat"] + GEO_JITTER_MAX)
+    lon = clamp(random.gauss(geo["lon"], GEO_JITTER_SIG),
+                geo["lon"] - GEO_JITTER_MAX, geo["lon"] + GEO_JITTER_MAX)
 
     # TIV: log-normal with mean ~$268k, plausible $100k–$3M range
     tiv = random.lognormvariate(12.5, 0.6)

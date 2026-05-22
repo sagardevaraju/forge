@@ -205,27 +205,37 @@ export function PortfolioPareto({ baselineOptimization, totalTiv: _totalTiv }: P
   return (
     <section
       data-testid="pareto-panel"
-      className="border rounded bg-white p-3 mb-4"
+      className="rounded-md bg-white p-5 ring-1 ring-zinc-200/70 shadow-[0_1px_0_rgba(24,24,27,0.03)]"
       aria-labelledby="pareto-heading"
     >
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2">
-          <h2
-            id="pareto-heading"
-            className="text-sm font-semibold text-zinc-800"
-          >
-            Pareto sweep
-          </h2>
-          <TrustTierBadge tier="MODEL_OUTPUT" />
+      <div className="flex items-end justify-between gap-3 mb-3">
+        <div>
+          <p className="text-[10.5px] uppercase tracking-[0.12em] font-medium text-zinc-500 mb-1">
+            Efficient frontier · 3×3 grid
+          </p>
+          <div className="flex items-center gap-2">
+            <h2
+              id="pareto-heading"
+              className="text-[15px] font-semibold text-zinc-900 tracking-[-0.005em]"
+            >
+              Pareto sweep
+            </h2>
+            <TrustTierBadge tier="MODEL_OUTPUT" />
+          </div>
+          <p className="text-[12px] text-zinc-600 mt-1.5 max-w-prose">
+            Re-solves the MIP at 9 (capital × cession) budget combinations
+            so you can read the shape of the frontier in one glance.
+          </p>
         </div>
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           aria-controls="pareto-grid"
-          className="text-xs px-2 py-1 rounded border border-zinc-300 text-zinc-700 hover:bg-zinc-100"
+          aria-label={open ? 'Hide Pareto sweep' : 'Show Pareto sweep'}
+          className="shrink-0 text-[11.5px] font-medium px-2.5 py-1.5 rounded-md ring-1 ring-zinc-300 text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 transition-colors"
         >
-          {open ? 'Hide Pareto sweep' : 'Show Pareto sweep'}
+          {open ? 'Hide sweep' : 'Run sweep'}
         </button>
       </div>
 
@@ -293,10 +303,10 @@ export function PortfolioPareto({ baselineOptimization, totalTiv: _totalTiv }: P
                       cell.capitalMult,
                     )}, Cession ${formatMultiplier(cell.cessionMult)}`}
                     className={[
-                      'rounded border px-2 py-2 flex flex-col gap-0.5 min-h-[64px]',
+                      'rounded-md px-2.5 py-2 flex flex-col gap-0.5 min-h-[68px] transition-shadow',
                       isBaseline
-                        ? 'border-emerald-600 border-2 ring-1 ring-emerald-200'
-                        : 'border-zinc-200',
+                        ? 'ring-2 ring-emerald-600 shadow-[0_0_0_3px_rgba(4,120,87,0.08)]'
+                        : 'ring-1 ring-zinc-200',
                     ].join(' ')}
                     style={
                       isInfeasible || isError
@@ -351,12 +361,12 @@ export function PortfolioPareto({ baselineOptimization, totalTiv: _totalTiv }: P
 
           <ProvenanceFootnote
             source="9 parallel solves via /api/optimize/portfolio (PuLP / CBC, 3×3 grid on capital × cession budgets, max non-renew pinned to baseline)."
-            method="Each cell is a fresh MIP solve at the cell's budget triple; server-side TTL cache (5 min) deduplicates identical triples."
+            method="Each cell is a fresh MIP solve at the cell's budget triple. Server-side TTL cache (5 min) deduplicates identical triples."
             confidence={
               objectives.length
                 ? `Achieved-objective span across feasible cells: $${(minObj / 1e6).toFixed(
                     1,
-                  )}M – $${(maxObj / 1e6).toFixed(1)}M.`
+                  )}M to $${(maxObj / 1e6).toFixed(1)}M.`
                 : 'All 9 cells infeasible or errored.'
             }
           />

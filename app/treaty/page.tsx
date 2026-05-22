@@ -41,7 +41,7 @@ export default async function TreatyPage() {
     <div className="p-6">
       <h1 className="text-2xl font-bold mb-1">Treaty</h1>
       <p className="text-sm text-zinc-600 mb-4">
-        The placed reinsurance stack — quota share at the bottom plus each excess-of-loss
+        The placed reinsurance stack, quota share at the bottom plus each excess-of-loss
         layer. Attachment, exhaustion, rate-on-line, and reinstatements remaining are surfaced
         per layer so the ops desk can see at a glance where the carrier&rsquo;s tail exposure
         sits relative to the cover.

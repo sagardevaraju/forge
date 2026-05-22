@@ -84,7 +84,7 @@ export function AgentChat() {
           // Task P2.25 — procedure-mode tool_call events carry a
           // human-readable `description`. Surface it verbatim when present.
           const desc = (ev as { description?: string }).description;
-          const label = desc ? `${ev.name} — ${desc}` : ev.name;
+          const label = desc ? `${ev.name}, ${desc}` : ev.name;
           setStatusLine(`Calling ${label}…${iterTag}`);
         } else if (ev.type === 'tool_result') {
           setStatusLine(

@@ -27,6 +27,17 @@ import { PersonaToggleUrl } from './PersonaToggle';
 
 const PERSONA_AWARE_ROUTES = ['/portfolio', '/events'] as const;
 
+const ROUTES: { href: string; label: string }[] = [
+  { href: '/portfolio', label: 'Portfolio' },
+  { href: '/events', label: 'Events' },
+  { href: '/simulate', label: 'Simulate' },
+  { href: '/claims', label: 'Claims' },
+  { href: '/calibration', label: 'Calibration' },
+  { href: '/treaty', label: 'Treaty' },
+  { href: '/load', label: 'Load' },
+  { href: '/methodology', label: 'Methodology' },
+];
+
 function isPersonaAware(pathname: string | null): boolean {
   if (!pathname) return false;
   return PERSONA_AWARE_ROUTES.some(
@@ -34,29 +45,50 @@ function isPersonaAware(pathname: string | null): boolean {
   );
 }
 
+function isActive(href: string, pathname: string | null): boolean {
+  if (!pathname) return false;
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 export function LayoutSubBanner() {
   const pathname = usePathname();
   const showToggle = isPersonaAware(pathname);
   return (
-    <div className="bg-white border-b px-4 py-2 flex items-center gap-4 text-xs">
-      <Link href="/" className="font-semibold">FORGE</Link>
-      <nav className="flex gap-3 text-zinc-600">
-        <Link href="/portfolio" className="hover:text-zinc-900">Portfolio</Link>
-        <Link href="/events" className="hover:text-zinc-900">Events</Link>
-        <Link href="/simulate" className="hover:text-zinc-900">Simulate</Link>
-        <Link href="/claims" className="hover:text-zinc-900">Claims</Link>
-        <Link href="/calibration" className="hover:text-zinc-900">Calibration</Link>
-        <Link href="/treaty" className="hover:text-zinc-900">Treaty</Link>
-        <Link href="/load" className="hover:text-zinc-900">Load</Link>
-        <Link href="/methodology" className="hover:text-zinc-900">Methodology</Link>
-      </nav>
-      {showToggle && (
-        <div className="ml-auto">
-          <Suspense fallback={<div className="inline-block w-[260px] h-[26px]" />}>
-            <PersonaToggleUrl />
-          </Suspense>
-        </div>
-      )}
+    <div className="sticky top-0 z-30 bg-white/85 backdrop-blur supports-[backdrop-filter]:bg-white/70 border-b hairline">
+      <div className="mx-auto max-w-[1400px] px-6 h-12 flex items-center gap-6 text-[12.5px]">
+        <Link
+          href="/"
+          className="font-semibold tracking-[0.04em] text-zinc-900 hover:text-zinc-700"
+        >
+          FORGE
+        </Link>
+        <nav className="flex items-center gap-1 text-zinc-500" aria-label="Primary">
+          {ROUTES.map((r) => {
+            const active = isActive(r.href, pathname);
+            return (
+              <Link
+                key={r.href}
+                href={r.href}
+                aria-current={active ? 'page' : undefined}
+                className={
+                  active
+                    ? 'rounded-md px-2 py-1 text-zinc-900 bg-zinc-100/80 font-medium'
+                    : 'rounded-md px-2 py-1 hover:text-zinc-900 hover:bg-zinc-100/60 transition-colors'
+                }
+              >
+                {r.label}
+              </Link>
+            );
+          })}
+        </nav>
+        {showToggle && (
+          <div className="ml-auto">
+            <Suspense fallback={<div className="inline-block w-[260px] h-[26px]" />}>
+              <PersonaToggleUrl />
+            </Suspense>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

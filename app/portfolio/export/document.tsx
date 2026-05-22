@@ -188,13 +188,13 @@ export function PortfolioExportDocument({
 
   return (
     <Document
-      title={`FORGE Portfolio Decision — ${isoDate}`}
+      title={`FORGE Portfolio Decision, ${isoDate}`}
       author="FORGE"
       subject="Portfolio MIP board-deck export"
     >
       <Page size="LETTER" style={styles.page} wrap>
         <Text style={styles.headline}>
-          FORGE Portfolio Decision — {isoDate}
+          FORGE Portfolio Decision, {isoDate}
         </Text>
         <Text style={styles.subhead}>
           Optimizer status: {optimization.status} · Objective{' '}
@@ -293,7 +293,7 @@ export function PortfolioExportDocument({
           (schema_version {schemaVersion}). The optimizer is a mixed-integer
           program solved with CBC over {optimization.cohorts.length}{' '}
           {`{zip3, build_type, tiv_quintile}`} cohorts. Cohort priors are
-          HAZUS-derived; see `docs/methodology.md`. Re-solve via{' '}
+          HAZUS-derived. See `docs/methodology.md`. Re-solve via{' '}
           {`POST /api/optimize/portfolio`}.
         </Text>
 

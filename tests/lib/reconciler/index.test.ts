@@ -368,7 +368,7 @@ describe('reconcile — notice-period filter (P2.31)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Task P2.32 — Per-(state, territory) regulatory caps
+// Task P2.32 — Per-(state, territory) modeled territory caps
 // ---------------------------------------------------------------------------
 
 describe('reconcile — territory caps (P2.32)', () => {

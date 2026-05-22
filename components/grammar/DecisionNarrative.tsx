@@ -83,7 +83,7 @@ export function DecisionNarrative({
         });
         if (!resp.ok) {
           setError(
-            `narrative service unavailable — HTTP ${resp.status}; please retry.`,
+            `narrative service unavailable, HTTP ${resp.status}. Please retry.`,
           );
           setLoading(false);
           return;
@@ -117,9 +117,9 @@ export function DecisionNarrative({
             <span
               data-testid="decision-narrative-fallback-hint"
               className="text-[10px] text-amber-700"
-              title="The cascading LLM is unavailable; a deterministic stub is shown."
+              title="The cascading LLM is unavailable. A deterministic stub is shown."
             >
-              live narrative unavailable — stub shown
+              live narrative unavailable, stub shown
             </span>
           )}
           {loading && (

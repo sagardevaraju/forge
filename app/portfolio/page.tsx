@@ -45,16 +45,36 @@ import path from 'node:path';
 import { db } from '@/lib/db/client';
 import { SimulationBanner, type UnresolvedSim } from '@/components/grammar/SimulationBanner';
 import { aggregateCohorts } from '@/lib/db/cohorts';
+import { getBookStates } from '@/lib/db/book_totals';
+import { zip3Centroids } from '@/lib/db/zip3_centroids';
 import { loadPortfolioOptimization } from '@/lib/db/portfolio_optimization';
 import { PortfolioMap } from '@/components/PortfolioMap';
 import { PortfolioPersonaScope } from '@/components/PortfolioPersonaScope';
 import { PortfolioPareto } from '@/components/PortfolioPareto';
 import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
+import { fetchNhcCone } from '@/app/api/agent/tools/fetch_nhc_cone';
+import {
+  fetchActiveStorms,
+  pickRelevantStorm,
+} from '@/app/api/agent/tools/fetch_active_storms';
+import { fetchNwsAlerts } from '@/app/api/agent/tools/fetch_nws_alerts';
+import type { FetchNhcConeResult } from '@/app/api/agent/tools/fetch_nhc_cone';
+import type { ActiveStorm } from '@/app/api/agent/tools/fetch_active_storms';
+import type { FetchNwsAlertsResult } from '@/app/api/agent/tools/fetch_nws_alerts';
 import type { TreatyStack, TreatyLayer } from '@/lib/treaty/types';
 
 export const dynamic = 'force-dynamic';
 
 const TREATY_ARTIFACT_PATH = path.join(process.cwd(), 'artifacts', 'treaty.json');
+/**
+ * Fallback storm id used when NHC reports zero active named storms. The
+ * historical demo (Hurricane Helene, AL092024) keeps the active-threat
+ * strip populated with a recognisable scenario between hurricane
+ * seasons. When the live feed reports zero active storms, the page
+ * still renders this cone — but downstream UI should treat it as a
+ * frozen reference (the LiveEventStrip's source chip says "Mock").
+ */
+const FALLBACK_STORM_ID = 'AL092024';
 
 interface RolLayer {
   type: string;
@@ -104,12 +124,66 @@ async function loadUnresolvedSims(): Promise<UnresolvedSim[]> {
 }
 
 export default async function PortfolioPage() {
-  const [cohorts, optimizationRaw, treaty, unresolved] = await Promise.all([
+  // Pre-render dependencies that the storm-id auto-discovery and the alert
+  // scoping need before we kick off the parallel fetches. Both are cheap
+  // (~10ms each on a warm libSQL connection) so we run them inline rather
+  // than racing them in Promise.all — the picked storm id is a Promise.all
+  // input downstream.
+  const [bookStates, active] = await Promise.all([
+    getBookStates().catch(() => [] as string[]),
+    fetchActiveStorms
+      .handler({ basin: 'AL' })
+      .catch(() => ({ storms: [] as ActiveStorm[], source: 'mock' as const, fetched_at: '' })),
+  ]);
+  const picked = pickRelevantStorm(active.storms);
+  const liveActiveStormFound = picked !== null && active.source === 'live';
+  const stormId = picked?.id ?? FALLBACK_STORM_ID;
+
+  const [
+    cohorts,
+    optimizationRaw,
+    treaty,
+    cone,
+    alertsRes,
+    unresolved,
+    zip3CentroidMap,
+  ]: [
+    Awaited<ReturnType<typeof aggregateCohorts>>,
+    Awaited<ReturnType<typeof loadPortfolioOptimization>>,
+    TreatyStack | null,
+    FetchNhcConeResult | null,
+    FetchNwsAlertsResult | null,
+    Awaited<ReturnType<typeof loadUnresolvedSims>>,
+    Awaited<ReturnType<typeof zip3Centroids>>,
+  ] = await Promise.all([
     aggregateCohorts(),
     loadPortfolioOptimization(),
     loadTreatyArtifact(),
+    // Best-effort cone fetch — failure (network, missing storm) degrades to
+    // null and the map shows an honest "no active named storm" line. Never
+    // blocks the page render on a third-party feed.
+    fetchNhcCone.handler({ storm_id: stormId }).catch(() => null),
+    // NWS active alerts scoped to wherever the book has policies, NOT
+    // hardcoded FL. `getBookStates` returns the distinct state set from
+    // the policies table; for a typical FORGE seed that's roughly the US
+    // South. An empty array falls back to FL inside the tool's default
+    // to keep a fresh-clone dev experience populated.
+    fetchNwsAlerts
+      .handler({ state: bookStates.length > 0 ? bookStates : undefined })
+      .catch(() => null),
     loadUnresolvedSims(),
+    // Per-ZIP3 map centroids from the live policy book — anchors the
+    // Portfolio Map bubbles to where policies actually sit. Degrades to an
+    // empty map (the pane then falls back per-ZIP3) rather than failing.
+    zip3Centroids().catch((): Awaited<ReturnType<typeof zip3Centroids>> => ({})),
   ]);
+  // Annotate the cone with a synthetic-source flag when we know NHC said
+  // "no active storms" and we're rendering the fallback — distinct from
+  // "the tool's mock fallback fired because of a network error" which
+  // already surfaces via cone.source === 'mock'. Either way the
+  // LiveEventStrip's source chip reads "Mock" so the operator is told.
+  void liveActiveStormFound; // reserved for a future "demo" chip on the strip
+  const coneRefreshedAt = new Date();
   // Task P2.0: schema_version 3 ships per-cohort `loss_scenarios` arrays
   // (K=1000 lognormal draws) for downstream P2.6 / P2.7 / P2.8 use. Those
   // arrays are server-side only — at ~1000 floats × ~570 cohorts they
@@ -136,9 +210,37 @@ export default async function PortfolioPage() {
   const saaGap =
     optWithGap && typeof optWithGap.gap === 'number' ? optWithGap.gap : undefined;
   return (
-    <div className="p-6">
+    <div className="mx-auto max-w-[1400px] px-6 py-8">
       <SimulationBanner unresolved={unresolved} />
-      <h1 className="text-2xl font-bold mb-4">Portfolio Map</h1>
+      <header className="mb-6 flex items-end justify-between gap-6 border-b hairline pb-5">
+        <div>
+          <p className="text-[10.5px] uppercase tracking-[0.18em] font-medium text-zinc-500 mb-1">
+            Portfolio · MIP recommendation
+          </p>
+          <h1 className="text-[26px] font-semibold tracking-[-0.02em] text-zinc-900 leading-none">
+            Portfolio Map
+          </h1>
+          <p className="text-[13px] text-zinc-600 mt-2 max-w-prose">
+            Cohort-level recommendations from the precomputed PuLP/CBC solve.
+            Tweak the budget triple on the right to re-solve in place.
+          </p>
+        </div>
+        {optimization && (
+          <div className="text-right text-[11px] text-zinc-500 leading-snug tabular-nums">
+            <div>
+              MIP status{' '}
+              <span className="text-zinc-800 font-medium">{optimization.status}</span>
+            </div>
+            <div>
+              Objective{' '}
+              <span className="text-zinc-800 font-medium">
+                ${(optimization.objective / 1e6).toFixed(1)}M
+              </span>
+            </div>
+          </div>
+        )}
+      </header>
+
       {optimization ? (
         <PortfolioPersonaScope
           initialOptimization={optimization}
@@ -148,30 +250,56 @@ export default async function PortfolioPage() {
         />
       ) : (
         <p className="text-sm text-zinc-600 mb-4">
-          Portfolio optimization artifact missing — run{' '}
-          <code>python -m scripts.precompute_portfolio_optimization</code>.
+          Portfolio optimization artifact missing. Run{' '}
+          <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-[12px] text-zinc-800">
+            python -m scripts.precompute_portfolio_optimization
+          </code>
+          .
         </p>
       )}
-      <div className="h-[60vh] border rounded">
-        <PortfolioMap cohorts={cohorts} optimization={optimization} />
-      </div>
+
+      <section className="mt-6">
+        <div className="mb-2 flex items-baseline justify-between">
+          <h2 className="text-[12px] uppercase tracking-[0.12em] font-medium text-zinc-500">
+            Exposure map
+          </h2>
+          <p className="text-[11px] text-zinc-500">
+            Click any ZIP3 cluster to drill into per-cohort action mix.
+          </p>
+        </div>
+        <div className="h-[60vh] overflow-hidden rounded-md ring-1 ring-zinc-200/70 bg-white shadow-[0_1px_0_rgba(24,24,27,0.03)]">
+          <PortfolioMap
+            cohorts={cohorts}
+            optimization={optimization}
+            cone={cone}
+            coneRefreshedAt={coneRefreshedAt}
+            alerts={alertsRes?.alerts ?? []}
+            alertCounts={alertsRes?.counts}
+            zip3Centroids={zip3CentroidMap}
+          />
+        </div>
+      </section>
+
       {optimization && (
-        <div className="mt-4">
+        <section className="mt-8">
           <PortfolioPareto
             baselineOptimization={optimization}
             totalTiv={totalTiv}
           />
-        </div>
+        </section>
       )}
-      <ProvenanceFootnote
-        source="policies table (synthetic seed via scripts/seed_policy_book.py)"
-        method="lib/db/cohorts::aggregateCohorts + api_py/optimize_portfolio::solve"
-        confidence={
-          optimization
-            ? `MIP status ${optimization.status} · objective $${(optimization.objective / 1e6).toFixed(1)}M`
-            : 'optimization cache missing'
-        }
-      />
+
+      <footer className="mt-10 border-t hairline pt-5">
+        <ProvenanceFootnote
+          source="policies table (synthetic seed via scripts/seed_policy_book.py)"
+          method="lib/db/cohorts::aggregateCohorts + api_py/optimize_portfolio::solve"
+          confidence={
+            optimization
+              ? `MIP status ${optimization.status} · objective $${(optimization.objective / 1e6).toFixed(1)}M`
+              : 'optimization cache missing'
+          }
+        />
+      </footer>
     </div>
   );
 }

@@ -33,12 +33,8 @@
  * Carries a `__setDraftSitrepLlmFactory` test hook (mirrors the P2.19
  * DecisionNarrative pattern) so unit tests inject a stubbed `chat()`.
  */
-import {
-  CascadingLLM,
-  makeOpenRouterProvider,
-  makeGitHubModelsProvider,
-} from '@/lib/llm/cascading-client';
-import type { ChatRequest, ChatResponse, ProviderFn } from '@/lib/llm/types';
+import { getLlmFactory } from '@/app/api/agent/chat/_llm-factory';
+import type { ChatRequest, ChatResponse } from '@/lib/llm/types';
 
 export type ThreatTier = 'low' | 'medium' | 'high' | 'critical';
 
@@ -67,20 +63,11 @@ const VALID_TIERS: readonly ThreatTier[] = ['low', 'medium', 'high', 'critical']
 let llmFactory: () => { chat: (req: ChatRequest) => Promise<ChatResponse> } = defaultLlmFactory;
 
 function defaultLlmFactory() {
-  const primary: ProviderFn = makeOpenRouterProvider(
-    process.env.OPENROUTER_API_KEY ?? '',
-    process.env.LLM_PRIMARY_MODEL ?? 'openai/gpt-4.1',
-  );
-  const fallback: ProviderFn = makeGitHubModelsProvider(
-    process.env.GITHUB_MODELS_PAT ?? '',
-    process.env.LLM_FALLBACK_MODEL ?? 'gpt-4o',
-  );
-  return new CascadingLLM({
-    primary,
-    fallback,
-    maxRetries: Number(process.env.LLM_RETRY_MAX ?? 3),
-    baseDelayMs: Number(process.env.LLM_RETRY_BASE_MS ?? 500),
-  });
+  // Delegate to the chat route's shared factory so provider/model selection
+  // (GH Models primary when PAT set, OpenRouter fallback) stays in one place.
+  // Was: a private OpenRouter-primary wiring that silently 403'd against the
+  // GH-Models-shaped env, returning synthetic_fallback to every caller.
+  return getLlmFactory()();
 }
 
 export function __setDraftSitrepLlmFactory(
@@ -174,12 +161,12 @@ function syntheticStub(args: DraftSitrepArgs): StructuredSitrep {
 
 const SYSTEM_PROMPT =
   'You are a catastrophe-operations writer drafting an internal SITREP for a P&C insurer. ' +
-  'Output ONLY a single JSON object — no prose, no markdown fences. The object MUST have ' +
-  'EXACTLY these 6 keys: threat_tier (one of "low" | "medium" | "high" | "critical"), ' +
-  'lead_time_hours (non-negative number — hours until expected impact), ' +
-  'portfolio_recommendation (1-2 sentences), operational_recommendation (1-2 sentences), ' +
-  'claims_prep_recommendation (1-2 sentences), escalation_criteria (1-2 sentences). ' +
-  'Be concrete: cite ZIP3s, staff counts, dollar thresholds, peak-wind triggers where the ' +
+  'Output ONLY a single JSON object. No prose, no markdown fences. The object MUST have ' +
+  'EXACTLY these 6 keys: threat_tier (one of "low", "medium", "high", "critical"), ' +
+  'lead_time_hours (non-negative number giving hours until expected impact), ' +
+  'portfolio_recommendation (1 to 2 sentences), operational_recommendation (1 to 2 sentences), ' +
+  'claims_prep_recommendation (1 to 2 sentences), escalation_criteria (1 to 2 sentences). ' +
+  'Be concrete: cite ZIP3s, staff counts, dollar thresholds, and peak-wind triggers where the ' +
   'posture summary provides them.';
 
 export const draftSitrep = {
@@ -229,7 +216,9 @@ export const draftSitrep = {
         return { data_source: 'synthetic_fallback', sitrep: syntheticStub(args) };
       }
       return { data_source: 'live', sitrep: parsed };
-    } catch {
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[draft_sitrep] live LLM failed, falling back to stub:', msg);
       return { data_source: 'synthetic_fallback', sitrep: syntheticStub(args) };
     }
   },

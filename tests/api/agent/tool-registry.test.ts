@@ -3,7 +3,9 @@ import { describe, test, expect } from 'vitest';
 import { TOOLS, TOOL_MAP } from '@/lib/llm/tool-registry';
 
 const EXPECTED_TOOL_NAMES = [
+  'fetch_active_storms',
   'fetch_nhc_cone',
+  'fetch_nws_alerts',
   'fetch_firms_fires',
   'fetch_fema_declarations',
   'fetch_storm_events',
@@ -13,8 +15,8 @@ const EXPECTED_TOOL_NAMES = [
 ];
 
 describe('tool-registry', () => {
-  test('exposes exactly 7 tools', () => {
-    expect(TOOLS).toHaveLength(7);
+  test('exposes exactly 9 tools', () => {
+    expect(TOOLS).toHaveLength(9);
   });
 
   test('every expected tool name is present', () => {

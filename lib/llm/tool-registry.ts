@@ -7,6 +7,8 @@
  */
 import {
   fetchNhcCone,
+  fetchActiveStorms,
+  fetchNwsAlerts,
   fetchFirmsFires,
   fetchFemaDeclarations,
   fetchStormEvents,
@@ -23,7 +25,9 @@ export interface Tool<TArgs = unknown, TResult = unknown> {
 }
 
 export const TOOLS: Tool[] = [
+  fetchActiveStorms,
   fetchNhcCone,
+  fetchNwsAlerts,
   fetchFirmsFires,
   fetchFemaDeclarations,
   fetchStormEvents,

@@ -1,4 +1,11 @@
 export { fetchNhcCone } from './fetch_nhc_cone';
+export { fetchActiveStorms, pickRelevantStorm } from './fetch_active_storms';
+export {
+  fetchNwsAlerts,
+  categorizeAlertEvent,
+  countAlerts,
+  DEFAULT_ACUTE_EVENTS,
+} from './fetch_nws_alerts';
 export { fetchFirmsFires } from './fetch_firms_fires';
 export { fetchFemaDeclarations } from './fetch_fema_declarations';
 export { fetchStormEvents } from './fetch_storm_events';

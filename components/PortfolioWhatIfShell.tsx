@@ -149,7 +149,7 @@ export function PortfolioWhatIfShell({
         }
         if (json.status === 'Infeasible_relaxed' && typeof json.relaxation_factor === 'number') {
           setWarning(
-            `Infeasible at the requested capital budget — relaxed by ${json.relaxation_factor}× and re-solved.`,
+            `Infeasible at the requested capital budget, relaxed by ${json.relaxation_factor}× and re-solved.`,
           );
           setCurrent(json);
           return;
@@ -228,8 +228,8 @@ export function PortfolioWhatIfShell({
   const capitalMax = Math.max(baselineBudgets.capital_budget * 2, totalTiv * 0.1);
 
   return (
-    <div className="flex flex-col md:flex-row gap-4 mb-4">
-      <div className="flex-1 min-w-0">
+    <div className="flex flex-col gap-4 mb-4">
+      <div>
         <PortfolioHeader
           totalTiv={totalTiv}
           objective={current.objective}
@@ -253,15 +253,17 @@ export function PortfolioWhatIfShell({
         {personaConfig.quickLinks.length > 0 && (
           <div
             data-testid="persona-quick-links"
-            className="flex flex-wrap gap-2 mt-2 text-xs"
+            className="flex flex-wrap items-center gap-x-3 gap-y-1 -mt-2 mb-1 text-[11.5px]"
             aria-label="Persona quick-links"
           >
-            <span className="text-zinc-500 uppercase tracking-wide">Drill-in:</span>
+            <span className="text-[10px] uppercase tracking-[0.12em] font-medium text-zinc-500">
+              Drill-in
+            </span>
             {personaConfig.quickLinks.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
-                className="text-blue-700 hover:text-blue-900 underline"
+                className="text-emerald-800 hover:text-emerald-900 underline-offset-2 hover:underline decoration-emerald-300"
               >
                 {link.label}
               </Link>
@@ -272,78 +274,108 @@ export function PortfolioWhatIfShell({
       {personaConfig.whatIfRail && (
       <aside
         data-testid="whatif-rail"
-        className="w-full md:w-[280px] md:flex-none flex flex-col gap-2 md:sticky md:top-4 self-start"
+        className="rounded-md bg-white ring-1 ring-zinc-200/70 shadow-[0_1px_0_rgba(24,24,27,0.03)] px-5 py-4"
         aria-label="What-if budget controls"
       >
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-zinc-800">What-if</h2>
-          <div className="flex items-center gap-2">
+        {/* Task P2.20 — relocated from a 300px side-rail to a full-width
+            horizontal bar under the KPI strip. Header row + 3-column slider
+            grid restore the strip's full width and put the controls right
+            above the exposure map they re-solve against. */}
+        <div className="flex items-center justify-between gap-4 pb-3 mb-3 border-b hairline">
+          <div className="flex items-baseline gap-3 min-w-0">
+            <h2 className="text-[13px] font-semibold text-zinc-900 tracking-[-0.005em]">
+              What-if
+            </h2>
+            <p className="text-[10.5px] uppercase tracking-[0.08em] text-zinc-500">
+              Re-solve the MIP
+            </p>
+            <p className="hidden md:block text-[10.5px] text-zinc-400 leading-snug truncate">
+              · Server-side 5-min TTL cache deduplicates identical triples
+            </p>
+          </div>
+          <div className="flex items-center gap-3 flex-none">
             {solving && (
               <span
                 data-testid="whatif-spinner"
                 role="status"
                 aria-live="polite"
                 aria-label="Re-solving Portfolio MIP"
-                className="inline-block h-3 w-3 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin"
+                className="inline-block h-3 w-3 rounded-full border-2 border-emerald-600 border-t-transparent animate-spin"
               />
             )}
             <TrustTierBadge tier="MODEL_OUTPUT" />
+            <button
+              type="button"
+              onClick={onReset}
+              disabled={onBaseline}
+              className="text-[11px] px-2.5 py-1 rounded-md ring-1 ring-zinc-300 text-zinc-700 enabled:hover:bg-zinc-100 enabled:hover:text-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Reset
+            </button>
           </div>
         </div>
 
-        <WhatIfControl
-          label="Capital budget"
-          baseline={baselineBudgets.capital_budget}
-          current={proposedBudgets.capital_budget}
-          min={0}
-          max={capitalMax}
-          step={Math.max(capitalMax / 100, 1e5)}
-          format={(v) => `$${(v / 1e6).toFixed(1)}M`}
-          ariaLabel="Capital budget ($)"
-          disabled={solving}
-          onCommit={onCapitalCommit}
-        />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-x-8 gap-y-1 divide-y md:divide-y-0 md:divide-x hairline">
+          <div className="md:pr-8 md:pl-0">
+            <WhatIfControl
+              label="Capital budget"
+              baseline={baselineBudgets.capital_budget}
+              current={proposedBudgets.capital_budget}
+              min={0}
+              max={capitalMax}
+              step={Math.max(capitalMax / 100, 1e5)}
+              format={(v) => `$${(v / 1e6).toFixed(1)}M`}
+              ariaLabel="Capital budget ($M)"
+              disabled={solving}
+              onCommit={onCapitalCommit}
+              inputScale={1e6}
+              inputDecimals={1}
+              inputSuffix="M"
+            />
+          </div>
 
-        <WhatIfControl
-          label="Max non-renew %"
-          baseline={baselineBudgets.max_nonrenew_pct}
-          current={proposedBudgets.max_nonrenew_pct}
-          min={0}
-          max={1}
-          step={0.01}
-          format={(v) => `${(v * 100).toFixed(0)}%`}
-          ariaLabel="Max non-renew fraction"
-          disabled={solving}
-          onCommit={onNonrenewCommit}
-        />
+          <div className="md:px-4">
+            <WhatIfControl
+              label="Max non-renew %"
+              baseline={baselineBudgets.max_nonrenew_pct}
+              current={proposedBudgets.max_nonrenew_pct}
+              min={0}
+              max={1}
+              step={0.01}
+              format={(v) => `${(v * 100).toFixed(0)}%`}
+              ariaLabel="Max non-renew percent"
+              disabled={solving}
+              onCommit={onNonrenewCommit}
+              inputScale={0.01}
+              inputDecimals={0}
+              inputSuffix="%"
+            />
+          </div>
 
-        <WhatIfControl
-          label="Cession budget"
-          baseline={baselineBudgets.cession_budget}
-          current={proposedBudgets.cession_budget}
-          min={0}
-          max={cessionMax}
-          step={Math.max(cessionMax / 100, 1e4)}
-          format={(v) => `$${(v / 1e6).toFixed(2)}M`}
-          ariaLabel="Cession budget ($)"
-          disabled={solving}
-          onCommit={onCessionCommit}
-        />
-
-        <button
-          type="button"
-          onClick={onReset}
-          disabled={onBaseline}
-          className="self-end text-xs px-2 py-1 rounded border border-zinc-300 text-zinc-700 enabled:hover:bg-zinc-100 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          Reset to baseline
-        </button>
+          <div className="md:pl-8 md:pr-0">
+            <WhatIfControl
+              label="Cession budget"
+              baseline={baselineBudgets.cession_budget}
+              current={proposedBudgets.cession_budget}
+              min={0}
+              max={cessionMax}
+              step={Math.max(cessionMax / 100, 1e4)}
+              format={(v) => `$${(v / 1e6).toFixed(2)}M`}
+              ariaLabel="Cession budget ($M)"
+              disabled={solving}
+              onCommit={onCessionCommit}
+              inputScale={1e6}
+              inputDecimals={2}
+              inputSuffix="M"
+            />
+          </div>
+        </div>
 
         {warning && (
           <div
             data-testid="whatif-warning"
             role="alert"
-            className="text-xs p-2 rounded border border-amber-300 bg-amber-50 text-amber-900"
+            className="mt-3 text-[11px] p-2.5 rounded-md ring-1 ring-amber-300 bg-amber-50 text-amber-900"
           >
             {warning}
           </div>
@@ -353,17 +385,11 @@ export function PortfolioWhatIfShell({
           <div
             data-testid="whatif-error"
             role="alert"
-            className="text-xs p-2 rounded border border-red-300 bg-red-50 text-red-900"
+            className="mt-3 text-[11px] p-2.5 rounded-md ring-1 ring-rose-300 bg-rose-50 text-rose-900"
           >
             Re-solve failed: {error}
           </div>
         )}
-
-        <p className="text-[10px] text-zinc-500 leading-snug mt-1">
-          Re-solve via <code>/api/optimize/portfolio</code> — invokes the same
-          PuLP/CBC solver as the precompute. Server-side cache (5 min TTL)
-          deduplicates identical budget triples.
-        </p>
       </aside>
       )}
     </div>

@@ -46,7 +46,13 @@ import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
 import { ConeExposureBars, type ConeExposureCohort } from './ConeExposureBars';
 import type { FetchNhcConeResult } from '@/app/api/agent/tools/fetch_nhc_cone';
 import type { FireDetection } from '@/app/api/agent/tools/fetch_firms_fires';
+import type { NwsAlert, NwsAlertCategory } from '@/app/api/agent/tools/fetch_nws_alerts';
 import type { PolygonLike } from '@/lib/geo/point_in_polygon';
+import {
+  ALERT_FILL_COLOR,
+  ALERT_LINE_COLOR,
+  alertColorMatchExpression,
+} from '@/lib/grammar/alert-colors';
 
 /**
  * Task P2.23 — The GEFS-perturbation cone envelope can be attached to the
@@ -72,9 +78,29 @@ interface Props {
    * falls back to its "no book loaded" placeholder.
    */
   cohorts?: ConeExposureCohort[];
+  /**
+   * Live NWS active alerts (tornado / flood / severe thunderstorm / etc.).
+   * Rendered as a colour-encoded polygon layer underneath the hurricane
+   * cone so the cone stays the dominant visual element. Optional — when
+   * omitted or empty, nothing extra renders.
+   */
+  alerts?: NwsAlert[];
+  /**
+   * Per-ZIP3 `[lon, lat]` centroids from the live policy book
+   * (`lib/db/zip3_centroids.ts`), used by the cone-exposure mini-map to
+   * classify cohorts inside/outside the cone. Optional so existing callers
+   * / tests can omit it — the mini-map then counts cohorts as unmapped.
+   */
+  zip3Centroids?: Record<string, [number, number]>;
 }
 
-export function EventConsole({ cone, fires, cohorts }: Props) {
+export function EventConsole({
+  cone,
+  fires,
+  cohorts,
+  alerts,
+  zip3Centroids,
+}: Props) {
   const [sitrep, setSitrep] = useState<StructuredSitrep | null>(null);
   const [sitrepDataSource, setSitrepDataSource] = useState<SitrepDataSource | null>(null);
 
@@ -104,6 +130,36 @@ export function EventConsole({ cone, fires, cohorts }: Props) {
   // stays on top with full fill + stroke, while priors sit beneath as
   // faint outlines only.
   const priorCones = cone?.prior_cones ?? [];
+
+  // NWS active alerts — tornado / flood / severe thunderstorm / etc. The
+  // tool returns geometry as either Polygon, MultiPolygon, or null
+  // (county-coded alerts don't ship a polygon and are dropped here).
+  // We build a single GeoJSON FeatureCollection with `category` on each
+  // feature so MapLibre's data-driven `match` expression can pick the
+  // right colour per peril without us emitting one Source per category.
+  const alertFeatures: GeoJSON.Feature[] = (alerts ?? [])
+    .filter((a): a is NwsAlert & { geometry: NonNullable<NwsAlert['geometry']> } =>
+      a.geometry !== null,
+    )
+    .map((a) => ({
+      type: 'Feature',
+      geometry: a.geometry,
+      properties: {
+        id: a.id,
+        event: a.event,
+        category: a.category,
+        severity: a.severity,
+        expires: a.expires,
+        headline: a.headline,
+        area_desc: a.area_desc,
+      },
+    }));
+  const alertsGeoJson: GeoJSON.FeatureCollection = {
+    type: 'FeatureCollection',
+    features: alertFeatures,
+  };
+  const fillColorExpr = alertColorMatchExpression(ALERT_FILL_COLOR);
+  const lineColorExpr = alertColorMatchExpression(ALERT_LINE_COLOR);
 
   // Task P2.23 — GEFS perturbation uncertainty envelope. Three concentric
   // hulls (t72h, t48h, t24h) ordered widest → narrowest. Rendered before
@@ -183,6 +239,35 @@ export function EventConsole({ cone, fires, cohorts }: Props) {
                 />
               </Source>
             ))}
+            {/* NWS active alerts — tornado / flood / severe thunderstorm /
+                etc. Painted BEFORE the hurricane cone so the cone fill +
+                outline stay the dominant element. Within the alert layer
+                the fill opacity is low (0.35) so overlapping polygons
+                remain legible and the basemap shows through; the line
+                outline at full opacity gives each alert a clear boundary
+                even when the fill blends with another. */}
+            {alertFeatures.length > 0 && (
+              <Source id="nws-alerts" type="geojson" data={alertsGeoJson}>
+                <Layer
+                  id="nws-alerts-fill"
+                  type="fill"
+                  paint={{
+                    'fill-color': fillColorExpr,
+                    'fill-opacity': 0.35,
+                    'fill-outline-color': 'transparent',
+                  }}
+                />
+                <Layer
+                  id="nws-alerts-line"
+                  type="line"
+                  paint={{
+                    'line-color': lineColorExpr,
+                    'line-width': 1.5,
+                    'line-opacity': 0.9,
+                  }}
+                />
+              </Source>
+            )}
             {cone?.cone != null && (
               <Source id="cone" type="geojson" data={cone.cone as GeoJSON.Feature}>
                 <Layer
@@ -269,8 +354,62 @@ export function EventConsole({ cone, fires, cohorts }: Props) {
               cone={(cone?.cone as PolygonLike | null) ?? null}
               cohorts={cohorts ?? []}
               coneSource={cone?.source}
+              zip3Centroids={zip3Centroids ?? {}}
             />
           </div>
+          {/* NWS alerts legend — bottom-right corner, mirrors the
+              prior-advisories legend pattern. Only renders categories
+              that actually have an alert on the map so the operator
+              doesn't read decorative swatches for absent perils. */}
+          {alertFeatures.length > 0 && (
+            <div
+              data-testid="nws-alerts-legend"
+              className="absolute bottom-3 right-3 bg-white p-2 border rounded shadow-sm text-[11px] leading-tight"
+            >
+              <div className="font-semibold mb-1 flex items-center gap-2">
+                Active alerts
+                <span className="text-[10px] text-slate-500 font-normal">
+                  NWS · live
+                </span>
+              </div>
+              <ul className="space-y-1">
+                {(
+                  [
+                    ['tornado', 'Tornado'],
+                    ['flood', 'Flood'],
+                    ['severe_thunderstorm', 'Severe T-storm'],
+                    ['hurricane', 'Hurricane'],
+                    ['tropical', 'Tropical storm'],
+                    ['storm_surge', 'Storm surge'],
+                    ['other', 'Other'],
+                  ] as Array<[NwsAlertCategory, string]>
+                )
+                  .map(([cat, label]) => {
+                    const n = (alerts ?? []).filter((a) => a.category === cat).length;
+                    return { cat, label, n };
+                  })
+                  .filter(({ n }) => n > 0)
+                  .map(({ cat, label, n }) => (
+                    <li
+                      key={cat}
+                      data-testid={`nws-alerts-legend-${cat}`}
+                      className="flex items-center gap-2"
+                    >
+                      <span
+                        aria-hidden
+                        className="inline-block h-2.5 w-2.5 rounded-sm"
+                        style={{
+                          backgroundColor: ALERT_FILL_COLOR[cat],
+                          outline: `1px solid ${ALERT_LINE_COLOR[cat]}`,
+                        }}
+                      />
+                      <span className="text-slate-700">{label}</span>
+                      <span className="text-slate-500 tabular-nums">×{n}</span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
         </div>
         <div className="flex flex-col gap-4 overflow-auto">
           <AgentChat />

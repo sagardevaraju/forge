@@ -275,7 +275,7 @@ export async function POST(req: Request) {
       const summarizePrompt =
         `You are summarizing the results of the "${runbook.name}" runbook ` +
         `(${runbook.id}) for the operator. The runbook executed ${runbook.steps.length} ` +
-        `steps; their results are wrapped in <tool_result> tags below. Produce a tight, ` +
+        `steps. Their results are wrapped in <tool_result> tags below. Produce a tight, ` +
         `operationally-decisive synthesis. Cite the specific numeric values from each ` +
         `result. Do not propose additional tool calls.`;
       const resultsBody = collectedResults

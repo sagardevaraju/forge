@@ -3,7 +3,7 @@
  *
  * Rendered above the ClaimsTable on the `/claims` pre-brief. Each row shows
  * one ZIP3 affected by the pre-flagged policy set with:
- *   - county label (resolved via `lib/regulatory/zip3_to_county.ts`)
+ *   - real county label (resolved via `lib/regulatory/zip3_geo.ts`)
  *   - policy_count contributing
  *   - needed = ceil(Σ expected_loss / DOLLARS_PER_ADJUSTER)
  *   - baseline staffing assumption (ADJUSTER_LOAD_BASELINE_PER_ZIP3)
@@ -19,7 +19,7 @@
  * for this section.
  */
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
-import { zip3ToCounty } from '@/lib/regulatory/zip3_to_county';
+import { zip3CountyLabel } from '@/lib/regulatory/zip3_geo';
 import type { AdjusterLoadRollup as AdjusterLoadRollupData } from '@/lib/reconciler/adjuster_load';
 import {
   ADJUSTER_LOAD_DOLLARS_PER_ADJUSTER,
@@ -75,7 +75,7 @@ export function AdjusterLoadRollup({ rollup }: Props) {
 
       {rollup.rows.length === 0 ? (
         <p className="text-xs text-zinc-500">
-          No flagged policies have a matching cohort prior — adjuster-load
+          No flagged policies have a matching cohort prior. Adjuster-load
           rollup is empty until the Portfolio MIP cache is refreshed.
         </p>
       ) : (
@@ -99,7 +99,7 @@ export function AdjusterLoadRollup({ rollup }: Props) {
               >
                 <td className="p-1.5 font-mono">
                   {r.zip3}{' '}
-                  <span className="text-zinc-500">· {zip3ToCounty(r.zip3)}</span>
+                  <span className="text-zinc-500">· {zip3CountyLabel(r.zip3)}</span>
                 </td>
                 <td className="p-1.5 text-right tabular-nums">
                   {r.policy_count}

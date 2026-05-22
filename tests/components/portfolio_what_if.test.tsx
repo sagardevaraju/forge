@@ -154,7 +154,8 @@ describe('PortfolioWhatIfShell', () => {
 
     await waitFor(() => expect(screen.getByText(/\$47\.8M/)).toBeInTheDocument());
     // New capital_used / budget pair should render.
-    expect(screen.getByText(/93\.5M.*120\.0M/)).toBeInTheDocument();
+    expect(screen.getByText(/\$93\.5M/)).toBeInTheDocument();
+    expect(screen.getByText(/of \$120\.0M capital budget/)).toBeInTheDocument();
   });
 
   test('ExecCard deltas show the change vs baseline after a commit', async () => {
@@ -239,12 +240,14 @@ describe('PortfolioWhatIfShell', () => {
 
     await waitFor(() => expect(screen.getByText(/\$47\.8M/)).toBeInTheDocument());
 
-    const resetBtn = screen.getByRole('button', { name: /reset to baseline/i });
+    const resetBtn = screen.getByRole('button', { name: /^reset$/i });
     fireEvent.click(resetBtn);
 
     // Objective + capital pair return to the initial values.
     expect(screen.getByText(/\$44\.5M/)).toBeInTheDocument();
-    expect(screen.getByText(/89\.2M.*100\.0M/)).toBeInTheDocument();
+    // Task P2.20 — ratio card now stacks value + caption ("of $100.0M capital budget").
+    expect(screen.getByText(/\$89\.2M/)).toBeInTheDocument();
+    expect(screen.getByText(/of \$100\.0M capital budget/)).toBeInTheDocument();
     // The capital slider returns to the initial budget.
     expect(screen.getAllByRole('slider')[0]).toHaveAttribute('aria-valuenow', '100000000');
     // Delta line disappears once we are back to baseline.
@@ -291,6 +294,8 @@ describe('PortfolioWhatIfShell', () => {
     expect(err.textContent).toMatch(/solver crashed/i);
     // Original numbers still visible.
     expect(screen.getByText(/\$44\.5M/)).toBeInTheDocument();
-    expect(screen.getByText(/89\.2M.*100\.0M/)).toBeInTheDocument();
+    // Task P2.20 — ratio card now stacks value + caption ("of $100.0M capital budget").
+    expect(screen.getByText(/\$89\.2M/)).toBeInTheDocument();
+    expect(screen.getByText(/of \$100\.0M capital budget/)).toBeInTheDocument();
   });
 });

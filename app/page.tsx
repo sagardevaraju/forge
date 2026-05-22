@@ -4,11 +4,16 @@
  *
  *   - Book TIV / Policies        → SYNTHETIC_SCAFFOLD (seeded book)
  *   - Projected cession spend    → MODEL_OUTPUT       (Portfolio MIP artifact)
- *   - Open advisories            → LIVE_FEED          (NHC cone tool)
+ *   - Open advisories            → LIVE_FEED only when the NHC cone tool
+ *                                  actually returned live data; when the
+ *                                  tool falls back to its mock cone the
+ *                                  card downgrades to SYNTHETIC_SCAFFOLD so
+ *                                  the badge never claims a live feed over
+ *                                  mock data.
  *
  * The previous version hardcoded the latter two to 0 while tagging them
  * Live/Model. They now read from the cached MIP artifact and the NHC cone
- * tool respectively, so the badges no longer lie.
+ * tool respectively, and the tier reflects the cone's actual `source`.
  *
  * `force-dynamic` is preserved so Vercel does not ISR-cache stale book stats.
  */
@@ -26,12 +31,20 @@ export const dynamic = 'force-dynamic';
 // operator sees one click in.
 const DEMO_STORM_ID = 'AL092024';
 
-async function countOpenAdvisories(): Promise<number> {
+/**
+ * Count open advisories AND report whether the cone came from the live NHC
+ * feed or the tool's mock fallback — the caller uses `source` to pick an
+ * honest trust tier (a `LIVE_FEED` badge over mock data is a lie).
+ */
+async function countOpenAdvisories(): Promise<{
+  count: number;
+  source: 'live' | 'mock';
+}> {
   try {
     const cone = await fetchNhcCone.handler({ storm_id: DEMO_STORM_ID });
-    return cone ? 1 : 0;
+    return { count: cone ? 1 : 0, source: cone?.source ?? 'mock' };
   } catch {
-    return 0;
+    return { count: 0, source: 'mock' };
   }
 }
 
@@ -53,7 +66,11 @@ export default async function Landing() {
         value={`$${(projectedCessionSpend / 1e6).toFixed(1)}M`}
         tier={optimization ? 'MODEL_OUTPUT' : 'SYNTHETIC_SCAFFOLD'}
       />
-      <ExecCard label="Open advisories" value={`${openAdvisories}`} tier="LIVE_FEED" />
+      <ExecCard
+        label="Open advisories"
+        value={`${openAdvisories.count}`}
+        tier={openAdvisories.source === 'live' ? 'LIVE_FEED' : 'SYNTHETIC_SCAFFOLD'}
+      />
     </div>
   );
 }

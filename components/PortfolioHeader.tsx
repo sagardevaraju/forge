@@ -125,7 +125,7 @@ function formatRolLayers(layers: { type: string; rol: number; attachment?: numbe
     .join(' · ');
 }
 
-function renderCard(kind: PersonaCardKind, p: Props) {
+function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default' = 'default') {
   switch (kind) {
     case 'total_tiv':
       return (
@@ -134,6 +134,7 @@ function renderCard(kind: PersonaCardKind, p: Props) {
           label="Total TIV"
           value={$B(p.totalTiv)}
           tier="SYNTHETIC_SCAFFOLD"
+          variant={variant}
         />
       );
     case 'expected_margin':
@@ -144,6 +145,7 @@ function renderCard(kind: PersonaCardKind, p: Props) {
           value={$M(p.objective)}
           delta={p.objectiveDelta}
           tier="RECOMMENDATION"
+          variant={variant}
         />
       );
     case 'tvar_99':
@@ -176,16 +178,15 @@ function renderCard(kind: PersonaCardKind, p: Props) {
       // artifact), not retained-tail capital actually consumed against the
       // budget. The budget is the constraint cap on retained tail; ceded
       // cohorts (cede_xs) contribute ~0 to retained tail, so retained ≪ gross
-      // VaR-99 is expected. We label this honestly: "Tail exposure / capital
-      // budget" makes the relationship clear so a value of $78M / $31M no
-      // longer reads as a constraint violation. A future task may surface
-      // a separate "Retained tail vs budget" card sourced from
-      // book_totals.tvar_99 once the Python-track TVaR-99 lands.
+      // VaR-99 is expected. The label says "Tail exposure" and the budget
+      // half lives in the caption — so the headline number gets its own line
+      // and never has to wrap mid-figure on narrow grid cells.
       return (
         <ExecCard
           key={kind}
-          label="Tail exposure / capital budget"
-          value={`${$M(p.capitalUsed)} / ${$M(p.capitalBudget)}`}
+          label="Tail exposure"
+          value={$M(p.capitalUsed)}
+          caption={`of ${$M(p.capitalBudget)} capital budget`}
           delta={p.capitalUsedDelta}
           tier="MODEL_OUTPUT"
         />
@@ -194,8 +195,9 @@ function renderCard(kind: PersonaCardKind, p: Props) {
       return (
         <ExecCard
           key={kind}
-          label="Non-renew used / cap"
-          value={`${$M(p.nonrenewUsedTiv)} / ${$M(p.nonrenewCapTiv)}`}
+          label="Non-renew used"
+          value={$M(p.nonrenewUsedTiv)}
+          caption={`of ${$M(p.nonrenewCapTiv)} cap`}
           delta={p.nonrenewUsedDelta}
           tier="RECOMMENDATION"
         />
@@ -204,8 +206,9 @@ function renderCard(kind: PersonaCardKind, p: Props) {
       return (
         <ExecCard
           key={kind}
-          label="Cession spend / budget"
-          value={`${$M(p.cessionSpend)} / ${$M(p.cessionBudget)}`}
+          label="Cession spend"
+          value={$M(p.cessionSpend)}
+          caption={`of ${$M(p.cessionBudget)} budget`}
           tier="MODEL_OUTPUT"
         />
       );
@@ -262,26 +265,40 @@ function renderCard(kind: PersonaCardKind, p: Props) {
 export function PortfolioHeader(p: Props) {
   const startLabel = p.horizonStart ? formatHorizonLabel(p.horizonStart) : null;
   const endLabel = p.horizonEnd ? formatHorizonLabel(p.horizonEnd) : null;
-  const treatyYear = startLabel && endLabel ? `${startLabel} – ${endLabel}` : null;
+  const treatyYear = startLabel && endLabel ? `${startLabel} to ${endLabel}` : null;
   const persona = p.persona ?? 'cat-ops';
   const config = getPersonaConfig(persona);
-  // The cat-ops baseline renders exactly 5 cards in a single row. Other
-  // personas may surface 6 cards (one extra); the grid spans 5 columns on
-  // wide screens so the overflow wraps cleanly onto a second row rather
-  // than crushing the headline strip.
+  // Task P2.20 — equal-width tile grid. The earlier `col-span-2` hero made
+  // the first card visually dominate the rest and forced the remaining
+  // columns to ~165px in a side-rail layout, which is what caused the
+  // ratio-card labels and split values to wrap into a staircase. Now every
+  // card claims the same column, ratios use the new `caption` slot, and the
+  // strip fits whether the persona surfaces 5 or 6 cards.
+  const colsClass =
+    config.cards.length >= 6
+      ? 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3'
+      : 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3';
   return (
-    <div className="mb-4" data-testid="portfolio-header" data-persona={persona}>
+    <section
+      className="mb-6"
+      data-testid="portfolio-header"
+      data-persona={persona}
+      aria-label="Portfolio headline"
+    >
       {treatyYear && (
         <p
-          className="text-xs uppercase tracking-wider text-neutral-500 mb-2"
+          className="text-[10.5px] uppercase tracking-[0.14em] font-medium text-zinc-500 mb-3"
           aria-label="Treaty horizon"
         >
-          Treaty year: {treatyYear}
+          <span className="text-zinc-400 mr-1.5">●</span>
+          Treaty year · {treatyYear}
         </p>
       )}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        {config.cards.map((kind) => renderCard(kind, p))}
+      <div className={colsClass}>
+        {config.cards.map((kind) => (
+          <div key={kind}>{renderCard(kind, p, 'default')}</div>
+        ))}
       </div>
-    </div>
+    </section>
   );
 }

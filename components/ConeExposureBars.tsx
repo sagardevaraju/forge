@@ -12,14 +12,15 @@
  * the business-relevant exposure figure for an event-day reinsurance call.
  *
  * Trust tier is `MODEL_OUTPUT`: the bar values are not raw feed data — they
- * are computed via point-in-polygon against a feed-derived cone plus a
- * lookup-table-derived centroid. Provenance footnote credits all three.
+ * are computed via point-in-polygon against a feed-derived cone plus a ZIP3
+ * centroid derived from the live policy book (mean lat/lon per ZIP3, via
+ * `lib/db/zip3_centroids.ts`). Provenance footnote credits all sources.
  *
  * Edge cases:
  *   - `cone == null`         → "select a storm" placeholder.
  *   - `cohorts == []`        → "no book loaded" placeholder.
- *   - centroid missing (zip3 → null) → cohort is dropped from BOTH sides of
- *     the ratio, not silently bucketed as outside. Reported in the
+ *   - ZIP3 absent from the centroid map → cohort is dropped from BOTH sides
+ *     of the ratio, not silently bucketed as outside. Reported in the
  *     classification breakdown (`unmapped_count`) so we don't fake totals.
  *   - boundary case          → ray-casting is deterministic, so any cohort
  *     centroid that lands exactly on the cone boundary lands consistently
@@ -27,7 +28,6 @@
  */
 import { useMemo } from 'react';
 import { pointInPolygon, type PolygonLike } from '@/lib/geo/point_in_polygon';
-import { zip3Centroid } from '@/lib/geo/zip3_centroids';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
 import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
 
@@ -46,6 +46,12 @@ interface Props {
    * upstream; the parent passes that through so the badge stays accurate.
    */
   coneSource?: 'live' | 'mock';
+  /**
+   * Per-ZIP3 `[lon, lat]` centroids — the mean of each ZIP3's policy
+   * coordinates, computed from the live book by `lib/db/zip3_centroids.ts`.
+   * A ZIP3 absent here is counted as `unmapped` rather than guessed.
+   */
+  zip3Centroids: Record<string, [number, number]>;
 }
 
 interface Classification {
@@ -61,6 +67,7 @@ interface Classification {
 export function classifyCohorts(
   cone: PolygonLike | null | undefined,
   cohorts: ConeExposureCohort[],
+  zip3Centroids: Record<string, [number, number]>,
 ): Classification {
   let inside_tiv = 0;
   let outside_tiv = 0;
@@ -71,14 +78,14 @@ export function classifyCohorts(
   let total_count = 0;
 
   for (const c of cohorts) {
-    const centroid = zip3Centroid(c.zip3);
+    const centroid = zip3Centroids[c.zip3];
     if (!centroid) {
       unmapped_count += c.policy_count;
       continue;
     }
     total_tiv += c.total_tiv;
     total_count += c.policy_count;
-    const inside = pointInPolygon([centroid.lon, centroid.lat], cone);
+    const inside = pointInPolygon(centroid, cone);
     if (inside) {
       inside_tiv += c.total_tiv;
       inside_count += c.policy_count;
@@ -112,8 +119,16 @@ function fmtPct(part: number, total: number): string {
   return `${((100 * part) / total).toFixed(0)}%`;
 }
 
-export function ConeExposureBars({ cone, cohorts, coneSource }: Props) {
-  const c = useMemo(() => classifyCohorts(cone, cohorts), [cone, cohorts]);
+export function ConeExposureBars({
+  cone,
+  cohorts,
+  coneSource,
+  zip3Centroids,
+}: Props) {
+  const c = useMemo(
+    () => classifyCohorts(cone, cohorts, zip3Centroids),
+    [cone, cohorts, zip3Centroids],
+  );
 
   // Empty-state branches surface a placeholder rather than a 0 / 0 = NaN bar.
   if (!cone) {
@@ -132,7 +147,7 @@ export function ConeExposureBars({ cone, cohorts, coneSource }: Props) {
         data-testid="cone-exposure-empty-cohorts"
         className="border rounded p-3 text-xs text-zinc-500 bg-white"
       >
-        No book loaded — cone exposure unavailable.
+        No book loaded. Cone exposure unavailable.
       </div>
     );
   }
@@ -204,7 +219,7 @@ export function ConeExposureBars({ cone, cohorts, coneSource }: Props) {
       )}
 
       <ProvenanceFootnote
-        source={`NHC cone (${coneSource ?? 'mock'}) · policy book · ZIP3 centroid table`}
+        source={`NHC cone (${coneSource ?? 'mock'}) · policy book · ZIP3 centroids (mean of policy lat/lon)`}
         method="point_in_polygon@v1 · ray-casting against cone outer ring"
       />
     </div>

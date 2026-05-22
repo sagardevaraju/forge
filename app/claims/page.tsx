@@ -200,12 +200,12 @@ export default async function ClaimsPage() {
           <>
             Loss column reads each cohort&apos;s <code>loss_p50</code> from the
             Portfolio MIP artifact and splits it proportionally to policy TIV
-            ({noticeCohortHits}/{top.length} policies matched a cohort; the rest
+            ({noticeCohortHits}/{top.length} policies matched a cohort, the rest
             display &quot;—&quot;).
           </>
         ) : (
           <>
-            Portfolio MIP artifact is missing — run{' '}
+            Portfolio MIP artifact is missing. Run{' '}
             <code>python -m scripts.precompute_portfolio_optimization</code> to
             populate the loss column.
           </>
@@ -214,12 +214,12 @@ export default async function ClaimsPage() {
       <AdjusterLoadRollup rollup={adjusterLoad} />
       <ClaimsTable policies={top} priorSeverities={priorSeverities} />
       <ProvenanceFootnote
-        source="policies table (synthetic seed) filtered by FL coastal ZIP3 × {AE, VE}; loss column from artifacts/portfolio_optimization.json"
-        method="Portfolio MIP cohort prior (HAZUS-derived loss_p50, proportional TIV split per policy); adjuster-load rollup derived via lib/reconciler/adjuster_load.ts (ceil(sum cohort loss / $250K)); see docs/methodology.md"
+        source="policies table (synthetic seed) filtered by FL coastal ZIP3 × {AE, VE}. Loss column from artifacts/portfolio_optimization.json"
+        method="Portfolio MIP cohort prior (HAZUS-derived loss_p50, proportional TIV split per policy). Adjuster-load rollup derived via lib/reconciler/adjuster_load.ts (ceil(sum cohort loss / $250K)). See docs/methodology.md"
         confidence={
           haveArtifact
             ? `MIP status ${optimization!.status} · ${noticeCohortHits}/${top.length} policies matched a cohort · adjuster-load: ${adjusterLoad.total_needed} needed across ${adjusterLoad.rows.length} ZIP3(s)`
-            : 'optimization cache missing — loss column unavailable'
+            : 'optimization cache missing. Loss column unavailable'
         }
       />
     </div>

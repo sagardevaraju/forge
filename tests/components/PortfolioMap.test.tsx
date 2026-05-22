@@ -17,8 +17,24 @@ vi.mock('react-map-gl/maplibre', () => ({
   default: ({ children }: { children?: React.ReactNode }) => (
     <div data-testid="map-base-stub">{children}</div>
   ),
-  Source: ({ children }: { children?: React.ReactNode }) => (
-    <div data-testid="map-source">{children}</div>
+  // The Source mock exposes its `id` and serialized `data` so tests can
+  // assert on the GeoJSON wired into a layer without a WebGL canvas.
+  Source: ({
+    id,
+    data,
+    children,
+  }: {
+    id?: string;
+    data?: unknown;
+    children?: React.ReactNode;
+  }) => (
+    <div
+      data-testid="map-source"
+      data-source-id={id}
+      data-geojson={data ? JSON.stringify(data) : ''}
+    >
+      {children}
+    </div>
   ),
   Layer: () => <div data-testid="map-layer" />,
 }));
@@ -166,11 +182,11 @@ describe('PortfolioMap', () => {
 
     const legend = screen.getByTestId('portfolio-legend');
     // Two unique ZIP3s in the input.
-    expect(legend).toHaveTextContent('ZIP3s: 2');
+    expect(legend.textContent).toMatch(/ZIP3s\s*2/);
     // 5 + 3 + 10 = 18 policies.
-    expect(legend).toHaveTextContent('Total policies: 18');
+    expect(legend.textContent).toMatch(/Policies\s*18/);
     // 1.0M + 0.5M + 2.5M = 4.0M total TIV.
-    expect(legend).toHaveTextContent('Total TIV: $4,000,000');
+    expect(legend.textContent).toMatch(/Total TIV\s*\$4,000,000/);
   });
 
   test('renders the map shell so child Source/Layer mount under it', () => {
@@ -203,6 +219,39 @@ describe('PortfolioMap', () => {
     expect(
       swatches.some((s) => s.getAttribute('aria-label')?.toLowerCase().includes('retain')),
     ).toBe(true);
+  });
+
+  // Bubbles must be plotted at the policy-derived centroids passed in via
+  // `zip3Centroids` — not a hand-coded table. Guards the /portfolio vs
+  // /simulate map agreement fixed by lib/db/zip3_centroids.ts.
+  test('plots ZIP3 bubbles at the provided policy-derived centroids', () => {
+    const cohorts: Cohort[] = [
+      cohort({ id: '330_wood_frame_q0', zip3: '330', total_tiv: 3_500_000, policy_count: 5 }),
+      cohort({ id: '770_wood_frame_q2', zip3: '770', total_tiv: 500_000, policy_count: 10 }),
+    ];
+    // [lon, lat] as zip3Centroids() returns them from the live policy book.
+    const centroids: Record<string, [number, number]> = {
+      '330': [-82.04, 27.91],
+      '770': [-95.13, 29.48],
+    };
+    render(<PortfolioMap cohorts={cohorts} zip3Centroids={centroids} />);
+
+    const zipSource = screen
+      .getAllByTestId('map-source')
+      .find((el) => el.getAttribute('data-source-id') === 'zip3-points');
+    expect(zipSource).toBeDefined();
+
+    const fc = JSON.parse(zipSource!.getAttribute('data-geojson') ?? '{}') as {
+      features: {
+        properties: { zip3: string };
+        geometry: { coordinates: [number, number] };
+      }[];
+    };
+    const byZip: Record<string, [number, number]> = {};
+    for (const f of fc.features) byZip[f.properties.zip3] = f.geometry.coordinates;
+
+    expect(byZip['330']).toEqual([-82.04, 27.91]);
+    expect(byZip['770']).toEqual([-95.13, 29.48]);
   });
 
   // Task P2.20 — single-pane is the default mount mode so the existing page

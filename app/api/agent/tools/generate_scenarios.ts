@@ -156,12 +156,12 @@ function mockResult(storm_id: string, n: number): GenerateScenariosResult {
 export const generateScenarios = {
   name: 'generate_scenarios',
   description:
-    'Generate ensemble hurricane scenarios (path + peak_wind + surge_grid + prob) for a storm_id. n defaults to 100 and is capped at 10000. Also returns `cone_envelope` { t24h, t48h, t72h } — convex-hull polygons of perturbed-track points at each forecast horizon, used to visualise GEFS uncertainty.',
+    'Generate ensemble hurricane scenarios (path, peak_wind, surge_grid, prob) for a storm_id. n defaults to 100 and is capped at 10000. Also returns `cone_envelope` { t24h, t48h, t72h }, which holds convex-hull polygons of perturbed-track points at each forecast horizon, used to visualise GEFS uncertainty.',
   parameters: {
     type: 'object' as const,
     properties: {
       storm_id: { type: 'string', description: 'NHC storm identifier (e.g., AL092024)' },
-      n: { type: 'number', description: 'Number of scenarios; default 100, max 10000.' },
+      n: { type: 'number', description: 'Number of scenarios. Default 100, max 10000.' },
     },
     required: ['storm_id'],
   },
