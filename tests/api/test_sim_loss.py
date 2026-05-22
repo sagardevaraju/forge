@@ -31,14 +31,17 @@ TAMPA_POLY = {
 }
 
 
-def _footprint(peril="hail", intensity="severe"):
-    return {
+def _footprint(peril="hail", intensity="severe", severity=None):
+    fp = {
         "peril": peril,
         "intensity": intensity,
         "geometry": TAMPA_POLY,
         "effective_date": "2026-05-18",
         "metadata": {"drawn_by": "test", "drawn_at": "2026-05-18T00:00:00Z"},
     }
+    if severity is not None:
+        fp["severity"] = severity
+    return fp
 
 
 def test_generate_returns_cohort_x_K_array():
@@ -122,3 +125,55 @@ def test_intensity_clipped_at_one():
     # catastrophic x1.45 then clipped at 1.0.
     # Per-policy loss ≤ TIV × 1.0 → cohort totals bounded.
     assert (result["losses"] <= 500_000 + 800_000).all()
+
+
+def test_damage_multiplier_continuous_anchors():
+    from api_py.sim_loss import _damage_multiplier
+    assert _damage_multiplier("earthquake", 6.0) == pytest.approx(0.55)
+    assert _damage_multiplier("earthquake", 7.0) == pytest.approx(1.0)
+    assert _damage_multiplier("earthquake", 8.0) == pytest.approx(1.45)
+    assert _damage_multiplier("hail", 25) == pytest.approx(0.55)
+    assert _damage_multiplier("hail", 45) == pytest.approx(1.0)
+
+
+def test_damage_multiplier_clamps_low():
+    from api_py.sim_loss import _damage_multiplier
+    # Below-range inputs clamp at the 0.05 floor (matches TS damageMultiplier).
+    assert _damage_multiplier("earthquake", 1.0) == pytest.approx(0.05)
+    assert _damage_multiplier("hail", 0) == pytest.approx(0.05)
+
+
+def test_damage_multiplier_discrete():
+    from api_py.sim_loss import _damage_multiplier
+    assert _damage_multiplier("tornado", "ef0") == pytest.approx(0.325)
+    assert _damage_multiplier("tornado", "ef3") == pytest.approx(1.0)
+    assert _damage_multiplier("tornado", "ef5") == pytest.approx(1.45)
+    assert _damage_multiplier("winter", "extreme") == pytest.approx(1.90)
+    assert _damage_multiplier("flood", "major") == pytest.approx(1.45)
+
+
+def test_damage_multiplier_legacy_tier_fallback():
+    from api_py.sim_loss import _damage_multiplier
+    # Footprints stored before the per-peril scales carry a tier string.
+    assert _damage_multiplier("hail", "severe") == pytest.approx(1.0)
+    assert _damage_multiplier("tornado", "moderate") == pytest.approx(0.55)
+    assert _damage_multiplier("earthquake", "catastrophic") == pytest.approx(1.45)
+
+
+def test_generate_honours_severity():
+    # An EF5 tornado footprint produces strictly larger losses than EF0.
+    big = generate_sim_losses(
+        "1234567890123_abcdef02", _footprint(peril="tornado", severity="ef5"),
+        SAMPLE_POLICIES, cohort_keyer=lambda p: f"{p[5]}_{p[4]}", K=50)
+    small = generate_sim_losses(
+        "1234567890123_abcdef02", _footprint(peril="tornado", severity="ef0"),
+        SAMPLE_POLICIES, cohort_keyer=lambda p: f"{p[5]}_{p[4]}", K=50)
+    assert big["losses"].sum() > small["losses"].sum()
+
+
+def test_generate_legacy_intensity_fallback():
+    # A footprint with only `intensity` (no `severity`) still produces losses.
+    result = generate_sim_losses(
+        "1234567890123_abcdef03", _footprint(peril="hail", intensity="severe"),
+        SAMPLE_POLICIES, cohort_keyer=lambda p: f"{p[5]}_{p[4]}", K=50)
+    assert result["losses"].sum() > 0

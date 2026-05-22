@@ -9,7 +9,7 @@ column-wise onto the hurricane scenario set for joint TVaR-99.
 Severity model:
     loss(policy, draw) = TIV
                        × damage_ratio[peril][build_type]
-                       × intensity_scale[intensity]
+                       × damage_multiplier[peril][severity]
                        × decay(distance_to_reference)
                        × (1 + β · ε_draw)
 
@@ -40,6 +40,38 @@ _HAZUS_MATRIX: dict[str, dict[str, float]] = {
 }
 _INTENSITY_SCALE = {"moderate": 0.55, "severe": 1.0, "catastrophic": 1.45}
 
+# Mirrors lib/sim/severity.ts PERIL_SCALES discrete multipliers — keep in sync.
+# Modelling parameters anchored to the INTENSITY_SCALE spine (research.md).
+_PERIL_LEVEL_MULT: dict[str, dict[str, float]] = {
+    "tornado":  {"ef0": 0.325, "ef1": 0.55, "ef2": 0.775, "ef3": 1.0, "ef4": 1.225, "ef5": 1.45},
+    "flood":    {"minor": 0.55, "moderate": 1.0, "major": 1.45},
+    "wildfire": {"low": 0.55, "moderate": 1.0, "high": 1.45},
+    "winter":   {"limited": 0.325, "minor": 0.55, "moderate": 1.0, "major": 1.45, "extreme": 1.90},
+}
+
+
+def _damage_multiplier(peril: str, severity) -> float:
+    """Per-peril damage multiplier — mirrors lib/sim/severity.ts damageMultiplier.
+
+    `severity` is a number for continuous perils (earthquake Mw, hail stone
+    diameter mm) and a level id for discrete perils. A legacy tier string
+    ('moderate' | 'severe' | 'catastrophic') falls back to _INTENSITY_SCALE so
+    footprints stored before the per-peril scales still resolve. Numbers trace
+    to research.md (S2c earthquake, S3b hail, S1c/S6b discrete)."""
+    if peril == "earthquake":
+        if isinstance(severity, (int, float)) and not isinstance(severity, bool):
+            return max(0.05, 1.0 + 0.45 * (severity - 7.0))
+        return _INTENSITY_SCALE.get(severity, 1.0)
+    if peril == "hail":
+        if isinstance(severity, (int, float)) and not isinstance(severity, bool):
+            return max(0.05, 0.55 + 0.0225 * (severity - 25.0))
+        return _INTENSITY_SCALE.get(severity, 1.0)
+    levels = _PERIL_LEVEL_MULT.get(peril, {})
+    if severity in levels:
+        return levels[severity]
+    return _INTENSITY_SCALE.get(severity, 1.0)
+
+
 # K=1000 perturbation σ — see spec §5.
 _PERTURB: dict[str, dict[str, float]] = {
     "tornado":    {"vertex_deg": 0.005, "width_pct": 0.15},
@@ -56,10 +88,10 @@ def perturbation_sigmas(peril: str) -> dict[str, float]:
     return dict(_PERTURB.get(peril, {"vertex_deg": 0.003}))
 
 
-def _damage_ratio(peril: str, build_type: str, intensity: str) -> float:
+def _damage_ratio(peril: str, build_type: str, severity) -> float:
     row = _HAZUS_MATRIX.get(build_type) or _HAZUS_MATRIX["wood_frame"]
     base = row.get(peril, 0.0)
-    scaled = base * _INTENSITY_SCALE.get(intensity, 1.0)
+    scaled = base * _damage_multiplier(peril, severity)
     return max(0.0, min(1.0, scaled))
 
 
@@ -175,6 +207,8 @@ def generate_sim_losses(
     rng = np.random.default_rng(_sim_seed(sim_id))
     peril = footprint["peril"]
     intensity = footprint["intensity"]
+    # Canonical per-peril severity; legacy footprints carry only `intensity`.
+    severity = footprint.get("severity", intensity)
     perturb = perturbation_sigmas(peril)
     base_geom = footprint["geometry"]
     inner_radius_km = 0.0
@@ -214,7 +248,7 @@ def generate_sim_losses(
     lats_arr = np.array([p[1] for p in policy_list], dtype=float)
     tivs_arr = np.array([p[3] for p in policy_list], dtype=float)
     cohort_row_arr = np.array([key_to_idx[cohort_keyer(p)] for p in policy_list], dtype=int)
-    dr_arr = np.array([_damage_ratio(peril, p[4], intensity) for p in policy_list], dtype=float)
+    dr_arr = np.array([_damage_ratio(peril, p[4], severity) for p in policy_list], dtype=float)
     # Effective peril width used for decay (zero → uniform 1.0 for all perils except tornado/hail-with-core).
     _decay_width = width_km or inner_radius_km
 
