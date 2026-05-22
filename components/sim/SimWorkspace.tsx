@@ -6,7 +6,7 @@
  * Column 2 (flex):   SimMap (owns TerraDraw lifecycle)
  * Column 3 (280 px): ImpactPanel + PromoteButton
  *
- * State: activePeril, intensity, effectiveDate, currentFootprint, simId.
+ * State: activePeril, severity, effectiveDate, currentFootprint, simId.
  * On every valid footprint, POSTs /api/sim → stores sim_id + preview impact.
  * v1 always creates a new draft on "Save" (no PATCH flow yet).
  *
@@ -19,8 +19,8 @@ import { PerilPicker } from './PerilPicker';
 import { SimLibrary, type SimListItem } from './SimLibrary';
 import { ImpactPanel } from './ImpactPanel';
 import { PromoteButton } from './PromoteButton';
-import type { SimulationFootprint } from '@/lib/sim/footprint';
-import type { Peril, Intensity } from '@/lib/sim/severity';
+import { rebuildFootprint, type SimulationFootprint } from '@/lib/sim/footprint';
+import { PERIL_SCALES, severityLabel, type Peril, type SeverityValue } from '@/lib/sim/severity';
 import type { PreviewImpact } from '@/lib/sim/preview';
 
 export interface SimWorkspaceProps {
@@ -35,8 +35,9 @@ export function SimWorkspace(props: SimWorkspaceProps) {
   const search = useSearchParams();
 
   const [peril, setPeril] = useState<Peril>(props.initialFootprint?.peril ?? 'hail');
-  const [intensity, setIntensity] = useState<Intensity>(
-    props.initialFootprint?.intensity ?? 'severe',
+  const [severity, setSeverity] = useState<SeverityValue>(
+    props.initialFootprint?.severity ??
+      PERIL_SCALES[props.initialFootprint?.peril ?? 'hail'].default,
   );
   const [effectiveDate, setEffectiveDate] = useState(
     props.initialFootprint?.effective_date ?? new Date().toISOString().slice(0, 10),
@@ -53,10 +54,18 @@ export function SimWorkspace(props: SimWorkspaceProps) {
       : false,
   );
 
+  // Switching peril resets severity to the new peril's scale default — a Mw
+  // value is meaningless as a hail diameter, etc.
+  function changePeril(p: Peril) {
+    setPeril(p);
+    setSeverity(PERIL_SCALES[p].default);
+  }
+
   // Honour ?peril= query param (set by PerilPicker links in other pages).
   useEffect(() => {
     const p = search.get('peril') as Peril | null;
-    if (p) setPeril(p);
+    if (p) changePeril(p);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
   async function onFootprintChange(fp: SimulationFootprint) {
@@ -66,7 +75,7 @@ export function SimWorkspace(props: SimWorkspaceProps) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        name: `${fp.peril}, ${fp.intensity} — ${new Date().toISOString().slice(0, 10)}`,
+        name: `${fp.peril}, ${severityLabel(fp.peril, fp.severity)} - ${new Date().toISOString().slice(0, 10)}`,
         footprint: fp,
       }),
     });
@@ -86,11 +95,28 @@ export function SimWorkspace(props: SimWorkspaceProps) {
     router.replace(`/simulate?id=${body.sim_id}`);
   }
 
+  // Re-apply severity / effective-date changes to an existing footprint.
+  // Without this the SeverityStrip silently does nothing once a footprint is
+  // drawn — the impact panel and the stored sim stay frozen at draw-time
+  // values. For earthquake this resizes the Mw-derived circle; for tornado it
+  // re-buffers the swath to the new EF width.
+  useEffect(() => {
+    if (!currentFootprint) return;
+    if (
+      currentFootprint.severity === severity &&
+      currentFootprint.effective_date === effectiveDate
+    ) {
+      return;
+    }
+    onFootprintChange(rebuildFootprint(currentFootprint, severity, effectiveDate));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [severity, effectiveDate]);
+
   return (
     <div className="grid grid-cols-[200px_1fr_280px] gap-0 h-[calc(100vh-3rem)]">
       {/* Left column: peril picker + saved sims library */}
       <aside className="border-r border-slate-800 p-3 overflow-y-auto">
-        <PerilPicker active={peril} onChange={setPeril} />
+        <PerilPicker active={peril} onChange={changePeril} />
         <SimLibrary
           sims={sims}
           activeId={simId}
@@ -102,8 +128,8 @@ export function SimWorkspace(props: SimWorkspaceProps) {
       <main className="relative">
         <SimMap
           peril={peril}
-          intensity={intensity}
-          onIntensityChange={setIntensity}
+          severity={severity}
+          onSeverityChange={setSeverity}
           effectiveDate={effectiveDate}
           onEffectiveDateChange={setEffectiveDate}
           onFootprintChange={onFootprintChange}
