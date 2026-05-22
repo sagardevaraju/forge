@@ -11,6 +11,7 @@
  * v1 always creates a new draft on "Save" (no PATCH flow yet).
  *
  * Task 20: SimMap + SimWorkspace.
+ * Task 8 / peril-intensity-scales: per-peril severity state.
  */
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -34,10 +35,10 @@ export function SimWorkspace(props: SimWorkspaceProps) {
   const router = useRouter();
   const search = useSearchParams();
 
-  const [peril, setPeril] = useState<Peril>(props.initialFootprint?.peril ?? 'hail');
+  const initialPeril: Peril = props.initialFootprint?.peril ?? 'hail';
+  const [peril, setPeril] = useState<Peril>(initialPeril);
   const [severity, setSeverity] = useState<SeverityValue>(
-    props.initialFootprint?.severity ??
-      PERIL_SCALES[props.initialFootprint?.peril ?? 'hail'].default,
+    props.initialFootprint?.severity ?? PERIL_SCALES[initialPeril].default,
   );
   const [effectiveDate, setEffectiveDate] = useState(
     props.initialFootprint?.effective_date ?? new Date().toISOString().slice(0, 10),
@@ -102,6 +103,10 @@ export function SimWorkspace(props: SimWorkspaceProps) {
   // re-buffers the swath to the new EF width.
   useEffect(() => {
     if (!currentFootprint) return;
+    // A peril switch resets `severity` (changePeril), firing this effect while
+    // `currentFootprint` is still the previous peril's footprint. Never rebuild
+    // a footprint through a different peril's geometry path.
+    if (currentFootprint.peril !== peril) return;
     if (
       currentFootprint.severity === severity &&
       currentFootprint.effective_date === effectiveDate
