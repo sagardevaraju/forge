@@ -18,6 +18,7 @@ describe('previewImpact', () => {
     const result = previewImpact(POLICIES, {
       peril: 'hail',
       intensity: 'severe',
+      severity: 45,
       geometry: TAMPA_POLY,
       effective_date: '2026-05-18',
       metadata: { drawn_by: 'x', drawn_at: '2026-05-18T00:00:00Z' },
@@ -32,6 +33,7 @@ describe('previewImpact', () => {
     const result = previewImpact([], {
       peril: 'hail',
       intensity: 'severe',
+      severity: 45,
       geometry: TAMPA_POLY,
       effective_date: '2026-05-18',
       metadata: { drawn_by: 'x', drawn_at: '2026-05-18T00:00:00Z' },
@@ -43,6 +45,7 @@ describe('previewImpact', () => {
     const result = previewImpact(POLICIES, {
       peril: 'hail',
       intensity: 'severe',
+      severity: 45,
       geometry: TAMPA_POLY,
       effective_date: '2026-05-18',
       metadata: { drawn_by: 'x', drawn_at: '2026-05-18T00:00:00Z' },
@@ -50,5 +53,20 @@ describe('previewImpact', () => {
     for (let i = 1; i < result.top_cohorts.length; i++) {
       expect(result.top_cohorts[i].loss).toBeLessThanOrEqual(result.top_cohorts[i - 1].loss);
     }
+  });
+});
+
+describe('previewImpact honours per-peril severity', () => {
+  test('a higher hail diameter produces a larger gross loss', () => {
+    const base = {
+      peril: 'hail' as const,
+      intensity: 'severe' as const,
+      geometry: TAMPA_POLY,
+      effective_date: '2026-05-18',
+      metadata: { drawn_by: 'x', drawn_at: '2026-05-18T00:00:00Z' },
+    };
+    const small = previewImpact(POLICIES, { ...base, severity: 25 });
+    const large = previewImpact(POLICIES, { ...base, severity: 90 });
+    expect(large.gross_loss_estimate).toBeGreaterThan(small.gross_loss_estimate);
   });
 });

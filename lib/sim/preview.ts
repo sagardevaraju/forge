@@ -63,7 +63,7 @@ export function previewImpact(
     if (!booleanPointInPolygon(point([p.lon, p.lat]), geomFeature)) {
       continue;
     }
-    const dr = damageRatio(footprint.peril, p.build_type, footprint.intensity);
+    const dr = damageRatio(footprint.peril, p.build_type, footprint.severity ?? footprint.intensity);
     const loss = p.tiv * dr;
     policiesIn += 1;
     tivIn += p.tiv;
