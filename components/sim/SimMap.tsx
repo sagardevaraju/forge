@@ -5,7 +5,7 @@
  *
  * Mounts a react-map-gl/maplibre Map, attaches a TerraDraw instance (via the
  * terra-draw-maplibre-gl-adapter), and resets it whenever the active peril
- * changes. The DrawToolbar + IntensityStrip overlays are positioned absolutely
+ * changes. The DrawToolbar + SeverityStrip overlays are positioned absolutely
  * inside the map container.
  *
  * Policy overlay: when showPolicies is true, fetches /api/policies/points once
@@ -28,11 +28,12 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
 import { point } from '@turf/helpers';
 import { createDrawForPeril, PERIL_MODES } from '@/lib/sim/draw';
-import { buildFootprint, bufferTornadoSwath } from '@/lib/sim/footprint';
+import { buildFootprint, bufferTornadoSwath, earthquakeFootprintGeometry } from '@/lib/sim/footprint';
+import { SeverityStrip } from './SeverityStrip';
+import { tornadoWidthM } from '@/lib/sim/severity';
 import { DrawToolbar } from './DrawToolbar';
-import { IntensityStrip } from './IntensityStrip';
 import type { SimulationFootprint } from '@/lib/sim/footprint';
-import type { Peril, Intensity } from '@/lib/sim/severity';
+import type { Peril, SeverityValue } from '@/lib/sim/severity';
 import type { TerraDraw } from 'terra-draw';
 
 // terra-draw's FeatureId is string | number (not re-exported from the main barrel).
@@ -49,8 +50,8 @@ interface PolicyPoint {
 
 export interface SimMapProps {
   peril: Peril;
-  intensity: Intensity;
-  onIntensityChange: (i: Intensity) => void;
+  severity: SeverityValue;
+  onSeverityChange: (s: SeverityValue) => void;
   effectiveDate: string;
   onEffectiveDateChange: (d: string) => void;
   onFootprintChange: (fp: SimulationFootprint) => void;
@@ -154,33 +155,43 @@ export function SimMap(props: SimMapProps) {
     draw.setMode(PERIL_MODES[props.peril]);
 
     draw.on('finish', (id: FeatureId) => {
-      const { peril, intensity, effectiveDate, onFootprintChange } = propsRef.current;
+      const { peril, severity, effectiveDate, onFootprintChange } = propsRef.current;
       const snapshot = draw.getSnapshot();
       const feat = snapshot.find((f) => f.id === id);
       if (!feat) return;
 
-      const width_m = peril === 'tornado' ? 200 : undefined;
-
       let geometry: GeoJSON.Polygon;
       let centerline: GeoJSON.LineString | undefined;
+      let width_m: number | undefined;
+      let epicenter: GeoJSON.Point | undefined;
+      let mmi_radii_km: Record<string, number> | undefined;
 
       if (feat.geometry.type === 'LineString' && peril === 'tornado') {
         centerline = feat.geometry as GeoJSON.LineString;
-        geometry = bufferTornadoSwath(centerline, width_m!);
+        width_m = tornadoWidthM(severity);
+        geometry = bufferTornadoSwath(centerline, width_m);
+      } else if (feat.geometry.type === 'Point' && peril === 'earthquake') {
+        // Earthquake: the drawn feature is the epicenter; the footprint is the
+        // MMI-VI damage circle derived from the epicenter + the Mw severity.
+        epicenter = feat.geometry as GeoJSON.Point;
+        const eq = earthquakeFootprintGeometry(epicenter, severity as number);
+        geometry = eq.geometry;
+        mmi_radii_km = eq.mmi_radii_km;
       } else if (feat.geometry.type === 'Polygon') {
         geometry = feat.geometry as GeoJSON.Polygon;
       } else {
-        // earthquake point handling deferred to v1.1
         return;
       }
 
       onFootprintChange(
         buildFootprint({
           peril,
-          intensity,
+          severity,
           geometry,
           centerline,
           width_m,
+          epicenter,
+          mmi_radii_km,
           effective_date: effectiveDate,
           drawn_by: 'operator',
         }),
@@ -248,6 +259,30 @@ export function SimMap(props: SimMapProps) {
             </Source>
           </>
         )}
+        {/* Earthquake footprint — the MMI-VI damage circle. terra-draw only
+            renders the epicenter point, so the derived circle is drawn here. */}
+        {props.currentFootprint?.peril === 'earthquake' && (
+          <Source
+            id="eq-footprint"
+            type="geojson"
+            data={{
+              type: 'Feature',
+              geometry: props.currentFootprint.geometry,
+              properties: {},
+            } satisfies GeoJSON.Feature}
+          >
+            <Layer
+              id="eq-footprint-fill"
+              type="fill"
+              paint={{ 'fill-color': '#fbbf24', 'fill-opacity': 0.12 }}
+            />
+            <Layer
+              id="eq-footprint-line"
+              type="line"
+              paint={{ 'line-color': '#fbbf24', 'line-width': 2, 'line-opacity': 0.85 }}
+            />
+          </Source>
+        )}
       </Map>
       <DrawToolbar
         peril={props.peril}
@@ -256,9 +291,10 @@ export function SimMap(props: SimMapProps) {
         showPolicies={showPolicies}
         onTogglePolicies={() => setShowPolicies((v) => !v)}
       />
-      <IntensityStrip
-        intensity={props.intensity}
-        onChange={props.onIntensityChange}
+      <SeverityStrip
+        peril={props.peril}
+        severity={props.severity}
+        onSeverityChange={props.onSeverityChange}
         effectiveDate={props.effectiveDate}
         onDateChange={props.onEffectiveDateChange}
       />
