@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
 import { isValidSimId } from '@/lib/sim/id';
+import { parseFootprint } from '@/lib/sim/footprint';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,7 +31,7 @@ export async function GET(
     name: String(row.name),
     peril: String(row.peril),
     intensity: String(row.intensity),
-    footprint: JSON.parse(String(row.footprint)),
+    footprint: parseFootprint(JSON.parse(String(row.footprint))),
     effective_date: String(row.effective_date),
     drawn_by: String(row.drawn_by),
     drawn_at: String(row.drawn_at),

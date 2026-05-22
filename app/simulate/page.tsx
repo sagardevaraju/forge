@@ -7,7 +7,7 @@
  */
 import { db } from '@/lib/db/client';
 import { SimWorkspace } from '@/components/sim/SimWorkspace';
-import type { SimulationFootprint } from '@/lib/sim/footprint';
+import { parseFootprint, type SimulationFootprint } from '@/lib/sim/footprint';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +29,7 @@ export default async function SimulatePage({ searchParams }: { searchParams: Pro
   let initialFootprint: SimulationFootprint | null = null;
   if (id) {
     const r = await db.execute({ sql: 'SELECT footprint FROM simulations WHERE id = ?', args: [id] });
-    if (r.rows[0]) initialFootprint = JSON.parse(String(r.rows[0].footprint));
+    if (r.rows[0]) initialFootprint = parseFootprint(JSON.parse(String(r.rows[0].footprint)));
   }
 
   return (

@@ -10,6 +10,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db/client';
 import { newSimId } from '@/lib/sim/id';
 import { validateFootprint, type SimulationFootprint } from '@/lib/sim/footprint';
+import { legacyTier } from '@/lib/sim/severity';
 import { previewImpact, type Policy } from '@/lib/sim/preview';
 
 export const runtime = 'nodejs';
@@ -70,13 +71,16 @@ export async function POST(req: Request): Promise<Response> {
     return NextResponse.json({ error: v.reason }, { status: 400 });
   }
 
+  // The intensity column is now a derived legacy tier, not an operator input.
+  const intensityTier = legacyTier(fp.peril, fp.severity);
+
   const id = newSimId();
   const now = new Date().toISOString();
   await db.execute({
     sql: `INSERT INTO simulations
           (id, name, peril, intensity, footprint, effective_date, drawn_by, drawn_at, promoted, retired)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
-    args: [id, name, fp.peril, fp.intensity, JSON.stringify(fp), fp.effective_date,
+    args: [id, name, fp.peril, intensityTier, JSON.stringify(fp), fp.effective_date,
            fp.metadata.drawn_by, now],
   });
 

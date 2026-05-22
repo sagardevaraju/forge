@@ -57,4 +57,25 @@ describe('GET /api/sim/[id]', () => {
     const res = await GET_BY_ID(new Request('http://localhost'), { params: Promise.resolve({ id: '0000000000000_deadbeef' }) });
     expect(res.status).toBe(404);
   });
+
+  test('normalises a stored footprint so it carries a severity', async () => {
+    const create = await POST(await jsonRequest({
+      name: 'Severity read test',
+      footprint: {
+        peril: 'hail',
+        intensity: 'severe',
+        severity: 60,
+        geometry: { type: 'Polygon', coordinates: [[[-82.5,27.5],[-82,27.5],[-82,28],[-82.5,28],[-82.5,27.5]]] },
+        effective_date: '2026-05-22',
+        metadata: { drawn_by: 'tester', drawn_at: '2026-05-22T00:00:00Z' },
+      },
+    }));
+    const { sim_id } = await create.json();
+    const res = await GET_BY_ID(new Request('http://localhost'), {
+      params: Promise.resolve({ id: sim_id }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.footprint.severity).toBe(60);
+  });
 });
