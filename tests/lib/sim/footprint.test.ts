@@ -4,15 +4,21 @@ import {
   buildFootprint,
   bufferTornadoSwath,
   validateFootprint,
-  type SimulationFootprint,
+  mmiRadiusKm,
+  earthquakeFootprintGeometry,
+  rebuildFootprint,
 } from '@/lib/sim/footprint';
+import { tornadoWidthM } from '@/lib/sim/severity';
+
+const SQUARE: GeoJSON.Polygon = {
+  type: 'Polygon',
+  coordinates: [[[-82, 27], [-81, 27], [-81, 28], [-82, 28], [-82, 27]]],
+};
+const EPICENTER: GeoJSON.Point = { type: 'Point', coordinates: [-82, 27.5] };
 
 describe('bufferTornadoSwath', () => {
-  test('buffers a polyline to a polygon of width_m on each side', () => {
-    const line: GeoJSON.LineString = {
-      type: 'LineString',
-      coordinates: [[-82, 27], [-82, 28]],
-    };
+  test('buffers a polyline into a polygon', () => {
+    const line: GeoJSON.LineString = { type: 'LineString', coordinates: [[-82, 27], [-82, 28]] };
     const poly = bufferTornadoSwath(line, 200);
     expect(poly.type).toBe('Polygon');
     expect(poly.coordinates[0].length).toBeGreaterThan(3);
@@ -20,45 +26,121 @@ describe('bufferTornadoSwath', () => {
 });
 
 describe('buildFootprint', () => {
-  test('hail polygon: passes through geometry, attaches metadata', () => {
+  test('hail polygon: stores severity, derives the legacy intensity tier', () => {
     const fp = buildFootprint({
       peril: 'hail',
-      intensity: 'severe',
-      geometry: {
-        type: 'Polygon',
-        coordinates: [[[-82, 27], [-81, 27], [-81, 28], [-82, 28], [-82, 27]]],
-      },
-      effective_date: '2026-05-18',
+      severity: 45,
+      geometry: SQUARE,
+      effective_date: '2026-05-22',
       drawn_by: 'operator',
     });
-    expect(fp.peril).toBe('hail');
-    expect(fp.geometry.type).toBe('Polygon');
+    expect(fp.severity).toBe(45);
+    expect(fp.intensity).toBe('severe'); // 45 mm -> multiplier 1.0 -> severe
     expect(fp.metadata.drawn_by).toBe('operator');
     expect(fp.metadata.drawn_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
+  test('tornado: an EF0 severity derives the moderate tier', () => {
+    const fp = buildFootprint({
+      peril: 'tornado',
+      severity: 'ef0',
+      geometry: SQUARE,
+      effective_date: '2026-05-22',
+      drawn_by: 'operator',
+    });
+    expect(fp.intensity).toBe('moderate'); // ef0 -> 0.325 -> moderate
+  });
 });
 
-describe('validateFootprint', () => {
-  test('rejects polygon with fewer than 4 ring vertices (degenerate)', () => {
-    const fp: SimulationFootprint = {
-      peril: 'flood',
-      intensity: 'severe',
-      geometry: { type: 'Polygon', coordinates: [[[0,0],[1,0],[0,0]]] } as any,
-      effective_date: '2026-05-18',
-      metadata: { drawn_by: 'x', drawn_at: '2026-05-18T00:00:00Z' },
-    };
-    const result = validateFootprint(fp);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toMatch(/ring/i);
+describe('mmiRadiusKm', () => {
+  test('inverts Bakun-Wentworth: M7.0 reaches MMI VI at ~120 km', () => {
+    expect(mmiRadiusKm(7.0, 6)).toBeCloseTo(119.9, 1);
   });
-  test('accepts a valid polygon', () => {
-    const fp: SimulationFootprint = {
-      peril: 'flood',
-      intensity: 'severe',
-      geometry: { type: 'Polygon', coordinates: [[[-82,27],[-81,27],[-81,28],[-82,28],[-82,27]]] },
-      effective_date: '2026-05-18',
-      metadata: { drawn_by: 'x', drawn_at: '2026-05-18T00:00:00Z' },
+  test('clamps to 0 when the magnitude never reaches the intensity', () => {
+    expect(mmiRadiusKm(6.0, 8)).toBe(0);
+  });
+  test('radius grows with magnitude for a fixed MMI', () => {
+    expect(mmiRadiusKm(8.0, 6)).toBeGreaterThan(mmiRadiusKm(6.0, 6));
+  });
+});
+
+describe('earthquakeFootprintGeometry', () => {
+  test('produces a circular Polygon for a given moment magnitude', () => {
+    const eq = earthquakeFootprintGeometry(EPICENTER, 7.0);
+    expect(eq.geometry.type).toBe('Polygon');
+    expect(eq.mmi_radii_km['6']).toBeGreaterThan(0);
+  });
+  test('a larger magnitude yields a larger damage circle', () => {
+    const small = earthquakeFootprintGeometry(EPICENTER, 6.0);
+    const big = earthquakeFootprintGeometry(EPICENTER, 8.0);
+    expect(big.mmi_radii_km['6']).toBeGreaterThan(small.mmi_radii_km['6']);
+  });
+  test('a sub-damage magnitude (Mw 5.0) still yields a constructible Polygon', () => {
+    const eq = earthquakeFootprintGeometry(EPICENTER, 5.0);
+    expect(eq.geometry.type).toBe('Polygon');
+    expect(eq.geometry.coordinates[0].length).toBeGreaterThan(3);
+  });
+});
+
+describe('rebuildFootprint', () => {
+  test('a polygon peril keeps geometry, swaps severity + date', () => {
+    const original = buildFootprint({
+      peril: 'flood', severity: 'minor', geometry: SQUARE,
+      effective_date: '2026-05-18', drawn_by: 'operator',
+    });
+    const rebuilt = rebuildFootprint(original, 'major', '2026-06-01');
+    expect(rebuilt.severity).toBe('major');
+    expect(rebuilt.intensity).toBe('catastrophic');
+    expect(rebuilt.effective_date).toBe('2026-06-01');
+    expect(rebuilt.geometry).toEqual(original.geometry);
+  });
+  test('earthquake recomputes the damage circle when magnitude changes', () => {
+    const eq = earthquakeFootprintGeometry(EPICENTER, 6.0);
+    const original = buildFootprint({
+      peril: 'earthquake', severity: 6.0, geometry: eq.geometry,
+      epicenter: EPICENTER, mmi_radii_km: eq.mmi_radii_km,
+      effective_date: '2026-05-18', drawn_by: 'operator',
+    });
+    const rebuilt = rebuildFootprint(original, 8.0, '2026-05-18');
+    expect(rebuilt.severity).toBe(8.0);
+    expect(rebuilt.mmi_radii_km!['6']).toBeGreaterThan(original.mmi_radii_km!['6']);
+  });
+  test('tornado re-buffers the centerline to the new EF width', () => {
+    const centerline: GeoJSON.LineString = {
+      type: 'LineString', coordinates: [[-82, 27], [-82, 28]],
     };
+    const original = buildFootprint({
+      peril: 'tornado', severity: 'ef1',
+      geometry: bufferTornadoSwath(centerline, tornadoWidthM('ef1')),
+      centerline, width_m: tornadoWidthM('ef1'),
+      effective_date: '2026-05-18', drawn_by: 'operator',
+    });
+    const rebuilt = rebuildFootprint(original, 'ef5', '2026-05-18');
+    expect(rebuilt.severity).toBe('ef5');
+    expect(rebuilt.width_m).toBe(550);
+    const span = (g: GeoJSON.Polygon) => {
+      const xs = g.coordinates[0].map((c) => c[0]);
+      return Math.max(...xs) - Math.min(...xs);
+    };
+    expect(span(rebuilt.geometry)).toBeGreaterThan(span(original.geometry));
+  });
+});
+
+describe('validateFootprint (geometry)', () => {
+  test('rejects a degenerate polygon ring', () => {
+    const fp = buildFootprint({
+      peril: 'flood', severity: 'minor',
+      geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [0, 0]]] } as unknown as GeoJSON.Polygon,
+      effective_date: '2026-05-22', drawn_by: 'x',
+    });
+    const r = validateFootprint(fp);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/ring/i);
+  });
+  test('accepts a valid polygon footprint', () => {
+    const fp = buildFootprint({
+      peril: 'flood', severity: 'moderate', geometry: SQUARE,
+      effective_date: '2026-05-22', drawn_by: 'x',
+    });
     expect(validateFootprint(fp).ok).toBe(true);
   });
 });
