@@ -20,7 +20,9 @@ import { lineString, point } from '@turf/helpers';
 import { isValidSimId } from './id';
 import {
   legacyTier,
+  severityFromLegacy,
   tornadoWidthM,
+  PERIL_SCALES,
   type Peril,
   type Intensity,
   type SeverityValue,
@@ -254,7 +256,33 @@ export function validateFootprint(fp: SimulationFootprint): ValidationResult {
   if (fp.peril === 'earthquake' && !fp.epicenter) {
     return { ok: false, reason: 'Earthquake footprint requires epicenter' };
   }
+  if (fp.severity === undefined || fp.severity === null) {
+    return { ok: false, reason: 'Footprint requires a severity value' };
+  }
+  const scale = PERIL_SCALES[fp.peril];
+  if (scale.kind === 'continuous') {
+    if (typeof fp.severity !== 'number' || fp.severity < scale.min || fp.severity > scale.max) {
+      return {
+        ok: false,
+        reason: `severity must be a number in [${scale.min}, ${scale.max}] for ${fp.peril}`,
+      };
+    }
+  } else if (!scale.levels.some((l) => l.id === fp.severity)) {
+    return { ok: false, reason: `severity '${fp.severity}' is not a valid ${fp.peril} scale level` };
+  }
   return { ok: true };
+}
+
+/**
+ * Normalise a footprint read back from storage. Footprints persisted before
+ * the per-peril severity scales carry `intensity` but no `severity`; derive a
+ * representative `severity` for them via severityFromLegacy(). Modern
+ * footprints already carry `severity` and pass through unchanged. Apply at
+ * every stored-footprint read site (see spec "Backward compatibility").
+ */
+export function parseFootprint(raw: SimulationFootprint): SimulationFootprint {
+  if (raw.severity !== undefined && raw.severity !== null) return raw;
+  return { ...raw, severity: severityFromLegacy(raw.peril, raw.intensity) };
 }
 
 export { isValidSimId };

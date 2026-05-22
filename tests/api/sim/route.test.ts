@@ -19,6 +19,7 @@ describe('POST /api/sim', () => {
       footprint: {
         peril: 'hail',
         intensity: 'severe',
+        severity: 45,
         geometry: { type: 'Polygon', coordinates: [[[-82.5,27.5],[-82,27.5],[-82,28],[-82.5,28],[-82.5,27.5]]] },
         effective_date: '2026-05-18',
         metadata: { drawn_by: 'tester', drawn_at: '2026-05-18T00:00:00Z' },

@@ -4,9 +4,11 @@ import {
   buildFootprint,
   bufferTornadoSwath,
   validateFootprint,
+  parseFootprint,
   mmiRadiusKm,
   earthquakeFootprintGeometry,
   rebuildFootprint,
+  type SimulationFootprint,
 } from '@/lib/sim/footprint';
 import { tornadoWidthM } from '@/lib/sim/severity';
 
@@ -125,7 +127,7 @@ describe('rebuildFootprint', () => {
   });
 });
 
-describe('validateFootprint (geometry)', () => {
+describe('validateFootprint', () => {
   test('rejects a degenerate polygon ring', () => {
     const fp = buildFootprint({
       peril: 'flood', severity: 'minor',
@@ -136,11 +138,66 @@ describe('validateFootprint (geometry)', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toMatch(/ring/i);
   });
-  test('accepts a valid polygon footprint', () => {
+  test('rejects a footprint with no severity', () => {
+    const fp = buildFootprint({
+      peril: 'flood', severity: 'minor', geometry: SQUARE,
+      effective_date: '2026-05-22', drawn_by: 'x',
+    });
+    delete (fp as { severity?: unknown }).severity;
+    const r = validateFootprint(fp);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/severity/i);
+  });
+  test('rejects a severity outside a continuous scale range', () => {
+    const fp = buildFootprint({
+      peril: 'earthquake', severity: 7.0, geometry: SQUARE, epicenter: EPICENTER,
+      effective_date: '2026-05-22', drawn_by: 'x',
+    });
+    fp.severity = 12.0; // above the Mw 9.0 max
+    const r = validateFootprint(fp);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toMatch(/severity/i);
+  });
+  test('rejects a severity that is not a valid discrete level', () => {
+    const fp = buildFootprint({
+      peril: 'tornado', severity: 'ef3', geometry: SQUARE,
+      centerline: { type: 'LineString', coordinates: [[-82, 27], [-82, 28]] },
+      width_m: 240, effective_date: '2026-05-22', drawn_by: 'x',
+    });
+    fp.severity = 'ef9';
+    expect(validateFootprint(fp).ok).toBe(false);
+  });
+  test('accepts a valid footprint', () => {
     const fp = buildFootprint({
       peril: 'flood', severity: 'moderate', geometry: SQUARE,
       effective_date: '2026-05-22', drawn_by: 'x',
     });
     expect(validateFootprint(fp).ok).toBe(true);
+  });
+});
+
+describe('parseFootprint', () => {
+  test('passes a modern footprint (with severity) through unchanged', () => {
+    const fp = buildFootprint({
+      peril: 'hail', severity: 45, geometry: SQUARE,
+      effective_date: '2026-05-22', drawn_by: 'x',
+    });
+    expect(parseFootprint(fp).severity).toBe(45);
+  });
+  test('derives a continuous severity for a legacy footprint (intensity only)', () => {
+    const legacy = {
+      peril: 'hail', intensity: 'severe', geometry: SQUARE,
+      effective_date: '2026-05-22',
+      metadata: { drawn_by: 'x', drawn_at: '2026-05-22T00:00:00Z' },
+    } as unknown as SimulationFootprint;
+    expect(parseFootprint(legacy).severity).toBe(45); // severe hail -> 45 mm
+  });
+  test('derives a discrete severity for a legacy tornado footprint', () => {
+    const legacy = {
+      peril: 'tornado', intensity: 'catastrophic', geometry: SQUARE,
+      effective_date: '2026-05-22',
+      metadata: { drawn_by: 'x', drawn_at: '2026-05-22T00:00:00Z' },
+    } as unknown as SimulationFootprint;
+    expect(parseFootprint(legacy).severity).toBe('ef5');
   });
 });
