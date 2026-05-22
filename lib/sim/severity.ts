@@ -48,6 +48,106 @@ export function intensityScale(intensity: Intensity): number {
   return INTENSITY_SCALE[intensity];
 }
 
+/** A severity value: a number for continuous scales, a level id for discrete. */
+export type SeverityValue = number | string;
+
+/** One step of a discrete per-peril scale. */
+export interface ScaleLevel {
+  id: string;          // stable id stored on the footprint, e.g. 'ef3'
+  label: string;       // UI label, e.g. 'EF3'
+  sublabel?: string;   // e.g. '136-165 mph' (tornado wind band — cited)
+  multiplier: number;  // damage multiplier (modelling parameter)
+  width_m?: number;    // tornado only — swath corridor width (Brooks 2004)
+}
+
+/**
+ * A per-peril severity scale — either a continuous slider or a discrete
+ * picker. Numbers and citations live in research.md.
+ */
+export type PerilScale =
+  | {
+      kind: 'continuous';
+      unit: string;
+      min: number;
+      max: number;
+      step: number;
+      default: number;
+      multiplier(v: number): number; // damage multiplier (modelling parameter)
+      label(v: number): string;      // UI label, e.g. 'M7.2'
+    }
+  | { kind: 'discrete'; levels: ScaleLevel[]; default: string };
+
+/**
+ * Per-peril severity scales. Geometry-driving numbers (EF wind bands, Brooks
+ * 2004 path widths) are empirically cited; the damage multipliers are
+ * modelling parameters anchored to the INTENSITY_SCALE spine. See research.md.
+ */
+export const PERIL_SCALES: Record<Peril, PerilScale> = {
+  earthquake: {
+    kind: 'continuous',
+    unit: 'Mw',
+    min: 5.0,
+    max: 9.0,
+    step: 0.1,
+    default: 7.0,
+    // Modelling parameter — anchored M6/M7/M8 -> 0.55/1.0/1.45 (research.md S2c).
+    multiplier: (v) => Math.max(0.05, 1.0 + 0.45 * (v - 7.0)),
+    label: (v) => `M${v.toFixed(1)}`,
+  },
+  hail: {
+    kind: 'continuous',
+    unit: 'mm',
+    min: 10,
+    max: 120,
+    step: 5,
+    default: 45,
+    // Modelling parameter — anchored 25 mm -> 0.55, 45 mm -> 1.0 (research.md S3b).
+    multiplier: (v) => Math.max(0.05, 0.55 + 0.0225 * (v - 25)),
+    label: (v) => `${v} mm`,
+  },
+  tornado: {
+    kind: 'discrete',
+    default: 'ef3',
+    levels: [
+      { id: 'ef0', label: 'EF0', sublabel: '65-85 mph',   multiplier: 0.325, width_m: 30 },
+      { id: 'ef1', label: 'EF1', sublabel: '86-110 mph',  multiplier: 0.55,  width_m: 60 },
+      { id: 'ef2', label: 'EF2', sublabel: '111-135 mph', multiplier: 0.775, width_m: 120 },
+      { id: 'ef3', label: 'EF3', sublabel: '136-165 mph', multiplier: 1.0,   width_m: 240 },
+      { id: 'ef4', label: 'EF4', sublabel: '166-200 mph', multiplier: 1.225, width_m: 480 },
+      { id: 'ef5', label: 'EF5', sublabel: 'over 200 mph', multiplier: 1.45, width_m: 550 },
+    ],
+  },
+  flood: {
+    kind: 'discrete',
+    default: 'moderate',
+    levels: [
+      { id: 'minor',    label: 'Minor',    multiplier: 0.55 },
+      { id: 'moderate', label: 'Moderate', multiplier: 1.0 },
+      { id: 'major',    label: 'Major',    multiplier: 1.45 },
+    ],
+  },
+  wildfire: {
+    kind: 'discrete',
+    default: 'moderate',
+    levels: [
+      { id: 'low',      label: 'Low',      multiplier: 0.55 },
+      { id: 'moderate', label: 'Moderate', multiplier: 1.0 },
+      { id: 'high',     label: 'High',     multiplier: 1.45 },
+    ],
+  },
+  winter: {
+    kind: 'discrete',
+    default: 'moderate',
+    levels: [
+      { id: 'limited',  label: 'Limited',  multiplier: 0.325 },
+      { id: 'minor',    label: 'Minor',    multiplier: 0.55 },
+      { id: 'moderate', label: 'Moderate', multiplier: 1.0 },
+      { id: 'major',    label: 'Major',    multiplier: 1.45 },
+      { id: 'extreme',  label: 'Extreme',  multiplier: 1.90 },
+    ],
+  },
+};
+
 export function damageRatio(
   peril: Peril,
   buildType: BuildType | string,

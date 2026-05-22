@@ -3,6 +3,7 @@ import {
   damageRatio,
   intensityScale,
   PERILS,
+  PERIL_SCALES,
   type Peril,
   type Intensity,
 } from '@/lib/sim/severity';
@@ -38,5 +39,35 @@ describe('intensityScale', () => {
     expect(intensityScale('moderate' as Intensity)).toBe(0.55);
     expect(intensityScale('severe' as Intensity)).toBe(1.00);
     expect(intensityScale('catastrophic' as Intensity)).toBe(1.45);
+  });
+});
+
+describe('PERIL_SCALES', () => {
+  test('has an entry for every peril', () => {
+    for (const p of PERILS) expect(PERIL_SCALES[p]).toBeDefined();
+  });
+  test('earthquake and hail are continuous; the rest are discrete', () => {
+    expect(PERIL_SCALES.earthquake.kind).toBe('continuous');
+    expect(PERIL_SCALES.hail.kind).toBe('continuous');
+    for (const p of ['tornado', 'flood', 'wildfire', 'winter'] as const) {
+      expect(PERIL_SCALES[p].kind).toBe('discrete');
+    }
+  });
+  test('the earthquake slider spans Mw 5.0-9.0 with a 7.0 default', () => {
+    const s = PERIL_SCALES.earthquake;
+    if (s.kind !== 'continuous') throw new Error('expected continuous');
+    expect([s.min, s.max, s.step, s.default]).toEqual([5.0, 9.0, 0.1, 7.0]);
+  });
+  test('tornado has six EF levels, each carrying a Brooks-2004 width_m', () => {
+    const t = PERIL_SCALES.tornado;
+    if (t.kind !== 'discrete') throw new Error('expected discrete');
+    expect(t.levels.map((l) => l.id)).toEqual(['ef0', 'ef1', 'ef2', 'ef3', 'ef4', 'ef5']);
+    expect(t.levels.map((l) => l.width_m)).toEqual([30, 60, 120, 240, 480, 550]);
+    expect(t.default).toBe('ef3');
+  });
+  test('winter has the five WSSI loss-bearing categories', () => {
+    const w = PERIL_SCALES.winter;
+    if (w.kind !== 'discrete') throw new Error('expected discrete');
+    expect(w.levels.map((l) => l.id)).toEqual(['limited', 'minor', 'moderate', 'major', 'extreme']);
   });
 });
