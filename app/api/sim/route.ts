@@ -11,7 +11,8 @@ import { db } from '@/lib/db/client';
 import { newSimId } from '@/lib/sim/id';
 import { validateFootprint, type SimulationFootprint } from '@/lib/sim/footprint';
 import { legacyTier } from '@/lib/sim/severity';
-import { previewImpact, type Policy } from '@/lib/sim/preview';
+import { previewImpact } from '@/lib/sim/preview';
+import { loadBookPolicies } from '@/lib/sim/book';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,20 +20,6 @@ export const dynamic = 'force-dynamic';
 interface CreateBody {
   name?: string;
   footprint?: SimulationFootprint;
-}
-
-async function loadBookPolicies(): Promise<Policy[]> {
-  const r = await db.execute(
-    'SELECT id, lat, lon, tiv, build_type, zip3 FROM policies WHERE lat IS NOT NULL AND lon IS NOT NULL',
-  );
-  return r.rows.map((row) => ({
-    id: Number(row.id),
-    lat: Number(row.lat),
-    lon: Number(row.lon),
-    tiv: Number(row.tiv),
-    build_type: String(row.build_type ?? 'wood_frame'),
-    zip3: String(row.zip3),
-  }));
 }
 
 export async function GET(_req: Request): Promise<Response> {
