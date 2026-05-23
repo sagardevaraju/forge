@@ -198,7 +198,12 @@ describe('fetch_nws_alerts — live path', () => {
         { status: 200 },
       ),
     );
-    const out = await fetchNwsAlerts.handler({});
+    // Pass events: [] to bypass the DEFAULT_ACUTE_EVENTS whitelist — this
+    // test is about *parser* coverage (Polygon / MultiPolygon / null
+    // geometry / unknown category), not about which events the production
+    // page renders. Otherwise the Frost Advisory feature gets filtered out
+    // client-side and we can't assert the `other` category path.
+    const out = await fetchNwsAlerts.handler({ events: [] });
     expect(out.source).toBe('live');
     expect(out.alerts).toHaveLength(4); // the empty-event feature is dropped
     const byId = Object.fromEntries(out.alerts.map((a) => [a.id, a]));
@@ -219,7 +224,46 @@ describe('fetch_nws_alerts — live path', () => {
     expect(out.counts.other).toBe(1);
   });
 
-  test('URL builder includes status=actual, area, and every event', async () => {
+  test('default whitelist drops events outside DEFAULT_ACUTE_EVENTS (client-side filter)', async () => {
+    // Regression for the 2026-05-23 bug: NWS's /alerts/active treats `event`
+    // as a single-valued query param (last-value-wins), so the tool used to
+    // send 12 event= params and receive 0 features even on a day with 21
+    // active alerts in the queried area. The fix is to fetch the unfiltered
+    // active-alert feed and filter client-side here — this test locks that
+    // contract by feeding a mixed payload and asserting only whitelisted
+    // events survive.
+    delete process.env.FORGE_TOOLS_MODE;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          type: 'FeatureCollection',
+          features: [
+            // 3 whitelisted events that must pass through.
+            { type: 'Feature', geometry: null, properties: { id: 'a', event: 'Severe Thunderstorm Warning' } },
+            { type: 'Feature', geometry: null, properties: { id: 'b', event: 'Flash Flood Warning' } },
+            { type: 'Feature', geometry: null, properties: { id: 'c', event: 'Tornado Warning' } },
+            // 4 long-fuse / advisory events that must be filtered out.
+            { type: 'Feature', geometry: null, properties: { id: 'd', event: 'Special Weather Statement' } },
+            { type: 'Feature', geometry: null, properties: { id: 'e', event: 'Beach Hazards Statement' } },
+            { type: 'Feature', geometry: null, properties: { id: 'f', event: 'Flood Advisory' } },
+            { type: 'Feature', geometry: null, properties: { id: 'g', event: 'Frost Advisory' } },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const out = await fetchNwsAlerts.handler({});
+    expect(out.source).toBe('live');
+    expect(out.alerts.map((a) => a.id).sort()).toEqual(['a', 'b', 'c']);
+    expect(out.counts.total).toBe(3);
+  });
+
+  test('URL builder includes status=actual + area, and NEVER appends event= params', async () => {
+    // Regression: NWS treats multi-`event=` as last-value-wins (not OR), so
+    // appending the DEFAULT_ACUTE_EVENTS list as `event=` params caused the
+    // live feed to return 0 features for every realistic day. The fix moves
+    // the whitelist to client-side filtering — see the
+    // `default whitelist drops events outside DEFAULT_ACUTE_EVENTS` test.
     delete process.env.FORGE_TOOLS_MODE;
     let capturedUrl = '';
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
@@ -230,11 +274,7 @@ describe('fetch_nws_alerts — live path', () => {
     expect(capturedUrl).toContain('api.weather.gov/alerts/active');
     expect(capturedUrl).toContain('status=actual');
     expect(capturedUrl).toContain('area=FL');
-    // Every default event is appended; check a couple of representatives
-    // (URLSearchParams encodes spaces as `+`).
-    expect(capturedUrl).toContain('event=Tornado+Warning');
-    expect(capturedUrl).toContain('event=Flash+Flood+Warning');
-    expect(capturedUrl).toContain('event=Storm+Surge+Warning');
+    expect(capturedUrl).not.toContain('event=');
   });
 
   test('array state joins via comma in area= param', async () => {
@@ -259,17 +299,27 @@ describe('fetch_nws_alerts — live path', () => {
     expect(capturedUrl).not.toContain('area=');
   });
 
-  test('null state disables the area filter, custom events override defaults', async () => {
+  test('null state disables the area filter, custom events filter results client-side', async () => {
     delete process.env.FORGE_TOOLS_MODE;
     let capturedUrl = '';
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       capturedUrl = String(input);
-      return new Response(JSON.stringify({ features: [] }), { status: 200 });
+      return new Response(
+        JSON.stringify({
+          features: [
+            { type: 'Feature', geometry: null, properties: { id: 'tor', event: 'Tornado Warning' } },
+            { type: 'Feature', geometry: null, properties: { id: 'hur', event: 'Hurricane Warning' } },
+          ],
+        }),
+        { status: 200 },
+      );
     });
-    await fetchNwsAlerts.handler({ state: null, events: ['Tornado Warning'] });
+    const out = await fetchNwsAlerts.handler({ state: null, events: ['Tornado Warning'] });
     expect(capturedUrl).not.toContain('area=');
-    expect(capturedUrl).toContain('event=Tornado+Warning');
-    expect(capturedUrl).not.toContain('event=Hurricane');
+    // Event filter is applied client-side now (NWS multi-event is broken),
+    // so the URL must NOT carry event= params even when a filter is set.
+    expect(capturedUrl).not.toContain('event=');
+    expect(out.alerts.map((a) => a.id)).toEqual(['tor']);
   });
 
   test('empty events array disables event filter', async () => {

@@ -25,7 +25,13 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { PersonaToggleUrl } from './PersonaToggle';
 
-const PERSONA_AWARE_ROUTES = ['/portfolio', '/events'] as const;
+// Only `/portfolio` is genuinely persona-aware — the toggle there swaps
+// 5 ExecCards (margin ↔ TVaR-99, cession ↔ RoL-by-layer, etc.) and gates
+// the what-if rail. `/events` was previously listed but the toggle did
+// nothing measurable on that page — see the deleted EventsPersonaScope.
+// New persona-aware routes go here only when they materially reshape per
+// persona, not just because they "could".
+const PERSONA_AWARE_ROUTES = ['/portfolio'] as const;
 
 const ROUTES: { href: string; label: string }[] = [
   { href: '/portfolio', label: 'Portfolio' },

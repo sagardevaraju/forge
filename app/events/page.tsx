@@ -23,7 +23,6 @@
  * hoist the storm context up to the layout so only one banner is shown.
  */
 import { EventConsole } from '@/components/EventConsole';
-import { EventsPersonaScope } from '@/components/EventsPersonaScope';
 import { ThreatBanner } from '@/components/grammar/ThreatBanner';
 import { fetchNhcCone } from '@/app/api/agent/tools/fetch_nhc_cone';
 import {
@@ -141,6 +140,10 @@ export default async function EventsPage() {
 
   const alerts = alertsRes?.alerts ?? [];
   const alertCounts = alertsRes?.counts;
+  // Surface the NWS fetch timestamp on the legend so operators see how
+  // stale the alert layer is. The legend's refresh button calls
+  // router.refresh() to re-run this server component end-to-end.
+  const alertsFetchedAt = alertsRes?.fetched_at ?? null;
 
   return (
     <>
@@ -157,17 +160,19 @@ export default async function EventsPage() {
         />
       )}
       {/*
-        Task P2.18 — Persona toggle + quick-links band above the console.
-        Lens state is URL-backed (`?persona=<id>`) so a shared link with
-        `?persona=reinsurance` lands a treaty lead on this view with the
-        /treaty drill-in already one click away.
+        Note: the persona-scoped quick-links band (Task P2.18 / EventsPersonaScope)
+        was removed because it never reshaped this page — it just toggled
+        a single hyperlink that the main nav already exposes. The toggle
+        itself was also dropped from `/events` in `LayoutSubBanner.tsx`'s
+        PERSONA_AWARE_ROUTES; it still lives on `/portfolio` where it
+        meaningfully swaps ExecCards.
       */}
-      <EventsPersonaScope />
       <EventConsole
         cone={coneWithEnvelope}
         fires={fires}
         cohorts={cohorts}
         alerts={alerts}
+        alertsFetchedAt={alertsFetchedAt}
         zip3Centroids={zip3CentroidMap}
       />
     </>
