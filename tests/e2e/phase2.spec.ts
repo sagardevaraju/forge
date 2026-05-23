@@ -23,7 +23,7 @@
  *     status line to appear.
  *   - All test ids referenced here already exist in the production
  *     components (PortfolioWhatIfShell, PortfolioPersonaScope, ClaimsTable,
- *     CalibrationView, TreatyLadder, AgentChat, EventsPersonaScope).
+ *     CalibrationView, TreatyLadder, AgentChat).
  */
 import { test, expect } from '@playwright/test';
 
@@ -109,13 +109,14 @@ test('phase 2 — persona switch through all 5 modes on /portfolio', async ({ pa
   await expect(page).toHaveURL(/[?&]persona=academic/);
   await expect(page.getByText('SAA optimality gap')).toBeVisible();
 
-  // Persona scope band on /events also respects the URL param.
-  await page.goto(`${BASE}/events?persona=actuary`);
-  const eventsScope = page.getByTestId('events-persona-scope');
-  await expect(eventsScope).toBeVisible();
-  await expect(eventsScope).toHaveAttribute('data-persona', 'actuary');
-  // Actuary's quick-link is /calibration.
-  await expect(eventsScope.getByRole('link', { name: 'Calibration' })).toBeVisible();
+  // Phase 3 cleanup removed the `/events` persona surface — the toggle
+  // there only swapped a single drill-in link without reshaping the page,
+  // so EventsPersonaScope was deleted and `/events` was dropped from
+  // PERSONA_AWARE_ROUTES. The persona toggle is now only visible on
+  // `/portfolio` where it materially swaps ExecCards.
+  await page.goto(`${BASE}/events`);
+  const eventsToggle = page.getByRole('group', { name: 'persona-toggle' });
+  await expect(eventsToggle).toHaveCount(0);
 });
 
 test('phase 2 — /calibration renders reliability diagrams', async ({ page }) => {

@@ -35,7 +35,17 @@ import {
 
 interface Props {
   totalTiv: number;
-  objective: number;
+  /**
+   * Solver status from the artifact. When this is `"Infeasible"`, the
+   * margin / tail / non-renew / cession cards downgrade their trust
+   * tier to `SYNTHETIC_SCAFFOLD` and the headline numbers render as
+   * "—" — pre-2026 the cards wore `RECOMMENDATION` over a contaminated
+   * Infeasible solve, which is the same class of bug the CLAUDE.md
+   * "Data integrity" rule names (a `LIVE_FEED` badge over mock data).
+   */
+  status?: string;
+  /** Objective is null when status === 'Infeasible' — see PortfolioOptimization.objective. */
+  objective: number | null;
   capitalUsed: number;
   capitalBudget: number;
   nonrenewUsedTiv: number;
@@ -95,6 +105,15 @@ interface Props {
 
 const $M = (n: number) => `$${(n / 1e6).toFixed(1)}M`;
 const $B = (n: number) => `$${(n / 1e9).toFixed(2)}B`;
+/**
+ * Money formatter that downgrades to an em-dash when the solver could
+ * not produce a meaningful value (e.g. Infeasible status → objective is
+ * null). We refuse to render a numeric fallback (`$0.0M`, `$NaN`) over a
+ * broken solve — that's how the pre-2026 page was dressing up a
+ * contaminated `pulp.value(prob.objective)` reading as a "recommendation".
+ */
+const $Mor = (n: number | null | undefined): string =>
+  n === null || n === undefined || !Number.isFinite(n) ? '—' : $M(n);
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -126,6 +145,14 @@ function formatRolLayers(layers: { type: string; rol: number; attachment?: numbe
 }
 
 function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default' = 'default') {
+  // Infeasible status → every recommendation-grade card downgrades to
+  // SYNTHETIC_SCAFFOLD and renders "—". The expected-margin card pre-2026
+  // wore a RECOMMENDATION badge over a contaminated `pulp.value` reading
+  // when the solve was infeasible — exactly the false-confidence the
+  // CLAUDE.md "Data integrity" rule forbids ("a LIVE_FEED badge over
+  // mock data is a bug"). The PortfolioInfeasibleBanner below the card
+  // strip explains what happened and how to fix it.
+  const infeasible = p.status === 'Infeasible';
   switch (kind) {
     case 'total_tiv':
       return (
@@ -142,26 +169,28 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
         <ExecCard
           key={kind}
           label="Expected margin"
-          value={$M(p.objective)}
-          delta={p.objectiveDelta}
-          tier="RECOMMENDATION"
+          value={$Mor(p.objective)}
+          delta={infeasible ? undefined : p.objectiveDelta}
+          tier={infeasible ? 'SYNTHETIC_SCAFFOLD' : 'RECOMMENDATION'}
           variant={variant}
         />
       );
     case 'tvar_99':
-      // The portfolio artifact still ships `book_totals.loss_p99` (VaR-99)
-      // rather than a proper TVaR-99 — the P2.10 swap (mean of top 1% of
-      // scenarios) lives on the Python-track branch that hasn't merged into
-      // this branch yet. We surface VaR-99 here under a "(proxy)" label so
-      // the Actuary lens isn't lying about which tail statistic this is.
-      // Once P2.10 merges, this case can be relabeled "TVaR-99" and read
-      // from `book_totals.tvar_99` instead.
+      // Schema v5 (2026-05-23): we now have a real book-level TVaR-99 on
+      // the artifact (`book_totals.tvar_99`, mean of top 1 % of merged
+      // book-loss scenarios) rather than the v4 VaR-99 proxy. The card's
+      // value below is `capitalUsed`, which `PortfolioWhatIfShell`
+      // resolves to `retained_tvar_99` when present (realized retained
+      // tail under the chosen action mix). That's the right measure for
+      // the Actuary lens — it's coherent (TVaR is sub-additive; VaR
+      // isn't) and it reflects the optimizer's portfolio shape, not the
+      // gross book.
       return (
         <ExecCard
           key={kind}
-          label="VaR-99 (proxy)"
-          value={$M(p.capitalUsed)}
-          tier="MODEL_OUTPUT"
+          label="Retained TVaR-99"
+          value={$Mor(infeasible ? null : p.capitalUsed)}
+          tier={infeasible ? 'SYNTHETIC_SCAFFOLD' : 'MODEL_OUTPUT'}
         />
       );
     case 'crps':
@@ -174,21 +203,22 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
         />
       );
     case 'capital_used':
-      // The numerator is gross VaR-99 (book_totals.loss_p99 from the MIP
-      // artifact), not retained-tail capital actually consumed against the
-      // budget. The budget is the constraint cap on retained tail; ceded
-      // cohorts (cede_xs) contribute ~0 to retained tail, so retained ≪ gross
-      // VaR-99 is expected. The label says "Tail exposure" and the budget
-      // half lives in the caption — so the headline number gets its own line
-      // and never has to wrap mid-figure on narrow grid cells.
+      // Schema v5: `capitalUsed` is the REALIZED retained tail under the
+      // optimizer's chosen action mix (`retained_tvar_99` from the
+      // artifact), not the gross book p99 sum. So this card now actually
+      // moves when the operator changes the budget triple. Under
+      // Infeasible status we render "—" instead of an invariant gross
+      // number — the pre-2026 card displayed the prior-derived p99 sum
+      // even when the constraint that prior fed was being violated,
+      // which was a tautology in both directions.
       return (
         <ExecCard
           key={kind}
           label="Tail exposure"
-          value={$M(p.capitalUsed)}
+          value={$Mor(infeasible ? null : p.capitalUsed)}
           caption={`of ${$M(p.capitalBudget)} capital budget`}
-          delta={p.capitalUsedDelta}
-          tier="MODEL_OUTPUT"
+          delta={infeasible ? undefined : p.capitalUsedDelta}
+          tier={infeasible ? 'SYNTHETIC_SCAFFOLD' : 'MODEL_OUTPUT'}
         />
       );
     case 'nonrenew_used':
@@ -196,10 +226,10 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
         <ExecCard
           key={kind}
           label="Non-renew used"
-          value={$M(p.nonrenewUsedTiv)}
+          value={$Mor(infeasible ? null : p.nonrenewUsedTiv)}
           caption={`of ${$M(p.nonrenewCapTiv)} cap`}
-          delta={p.nonrenewUsedDelta}
-          tier="RECOMMENDATION"
+          delta={infeasible ? undefined : p.nonrenewUsedDelta}
+          tier={infeasible ? 'SYNTHETIC_SCAFFOLD' : 'RECOMMENDATION'}
         />
       );
     case 'cession_spend':
@@ -207,9 +237,9 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
         <ExecCard
           key={kind}
           label="Cession spend"
-          value={$M(p.cessionSpend)}
+          value={$Mor(infeasible ? null : p.cessionSpend)}
           caption={`of ${$M(p.cessionBudget)} budget`}
-          tier="MODEL_OUTPUT"
+          tier={infeasible ? 'SYNTHETIC_SCAFFOLD' : 'MODEL_OUTPUT'}
         />
       );
     case 'rol_by_layer':
@@ -268,6 +298,7 @@ export function PortfolioHeader(p: Props) {
   const treatyYear = startLabel && endLabel ? `${startLabel} to ${endLabel}` : null;
   const persona = p.persona ?? 'cat-ops';
   const config = getPersonaConfig(persona);
+  const infeasible = p.status === 'Infeasible';
   // Task P2.20 — equal-width tile grid. The earlier `col-span-2` hero made
   // the first card visually dominate the rest and forced the remaining
   // columns to ~165px in a side-rail layout, which is what caused the
@@ -299,6 +330,26 @@ export function PortfolioHeader(p: Props) {
           <div key={kind}>{renderCard(kind, p, 'default')}</div>
         ))}
       </div>
+      {infeasible && (
+        <div
+          data-testid="portfolio-infeasible-banner"
+          role="alert"
+          className="mt-3 rounded-md ring-1 ring-amber-300 bg-amber-50 px-4 py-3 text-[12.5px] text-amber-900 leading-relaxed"
+        >
+          <span className="font-semibold">MIP status: Infeasible.</span>{' '}
+          The retained-tail constraint cannot be satisfied under the current
+          capital budget, the 15 % non-renew cap, and the cession budget at
+          the same time. The headline KPIs are hidden because a solver in
+          this state has no meaningful objective to publish.
+          <span className="block mt-1 text-[11.5px] text-amber-800/90">
+            Loosen <code className="font-mono bg-amber-100 px-1 py-0.5 rounded">capital_budget</code>{' '}
+            (the what-if slider above), raise the non-renew cap, or remove
+            promoted simulations whose tails outstrip the prior — see the{' '}
+            <a href="/methodology#portfolio-mip" className="underline">methodology</a>{' '}
+            page.
+          </span>
+        </div>
+      )}
     </section>
   );
 }

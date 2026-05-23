@@ -346,7 +346,7 @@ export function PortfolioDrillDown({
                   ${(c.total_tiv / 1e6).toFixed(1)}M
                 </td>
                 <td style={{ padding: 4, minWidth: 150 }}>
-                  {a ? (
+                  {a && a.dominant_action !== null ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                       <div
                         style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'help' }}

@@ -343,7 +343,9 @@ export function PortfolioMap({
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 tabular-nums">
               <dt className="text-zinc-500">Expected margin</dt>
               <dd className="text-right font-medium">
-                ${(optimization.objective / 1e6).toFixed(1)}M
+                {optimization.objective === null
+                  ? '—'
+                  : `$${(optimization.objective / 1e6).toFixed(1)}M`}
               </dd>
               <dt className="text-zinc-500">Annual loss (p50/p99)</dt>
               <dd className="text-right font-medium">

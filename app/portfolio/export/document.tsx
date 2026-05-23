@@ -132,7 +132,11 @@ const styles = StyleSheet.create({
   },
 });
 
-function formatMoneyMillions(n: number): string {
+function formatMoneyMillions(n: number | null | undefined): string {
+  // Schema v5: `objective` can be null when the solver reports Infeasible;
+  // the exported PDF should match the on-screen "—" treatment, not crash
+  // on a null divide.
+  if (n === null || n === undefined || !Number.isFinite(n)) return '—';
   return `$${(n / 1_000_000).toFixed(1)}M`;
 }
 

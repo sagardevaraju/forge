@@ -61,13 +61,6 @@ vi.mock('@/components/grammar/ThreatBanner', () => ({
   ThreatBanner: () => <div data-testid="threat-banner-stub" />,
 }));
 
-// EventsPersonaScope (P2.18) is a client component that reads
-// next/navigation hooks. Stub it so this server-component page test stays
-// out of the URL-state machinery.
-vi.mock('@/components/EventsPersonaScope', () => ({
-  EventsPersonaScope: () => <div data-testid="events-persona-scope-stub" />,
-}));
-
 import EventsPage from '@/app/events/page';
 
 afterEach(() => {

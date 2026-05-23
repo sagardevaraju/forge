@@ -33,7 +33,8 @@
  * Layer-stack bottom-to-top:
  *   envelope (t72h → t48h → t24h) → prior cones → current cone → fires
  */
-import { useState } from 'react';
+import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { MapBase } from './MapBase';
 import { Source, Layer } from 'react-map-gl/maplibre';
 import { AgentChat } from './AgentChat';
@@ -86,6 +87,12 @@ interface Props {
    */
   alerts?: NwsAlert[];
   /**
+   * ISO timestamp at which the NWS feed was last fetched (passed through
+   * from `fetchNwsAlerts.handler` on the server). Surfaced in the legend so
+   * operators see how stale the alert layer is. Optional for back-compat.
+   */
+  alertsFetchedAt?: string | null;
+  /**
    * Per-ZIP3 `[lon, lat]` centroids from the live policy book
    * (`lib/db/zip3_centroids.ts`), used by the cone-exposure mini-map to
    * classify cohorts inside/outside the cone. Optional so existing callers
@@ -99,10 +106,19 @@ export function EventConsole({
   fires,
   cohorts,
   alerts,
+  alertsFetchedAt,
   zip3Centroids,
 }: Props) {
   const [sitrep, setSitrep] = useState<StructuredSitrep | null>(null);
   const [sitrepDataSource, setSitrepDataSource] = useState<SitrepDataSource | null>(null);
+
+  // `router.refresh()` re-runs the server component (`app/events/page.tsx`
+  // is `force-dynamic`) which re-invokes the NHC / NWS / FIRMS / GEFS
+  // handlers in parallel — so the refresh button reflows every live layer,
+  // not just the alerts. `useTransition` gates the button's pending state
+  // without blocking other UI interactions while the server work completes.
+  const router = useRouter();
+  const [refreshing, startRefresh] = useTransition();
 
   const sitrepCtx = cone
     ? {
@@ -357,21 +373,66 @@ export function EventConsole({
               zip3Centroids={zip3Centroids ?? {}}
             />
           </div>
-          {/* NWS alerts legend — bottom-right corner, mirrors the
-              prior-advisories legend pattern. Only renders categories
-              that actually have an alert on the map so the operator
-              doesn't read decorative swatches for absent perils. */}
+          {/* NWS alerts legend — bottom-right corner. `bottom-10` (40 px)
+              clears MapLibre's default attribution control (the "i" icon at
+              the bottom-right of the map canvas), which previously
+              overlapped the legend's lower edge and clipped the `×N` count
+              for the bottom category. Only renders categories that
+              actually have an alert on the map so the operator doesn't read
+              decorative swatches for absent perils. */}
           {alertFeatures.length > 0 && (
             <div
               data-testid="nws-alerts-legend"
-              className="absolute bottom-3 right-3 bg-white p-2 border rounded shadow-sm text-[11px] leading-tight"
+              className="absolute bottom-10 right-3 bg-white p-2 border rounded shadow-sm text-[11px] leading-tight"
             >
               <div className="font-semibold mb-1 flex items-center gap-2">
-                Active alerts
+                <span>Active alerts</span>
                 <span className="text-[10px] text-slate-500 font-normal">
                   NWS · live
                 </span>
+                <button
+                  type="button"
+                  data-testid="nws-alerts-refresh"
+                  // router.refresh() re-runs app/events/page.tsx (server),
+                  // which re-invokes fetchActiveStorms / fetchNhcCone /
+                  // fetchNwsAlerts / fetchFirmsFires / generateScenarios in
+                  // parallel. So the operator gets fresh cone + alerts +
+                  // fires from a single click — no need for a separate
+                  // alerts-only endpoint.
+                  onClick={() => startRefresh(() => router.refresh())}
+                  disabled={refreshing}
+                  aria-label={refreshing ? 'Refreshing alerts' : 'Refresh alerts'}
+                  title="Refresh from live feeds"
+                  className="ml-1 inline-flex h-5 w-5 items-center justify-center rounded text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50 disabled:cursor-progress"
+                >
+                  <svg
+                    aria-hidden
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`}
+                  >
+                    <polyline points="23 4 23 10 17 10" />
+                    <polyline points="1 20 1 14 7 14" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  </svg>
+                </button>
               </div>
+              {alertsFetchedAt && (
+                <div
+                  data-testid="nws-alerts-fetched-at"
+                  className="text-[10px] text-slate-400 font-normal mb-1 tabular-nums"
+                >
+                  Updated{' '}
+                  {new Date(alertsFetchedAt).toLocaleTimeString(undefined, {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </div>
+              )}
               <ul className="space-y-1">
                 {(
                   [

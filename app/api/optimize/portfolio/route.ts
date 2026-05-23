@@ -121,7 +121,17 @@ function cacheKey(b: Budgets, cohortHash: string): string {
 // ────────────────────────────────────────────────────────────────────────
 interface SolverResponse {
   status: string;
-  objective: number;
+  /**
+   * Schema v5 (2026-05-23): `null` when the solver reports `Infeasible`.
+   * The route forwards null to the client so the UI can render "—"
+   * instead of a fake `$0.0M` margin under a RECOMMENDATION badge.
+   */
+  objective: number | null;
+  /**
+   * Realized retained TVaR-99 under the materialized action mix. Mirrors
+   * api_py/optimize_portfolio.py::solve() return value.
+   */
+  retained_tvar_99?: number | null;
   /**
    * Each action row carries one continuous share per ``ActionName`` (the
    * 11-action set: ``retain`` + 7 ``reprice_*`` rate-grid buckets +
@@ -144,11 +154,19 @@ function invokeSolver(payload: {
 }): Promise<SolverResponse> {
   return new Promise((resolve, reject) => {
     const pythonBin = process.env.FORGE_PYTHON ?? 'python3';
-    const proc = spawn(pythonBin, ['-m', 'api_py._solve_stdin'], {
-      cwd: process.cwd(),
-      env: process.env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    // The shim dispatches by target name (added in Task SIM.11 when sim_loss
+    // joined the optimize_portfolio handler). Without the target arg the
+    // shim emits its usage message and exits 1 → "solver exited 1" on every
+    // what-if commit. Pass `optimize_portfolio` explicitly.
+    const proc = spawn(
+      pythonBin,
+      ['-m', 'api_py._solve_stdin', 'optimize_portfolio'],
+      {
+        cwd: process.cwd(),
+        env: process.env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
 
     let stdout = '';
     let stderr = '';
@@ -218,6 +236,11 @@ function summarizeActions(
     {} as PortfolioOptimization['action_summary'],
   );
   for (const row of actions) {
+    // Schema v5: dominant_action is null for cohorts under an Infeasible
+    // solve — every share is 0, so there is no meaningful argmax to bucket.
+    // Skip those rows; the caller will leave action_summary all-zero,
+    // which is the correct representation for an infeasible state.
+    if (row.dominant_action === null) continue;
     summary[row.dominant_action].count += 1;
     summary[row.dominant_action].tiv += tivById.get(row.cohort_id) ?? 0;
   }
@@ -258,6 +281,7 @@ function buildResponse(
   return {
     status: solver.status,
     objective: solver.objective,
+    retained_tvar_99: solver.retained_tvar_99 ?? null,
     horizon_start: solver.horizon_start ?? base.horizon_start,
     horizon_end: solver.horizon_end ?? base.horizon_end,
     budgets,
@@ -348,7 +372,12 @@ export async function POST(req: Request): Promise<Response> {
         relaxation_factor?: number;
       } = {
         status: 'Infeasible',
-        objective: 0,
+        // Schema v5: null over an infeasible solve, not 0 (a $0.0M margin
+        // is a numeric value the UI would dress up as "$0.0M" under a
+        // RECOMMENDATION badge — same false-confidence bug we're fixing
+        // on the precompute path).
+        objective: null,
+        retained_tvar_99: null,
         horizon_start: artifact.horizon_start,
         horizon_end: artifact.horizon_end,
         budgets,

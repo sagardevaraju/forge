@@ -367,12 +367,12 @@ function buildUrl(args: FetchNwsAlertsArgs): string {
   // resolved set so a multi-state book scopes the lookup correctly.
   const states = resolveStates(args.state);
   if (states.length > 0) params.set('area', states.join(','));
-  const events = args.events ?? DEFAULT_ACUTE_EVENTS;
-  if (events.length > 0) {
-    // NWS supports the same key repeated for OR semantics. URLSearchParams
-    // handles that cleanly via `append`.
-    for (const e of events) params.append('event', e);
-  }
+  // NB: we deliberately do NOT add `event=` filters here. NWS's
+  // `/alerts/active` treats `event` as a single-valued field — when multiple
+  // `event=` params are appended, the server honours only the last value
+  // (verified empirically 2026-05-23: a 12-event chain returned 0 features
+  // even on a day with 21 active alerts in FL/TX/LA/NC). Apply the
+  // `DEFAULT_ACUTE_EVENTS` whitelist client-side in `tryLive()` instead.
   return `https://api.weather.gov/alerts/active?${params.toString()}`;
 }
 
@@ -388,9 +388,18 @@ async function tryLive(args: FetchNwsAlertsArgs): Promise<FetchNwsAlertsResult |
   if (!r.ok) return null;
   const data = (await r.json()) as RawAlertResponse;
   const raw = Array.isArray(data.features) ? data.features : [];
+  // NWS's server-side `event=` filter is broken for multi-value OR (see
+  // buildUrl comment) — so we fetch the un-filtered active-alert feed for
+  // the requested area and apply the event whitelist here. `events: []`
+  // (passed explicitly) disables the filter entirely; omitted falls back to
+  // `DEFAULT_ACUTE_EVENTS`.
+  const wantedEvents = args.events ?? DEFAULT_ACUTE_EVENTS;
+  const wantedSet = new Set(wantedEvents);
   const alerts = raw
     .map(parseAlertFeature)
-    .filter((a): a is NwsAlert => a !== null);
+    .filter((a): a is NwsAlert =>
+      a !== null && (wantedSet.size === 0 || wantedSet.has(a.event)),
+    );
   return {
     alerts,
     counts: countAlerts(alerts),

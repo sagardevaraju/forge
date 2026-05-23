@@ -229,12 +229,22 @@ export default async function PortfolioPage() {
           <div className="text-right text-[11px] text-zinc-500 leading-snug tabular-nums">
             <div>
               MIP status{' '}
-              <span className="text-zinc-800 font-medium">{optimization.status}</span>
+              <span
+                className={
+                  optimization.status === 'Infeasible'
+                    ? 'text-amber-700 font-medium'
+                    : 'text-zinc-800 font-medium'
+                }
+              >
+                {optimization.status}
+              </span>
             </div>
             <div>
               Objective{' '}
               <span className="text-zinc-800 font-medium">
-                ${(optimization.objective / 1e6).toFixed(1)}M
+                {optimization.objective === null
+                  ? '—'
+                  : `$${(optimization.objective / 1e6).toFixed(1)}M`}
               </span>
             </div>
           </div>
@@ -295,7 +305,11 @@ export default async function PortfolioPage() {
           method="lib/db/cohorts::aggregateCohorts + api_py/optimize_portfolio::solve"
           confidence={
             optimization
-              ? `MIP status ${optimization.status} · objective $${(optimization.objective / 1e6).toFixed(1)}M`
+              ? `MIP status ${optimization.status} · objective ${
+                  optimization.objective === null
+                    ? '—'
+                    : `$${(optimization.objective / 1e6).toFixed(1)}M`
+                }`
               : 'optimization cache missing'
           }
         />

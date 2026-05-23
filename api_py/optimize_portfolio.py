@@ -396,9 +396,25 @@ def solve(
     Returns
     -------
     dict
-        ``{"status": str, "objective": float, "actions": [{"cohort_id": ...,
-        "retain": float, ..., "reprice_p10": float, ...}, ...],
-        "horizon_start": str, "horizon_end": str, "solver_mode": str}``.
+        ``{"status": str, "objective": float | None, "actions": [...],
+        "retained_tvar_99": float | None, "horizon_start": str,
+        "horizon_end": str, "solver_mode": str}``.
+
+        ``objective`` is **None** when ``status == "Infeasible"`` — callers
+        must not display a numeric margin over a contaminated solve. In
+        that state every action share is zero; downstream consumers should
+        render "—" / a banner explaining the infeasibility rather than
+        the bogus internal ``pulp.value`` of an LP-relaxed unbounded
+        intermediate.
+
+        ``retained_tvar_99`` is the **realized** retained tail under the
+        materialized action mix (mean of the top 1% of book-loss scenarios
+        after applying each cohort's chosen action — including the
+        per-scenario ``retained_xs`` integration for ``cede_xs`` cohorts).
+        This is the right scalar to compare against ``capital_budget`` in
+        the UI; ``book_totals.loss_p99`` from the artifact is gross and
+        invariant to the action mix and was producing tautological cards.
+        Null when cohorts lack ``loss_scenarios``.
 
         ``solver_mode`` is one of:
 
@@ -467,6 +483,34 @@ def solve(
             x = x_lp
             tvar_per_cohort = tvar_per_cohort_lp
 
+    # ── Infeasible: refuse to publish a contaminated objective ────────
+    # CBC reports `Infeasible` when the constraint set has no feasible
+    # solution. In that state ``pulp.value(prob.objective)`` reflects an
+    # internal LP-relaxed value (typically the unbounded objective of an
+    # all-zero assignment under <= constraints) — meaningless for the
+    # caller, and worse than null because a numeric value tempts the UI
+    # to render it under a "Recommendation" badge. We return
+    # ``objective=None`` and an actions array with every share at 0 so
+    # downstream consumers (PortfolioHeader, narrative tools) can detect
+    # the infeasible status and show "—" / a banner explaining the
+    # constraint that failed, instead of a fake margin number.
+    if status == "Infeasible":
+        actions_out_infeasible = [
+            {"cohort_id": c["id"], **{a: 0.0 for a in ACTIONS}} for c in cohorts
+        ]
+        result_infeasible: dict[str, Any] = {
+            "status": "Infeasible",
+            "objective": None,
+            "actions": actions_out_infeasible,
+            "horizon_start": horizon_start,
+            "horizon_end": horizon_end,
+            "solver_mode": solver_mode,
+        }
+        if use_tvar:
+            result_infeasible["tvar_99_used"] = True
+            result_infeasible["tvar_99_per_cohort"] = tvar_per_cohort
+        return result_infeasible
+
     # ── Materialize actions, applying argmax-rounding under fallback ──
     objective_acc = 0.0
     actions_out: list[dict[str, Any]] = []
@@ -528,6 +572,81 @@ def solve(
     else:
         objective = objective_acc
 
+    # ── Realized retained TVaR-99 under the materialized action mix ───
+    # The "Tail exposure" headline card used to read `book_totals.loss_p99`
+    # (the gross prior-derived p99 sum). That number is invariant to the
+    # action mix — i.e., the card was telling the operator "your tail is
+    # X" no matter what the optimizer chose. We compute the *realized*
+    # retained TVaR-99 here: per-scenario book retained loss = Σ_c (kept
+    # cohort loss under its chosen action), with cede_xs cohorts using the
+    # per-scenario `retained_xs` integration. TVaR-99 = mean of the top 1%
+    # of the resulting K=K_scenarios book-loss distribution.
+    #
+    # Returned as `retained_tvar_99` so the UI can render a card that
+    # actually moves when the operator changes the budget triple.
+    retained_tvar_99: float | None = None
+    try:
+        import numpy as np
+
+        # Stack the K-scenarios per cohort (only if every cohort carries them).
+        K = None
+        cohort_scenarios: list[list[float]] = []
+        cohort_kept_factor: list[float] = []
+        cohort_cede_xs_pick: list[bool] = []
+        cohort_treaty_layers: list[tuple[float, float]] = []
+        for c, row in zip(cohorts, actions_out):
+            sc = c.get("loss_scenarios")
+            if sc is None:
+                cohort_scenarios = []
+                break
+            if K is None:
+                K = len(sc)
+            elif len(sc) != K:
+                # Heterogeneous K — skip the realized calc rather than mis-aggregate.
+                cohort_scenarios = []
+                break
+            cohort_scenarios.append(sc)
+            # The dominant action under the MILP path is the action with share=1
+            # (binary). Under the LP-relaxed fallback rounding has already
+            # promoted argmax to 1. We pick the *first* action with share=1.
+            picked = None
+            for a in ACTIONS:
+                if row.get(a, 0.0) > 0.5:
+                    picked = a
+                    break
+            if picked is None:
+                # All zeros — treat as retained (shouldn't happen post-infeasible
+                # branch, but be defensive).
+                picked = "retain"
+            cohort_kept_factor.append(LOSS_FACTOR[picked])
+            cohort_cede_xs_pick.append(picked == "cede_xs")
+            treaty = c.get("treaty") or {}
+            loss50 = float(c["loss_p50"])
+            loss99 = float(c["loss_p99"])
+            attachment = float(treaty.get("attachment", loss50 * 1.5))
+            exhaustion = float(treaty.get("exhaustion", loss99 * 2.0))
+            if exhaustion < attachment:
+                exhaustion = attachment
+            cohort_treaty_layers.append((attachment, exhaustion))
+
+        if cohort_scenarios and K is not None and K > 0:
+            arr = np.asarray(cohort_scenarios, dtype=float)  # shape (n_cohorts, K)
+            kept = np.zeros_like(arr)
+            for i in range(arr.shape[0]):
+                if cohort_cede_xs_pick[i]:
+                    att, exh = cohort_treaty_layers[i]
+                    losses = arr[i]
+                    # retained_xs is `min(L, attachment) + max(0, L − exhaustion)`
+                    kept[i] = np.minimum(losses, att) + np.maximum(0.0, losses - exh)
+                else:
+                    kept[i] = arr[i] * cohort_kept_factor[i]
+            book_loss_scenarios = kept.sum(axis=0)
+            threshold = np.percentile(book_loss_scenarios, 99)
+            tail = book_loss_scenarios[book_loss_scenarios >= threshold]
+            retained_tvar_99 = float(tail.mean()) if tail.size > 0 else float(book_loss_scenarios.max())
+    except Exception as e:  # pragma: no cover — defensive; never fail the solve over telemetry
+        logger.warning("retained TVaR-99 computation skipped: %s", e)
+
     result: dict[str, Any] = {
         "status": status,
         "objective": float(objective),
@@ -535,6 +654,10 @@ def solve(
         "horizon_start": horizon_start,
         "horizon_end": horizon_end,
         "solver_mode": solver_mode,
+        # Realized retained tail under the materialized action mix —
+        # this is what the "Tail exposure" card should read against the
+        # capital_budget constraint. Null when cohorts lack loss_scenarios.
+        "retained_tvar_99": retained_tvar_99,
     }
     if use_tvar:
         result["tvar_99_used"] = True
