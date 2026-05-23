@@ -21,7 +21,7 @@ import { SimLibrary, type SimListItem } from './SimLibrary';
 import { ImpactPanel } from './ImpactPanel';
 import { PromoteButton } from './PromoteButton';
 import { rebuildFootprint, type SimulationFootprint } from '@/lib/sim/footprint';
-import { PERIL_SCALES, severityLabel, type Peril, type SeverityValue } from '@/lib/sim/severity';
+import { PERIL_SCALES, perilLabel, severityLabel, type Peril, type SeverityValue } from '@/lib/sim/severity';
 import type { PreviewImpact } from '@/lib/sim/preview';
 
 export interface SimWorkspaceProps {
@@ -76,7 +76,7 @@ export function SimWorkspace(props: SimWorkspaceProps) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        name: `${fp.peril}, ${severityLabel(fp.peril, fp.severity)} - ${new Date().toISOString().slice(0, 10)}`,
+        name: `${perilLabel(fp.peril)}, ${severityLabel(fp.peril, fp.severity)} - ${new Date().toISOString().slice(0, 10)}`,
         footprint: fp,
       }),
     });

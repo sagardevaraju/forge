@@ -47,6 +47,20 @@ to merely look plausible.
 
 `aggregateCohorts()` (`lib/db/cohorts.ts`) is the canonical TS implementation; `eval/end_to_end.py` ships a Python re-implementation. **Both must stay in sync** — same key (`{zip3}_{build_type}_q{0..4}`), same quintile cut-points (computed over the entire book, not per-state), same modal-flood-zone tie-break (lexical order). The cohort field is `tiv_quintile` (Task 12 renamed it from the historical `tiv_decile`); the value range is `0..4`.
 
+## Sim peril severity (lib/sim/severity.ts ↔ api_py/sim_loss.py)
+
+Per-peril severity scales live in `PERIL_SCALES` (TS) and `_PERIL_LEVEL_MULT` (Python). Damage = `HAZUS_base[build_type][peril] × multiplier(severity)`, clamped to [0,1]. **The TS and Python copies must stay in sync** — they are tested independently and one drifting silently inflates / deflates gross loss.
+
+**Calibration convention** (research.md is the citation file — every numeric value has a published source):
+
+- **Top realistic tier → multiplier = 1.0 = HAZUS-severe damage.** Hail 45 mm = `severe` = 1.0; dNBR `high` = 1.0; NWS `major` flood = 1.20 (slightly past severe — multi-floor); WSSI `extreme` = 1.0; Mw 7.0 = 1.0; EF3 = 1.0. `HAZUS_base × 1.0` is intended to land on the HAZUS-severe damage ratio for that build_type.
+- **Lower tiers reflect physical reality, NOT a 1:1 INTENSITY_SCALE spine relabel.** Hail 20 mm = 0 (damage threshold); WSSI Minor = 0.04 (industry baseline pipe-burst rate); dNBR Low = 0.10 (minimal structural impact); NWS Minor = 0.25 (nuisance inundation). The original spine map (every Minor → multiplier 0.55) produced sub-threshold *phantom damage* — pea hail = $10M, dNBR-Low burn = 50 % wood-frame damage, WSSI Minor = $21M on the FL book. **If you find yourself writing `multiplier: INTENSITY_SCALE.moderate` for a sub-threshold tier, stop and cite real claim data instead.**
+- **`severityFromLegacy` uses closest-multiplier search**, not exact match. The round-trip property `legacyTier(severityFromLegacy(t)) === t` is intentionally lossy at `catastrophic` for flood / wildfire / winter (those scales cap below the legacy spine's catastrophic multiplier 1.45 by design).
+- **`HAZUS_MATRIX` is a per-build-type table at the *severe* benchmark**, sourced from FEMA HAZUS-Wind / HAZUS-Flood / IBHS / FEMA P-957 (winter snow load). If you add a build_type, **mirror it in both files** and add a citation to `research.md`. The `manufactured` flood base was previously 0.45 (inverted from reality — HAZUS Flood TM 4.0 puts MH curves *above* wood frame); raised to 0.65 to match the upper end of the MH depth-damage curve.
+- **Earthquake multiplier zeros out below Mw 5.53** (Bakun-Wentworth zero-crossing for MMI VI). Don't add a `max(0.05, …)` floor — that's how M5.0 quakes used to produce phantom 3.5 % wood-frame damage inside the geometry-side `MIN_BUFFER_KM = 0.5` guard circle.
+
+**Operator-facing labels:** `PERIL_LABELS` / `perilLabel()` in `lib/sim/severity.ts` are the single source of truth for every renderer (PerilPicker, SimWorkspace sim-name generator, SimulationBanner). Internal peril ids stay snake_case (`winter`, `wildfire`, …) in the DB / parquet / reconciler keys; labels are display-only. **Notable mismatch:** the `winter` peril id renders as **"Winter Storm"** — covers the full WSSI scope (blizzards + ice storms + flash freezes + heavy snow + lake-effect, not just blizzards), matching PCS / AIR / RMS / Verisk industry classification and pairing cleanly with WSSI = Winter **Storm** Severity Index.
+
 ## Portfolio MIP
 
 `api_py/optimize_portfolio.py::solve()` runs PuLP with CBC and a 30-second timeLimit. **Don't add new actions casually** — Phase 2 (Task P2.8) fixed the action set at eleven: `retain`, the 7-bucket reprice rate grid (`reprice_n20`, `reprice_n10`, `reprice_0`, `reprice_p5`, `reprice_p10`, `reprice_p15`, `reprice_p20`), `non_renew`, `cede_qs`, `cede_xs`. The canonical TS list lives in `lib/portfolio-actions.ts` (`ACTIONS` + `ActionName` + `RATE_GRID`); the Python mirror is `api_py/optimize_portfolio.py::ACTIONS` + `RATE_GRID`. The reprice coefficient is no longer a per-key constant — it's computed per cohort from `_reprice_factor(Δrate, η)` where `η` is the cohort's retention elasticity. `LOSS_FACTOR` and `CESSION_COST_RATE` are still per-key dicts; if you add a key, update both, plus `lib/portfolio-actions.ts` (ACTIONS, RATE_GRID, ACTION_LABELS, ACTION_COLORS).
@@ -106,7 +120,9 @@ Every commit in the original plan tags a `Task N` from `docs/superpowers/plans/2
 | Change a page's data shape | The server-component page (`app/<view>/page.tsx`) + the client component (`components/<View>.tsx`) |
 | Change the policy book schema | `lib/db/schema.sql` + `lib/book/csv.ts` (CSV validators) + `scripts/seed_policy_book.py` (seed) |
 | Add a route to cron refresh | `app/api/cron/refresh/route.ts` + verify `crons` in `vercel.json` |
-| Add a new simulation peril | `lib/sim/severity.ts` (HAZUS row) + `api_py/sim_loss.py` (decay + perturbation) + `SimulationFootprint` union in `lib/sim/footprint.ts` |
+| Add a new simulation peril | `lib/sim/severity.ts` (HAZUS row + `PERIL_SCALES` entry + `PERIL_LABELS` entry) + `api_py/sim_loss.py` (`_HAZUS_MATRIX` + `_PERIL_LEVEL_MULT` + decay + perturbation) + `SimulationFootprint` union in `lib/sim/footprint.ts` + cite real-world calibration anchors in `research.md` |
+| Change a peril severity multiplier | `PERIL_SCALES` in `lib/sim/severity.ts` AND `_PERIL_LEVEL_MULT` in `api_py/sim_loss.py` — they must mirror. Anchor at top tier = 1.0 = HAZUS-severe; cite real claim data for lower tiers in `research.md`. Update tests in both `tests/lib/sim/severity.test.ts` and `tests/api/test_sim_loss.py` |
+| Rename a peril label | `PERIL_LABELS` in `lib/sim/severity.ts` — single source of truth. Keep the internal id snake_case (DB / parquet / reconciler join on it). If you also want stored sim names rewritten, run a `REPLACE(name, 'old_label,', 'New Label,')` UPDATE on the `simulations` table |
 | Touch the simulate flow | `/simulate` route (`app/simulate/page.tsx` + `components/sim/*`); loss compute in `api_py/sim_loss.py`; banner in `components/grammar/SimulationBanner.tsx` mounted on `/portfolio` |
 
 ## Build / test cheatsheet
@@ -130,3 +146,4 @@ python -m eval.end_to_end                              # Refresh eval JSON + PNG
 - Spec: `docs/superpowers/specs/2026-05-15-forge-design.md`
 - Plan: `docs/superpowers/plans/2026-05-15-forge.md`
 - Demo guide: `DEMO.md`
+- Peril severity calibration citations: `research.md` (every numeric value in `PERIL_SCALES` / `_PERIL_LEVEL_MULT` / `HAZUS_MATRIX` traces to a source recorded here — TDI Uri report, NWS WSSI, USGS dNBR, FEMA HAZUS-Flood TM 4.0, Brooks 2004, Bakun-Wentworth 1997, etc.)

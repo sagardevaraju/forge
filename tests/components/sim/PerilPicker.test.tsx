@@ -8,7 +8,10 @@ afterEach(() => cleanup());
 describe('PerilPicker', () => {
   test('renders all six perils', () => {
     render(<PerilPicker active="hail" onChange={() => {}} />);
-    for (const p of ['Tornado', 'Flood', 'Hail', 'Wildfire', 'Earthquake', 'Winter']) {
+    // Note: "winter" peril id renders as "Winter Storm" (PERIL_LABELS in
+    // lib/sim/severity.ts) — disambiguates from blizzard-only reading and
+    // matches PCS / AIR / RMS / Verisk industry vocabulary.
+    for (const p of ['Tornado', 'Flood', 'Hail', 'Wildfire', 'Earthquake', 'Winter Storm']) {
       expect(screen.getByText(p)).toBeInTheDocument();
     }
   });

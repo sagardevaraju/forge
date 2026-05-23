@@ -124,10 +124,15 @@ const BW_DISTANCE_COEF = 0.0206;
 // Modified Mercalli VI — onset of structural damage. Bounds the footprint.
 const DAMAGE_THRESHOLD_MMI = 6;
 
-// Below ~Mw 5.5 the MMI-VI contour has zero radius. The footprint contract
-// still needs a constructible Polygon, so the buffer is floored at this small
-// epsilon — a degenerate-case guard, not a measurement. mmi_radii_km still
-// honestly omits any shell whose true radius is 0.
+// Below ~Mw 5.53 (the Bakun-Wentworth zero-crossing for MMI VI) the MMI-VI
+// contour has zero radius. The footprint contract still needs a constructible
+// Polygon, so the buffer is floored at this small epsilon — a degenerate-case
+// guard, not a measurement. mmi_radii_km still honestly omits any shell whose
+// true radius is 0. Loss-wise this is also zero: lib/sim/severity.ts
+// PERIL_SCALES.earthquake.multiplier returns 0 below Mw 5.53, so any policy
+// that happens to fall inside this 500 m guard circle contributes no damage
+// (previously the `max(0.05, …)` floor produced phantom 3.5 % wood-frame
+// damage at M5.0 — that's been removed).
 const MIN_BUFFER_KM = 0.5;
 
 /**

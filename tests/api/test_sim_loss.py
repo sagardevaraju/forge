@@ -12,7 +12,7 @@ SAMPLE_POLICIES = [
     # (id, lat, lon, tiv, build_type, zip3)
     (1, 27.7, -82.3, 500_000.0, "wood_frame", "337"),
     (2, 27.8, -82.2, 800_000.0, "masonry", "337"),
-    (3, 30.0, -85.0, 400_000.0, "mobile_home", "325"),
+    (3, 30.0, -85.0, 400_000.0, "manufactured", "325"),
 ]
 
 
@@ -54,7 +54,7 @@ def test_generate_returns_cohort_x_K_array():
     )
     assert result["K"] == 100
     assert result["losses"].shape[1] == 100
-    # Two cohorts are inside (337_wood_frame, 337_masonry); 325_mobile_home is outside.
+    # Two cohorts are inside (337_wood_frame, 337_masonry); 325_manufactured is outside.
     assert result["losses"].shape[0] >= 1
 
 
@@ -132,15 +132,26 @@ def test_damage_multiplier_continuous_anchors():
     assert _damage_multiplier("earthquake", 6.0) == pytest.approx(0.55)
     assert _damage_multiplier("earthquake", 7.0) == pytest.approx(1.0)
     assert _damage_multiplier("earthquake", 8.0) == pytest.approx(1.45)
-    assert _damage_multiplier("hail", 25) == pytest.approx(0.55)
+    # Recalibrated to real-world thresholds: 20 mm damage threshold, 45 mm severe.
+    assert _damage_multiplier("hail", 20) == pytest.approx(0.0)
+    assert _damage_multiplier("hail", 25) == pytest.approx(0.2)
     assert _damage_multiplier("hail", 45) == pytest.approx(1.0)
+    assert _damage_multiplier("hail", 65) == pytest.approx(1.8)
 
 
 def test_damage_multiplier_clamps_low():
     from api_py.sim_loss import _damage_multiplier
-    # Below-range inputs clamp at the 0.05 floor (matches TS damageMultiplier).
-    assert _damage_multiplier("earthquake", 1.0) == pytest.approx(0.05)
-    assert _damage_multiplier("hail", 0) == pytest.approx(0.05)
+    # Below-range inputs honestly return 0. Earthquake zeroes out below
+    # Mw 5.53 (Bakun-Wentworth MMI VI zero-crossing) — the previous
+    # `max(0.05, …)` floor produced phantom 3.5 % wood-frame damage at
+    # M5.0 even though M5.0 quakes produce essentially no filed claims.
+    # Hail returns 0 below the 20 mm damage threshold.
+    assert _damage_multiplier("earthquake", 5.0) == pytest.approx(0.0)
+    assert _damage_multiplier("earthquake", 1.0) == pytest.approx(0.0)
+    # Just above the Bakun-Wentworth threshold the linear formula resumes.
+    assert _damage_multiplier("earthquake", 6.0) == pytest.approx(0.55)
+    assert _damage_multiplier("hail", 0) == pytest.approx(0.0)
+    assert _damage_multiplier("hail", 15) == pytest.approx(0.0)
 
 
 def test_damage_multiplier_discrete():
@@ -148,8 +159,26 @@ def test_damage_multiplier_discrete():
     assert _damage_multiplier("tornado", "ef0") == pytest.approx(0.325)
     assert _damage_multiplier("tornado", "ef3") == pytest.approx(1.0)
     assert _damage_multiplier("tornado", "ef5") == pytest.approx(1.45)
-    assert _damage_multiplier("winter", "extreme") == pytest.approx(1.90)
-    assert _damage_multiplier("flood", "major") == pytest.approx(1.45)
+    # Flood, wildfire, and winter are recalibrated off the legacy spine.
+    #   - NWS Flood: Minor is nuisance flooding (0.25), Major is multi-floor
+    #     inundation (1.20)
+    #   - dNBR Wildfire: low = minimal structural impact (0.10), high is
+    #     HAZUS-severe total loss (1.00)
+    #   - WSSI Winter: Limited is nuisance (0.01), Minor is scattered pipe
+    #     burst (0.04), Extreme anchors at HAZUS-severe (1.00) matching
+    #     Uri 2021 / Buffalo 2014 worst-hit-ZIP mean DRs
+    # Mirrors lib/sim/severity.ts.
+    assert _damage_multiplier("flood", "minor") == pytest.approx(0.25)
+    assert _damage_multiplier("flood", "moderate") == pytest.approx(0.70)
+    assert _damage_multiplier("flood", "major") == pytest.approx(1.20)
+    assert _damage_multiplier("wildfire", "low") == pytest.approx(0.10)
+    assert _damage_multiplier("wildfire", "moderate") == pytest.approx(0.40)
+    assert _damage_multiplier("wildfire", "high") == pytest.approx(1.00)
+    assert _damage_multiplier("winter", "limited") == pytest.approx(0.01)
+    assert _damage_multiplier("winter", "minor") == pytest.approx(0.04)
+    assert _damage_multiplier("winter", "moderate") == pytest.approx(0.15)
+    assert _damage_multiplier("winter", "major") == pytest.approx(0.40)
+    assert _damage_multiplier("winter", "extreme") == pytest.approx(1.00)
 
 
 def test_damage_multiplier_legacy_tier_fallback():

@@ -1,14 +1,7 @@
 'use client';
-import { PERILS, type Peril } from '@/lib/sim/severity';
+import { PERILS, PERIL_LABELS, type Peril } from '@/lib/sim/severity';
 
-const LABELS: Record<Peril, string> = {
-  tornado: 'Tornado',
-  flood: 'Flood',
-  hail: 'Hail',
-  wildfire: 'Wildfire',
-  earthquake: 'Earthquake',
-  winter: 'Winter',
-};
+const LABELS = PERIL_LABELS;
 
 const COLORS: Record<Peril, string> = {
   tornado: '#ff5247',

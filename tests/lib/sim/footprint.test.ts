@@ -91,7 +91,12 @@ describe('rebuildFootprint', () => {
     });
     const rebuilt = rebuildFootprint(original, 'major', '2026-06-01');
     expect(rebuilt.severity).toBe('major');
-    expect(rebuilt.intensity).toBe('catastrophic');
+    // NWS "Major" → multiplier 1.20 → legacyTier returns 'severe' (since
+    // 0.775 ≤ 1.20 < 1.225). The previous expectation 'catastrophic' was
+    // an artifact of the old 1:1 spine map (Major = INTENSITY_SCALE 1.45);
+    // the recalibrated flood scale tops out below catastrophic by design —
+    // see research.md §4b.
+    expect(rebuilt.intensity).toBe('severe');
     expect(rebuilt.effective_date).toBe('2026-06-01');
     expect(rebuilt.geometry).toEqual(original.geometry);
   });

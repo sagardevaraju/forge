@@ -32,21 +32,47 @@ import shapely
 from shapely.geometry import Point, Polygon, shape
 
 # Re-implements lib/sim/severity.ts: keep numbers in sync. v2 = lift to JSON.
+# Keys match the policy book's `build_type` vocabulary (scripts/seed_policy_book.py
+# BUILD_TYPES, lib/book/csv.ts ALLOWED_BUILD_TYPES). "manufactured" is FEMA HAZUS's
+# "Manufactured Housing" (MH) — historically aliased as "mobile_home" in research
+# papers. Using the seed vocabulary directly prevents the silent
+# manufactured→wood_frame fallback that under-modelled ~15 % of the book.
+# manufactured.flood was 0.45 (i.e. *less* flood-vulnerable than wood frame).
+# That inverts reality: HAZUS Flood Technical Manual 4.0 manufactured-housing
+# depth-damage curves at ~4 ft inundation sit at 0.55-0.65, ABOVE wood frame —
+# MH sits lower, has weaker floor systems, and is more easily moved by
+# floodwater. Raised to 0.65 to match the upper end of the HAZUS MH curve.
 _HAZUS_MATRIX: dict[str, dict[str, float]] = {
-    "wood_frame":  {"tornado": 0.42, "flood": 0.55, "hail": 0.18, "wildfire": 0.92, "earthquake": 0.35, "winter": 0.08},
-    "masonry":     {"tornado": 0.28, "flood": 0.62, "hail": 0.10, "wildfire": 0.85, "earthquake": 0.22, "winter": 0.06},
-    "mobile_home": {"tornado": 0.85, "flood": 0.45, "hail": 0.32, "wildfire": 0.95, "earthquake": 0.55, "winter": 0.18},
-    "commercial":  {"tornado": 0.30, "flood": 0.48, "hail": 0.12, "wildfire": 0.78, "earthquake": 0.28, "winter": 0.05},
+    "wood_frame":   {"tornado": 0.42, "flood": 0.55, "hail": 0.18, "wildfire": 0.92, "earthquake": 0.35, "winter": 0.08},
+    "masonry":      {"tornado": 0.28, "flood": 0.62, "hail": 0.10, "wildfire": 0.85, "earthquake": 0.22, "winter": 0.06},
+    "manufactured": {"tornado": 0.85, "flood": 0.65, "hail": 0.32, "wildfire": 0.95, "earthquake": 0.55, "winter": 0.18},
+    "commercial":   {"tornado": 0.30, "flood": 0.48, "hail": 0.12, "wildfire": 0.78, "earthquake": 0.28, "winter": 0.05},
 }
 _INTENSITY_SCALE = {"moderate": 0.55, "severe": 1.0, "catastrophic": 1.45}
 
 # Mirrors lib/sim/severity.ts PERIL_SCALES discrete multipliers — keep in sync.
-# Modelling parameters anchored to the INTENSITY_SCALE spine (research.md).
+# Tornado and winter remain spine-anchored. Flood and wildfire are recalibrated
+# off the spine (research.md §4b, §5b):
+#   - Flood NWS Minor/Moderate/Major map to inundation-depth severity, not to
+#     a 1:1 INTENSITY_SCALE relabel; minor is nuisance flooding (≈ 0.25), major
+#     is multi-floor / pile-supported (≈ 1.20).
+#   - Wildfire dNBR Low/Moderate/High: dNBR low has minimal structural impact
+#     (≈ 0.10), dNBR high is HAZUS-severe total loss (≈ 1.00).
+# Earlier 1:1 spine map produced "low burn severity → 50 % wood-frame damage"
+# and "minor flood → 30 % wood-frame damage", both HAZUS-severe-territory
+# damage from sub-threshold events.
 _PERIL_LEVEL_MULT: dict[str, dict[str, float]] = {
     "tornado":  {"ef0": 0.325, "ef1": 0.55, "ef2": 0.775, "ef3": 1.0, "ef4": 1.225, "ef5": 1.45},
-    "flood":    {"minor": 0.55, "moderate": 1.0, "major": 1.45},
-    "wildfire": {"low": 0.55, "moderate": 1.0, "high": 1.45},
-    "winter":   {"limited": 0.325, "minor": 0.55, "moderate": 1.0, "major": 1.45, "extreme": 1.90},
+    "flood":    {"minor": 0.25, "moderate": 0.70, "major": 1.20},
+    "wildfire": {"low": 0.10, "moderate": 0.40, "high": 1.00},
+    # Winter recalibrated to NWS WSSI operational definitions + industry loss
+    # data (TX 2021 Uri $11.2B / 510k claims, Buffalo 2022 $5.4B, I.I.I. $1.3B
+    # baseline). Previous 1:1 spine map put "Minor" — NWS-defined as "minor
+    # inconveniences" — at multiplier 0.55, producing 4.9 % mean DR
+    # (= $21M on a 1,362-policy FL triangle). Real Minor events produce
+    # ≈ 0.2-0.5 % mean DR. Extreme anchors at HAZUS-severe (1.0) matching
+    # Uri/Buffalo worst-hit-ZIP mean DRs of 5-15 %. See research.md §6b.
+    "winter":   {"limited": 0.01, "minor": 0.04, "moderate": 0.15, "major": 0.40, "extreme": 1.00},
 }
 
 
@@ -60,11 +86,24 @@ def _damage_multiplier(peril: str, severity) -> float:
     to research.md (S2c earthquake, S3b hail, S1c/S6b discrete)."""
     if peril == "earthquake":
         if isinstance(severity, (int, float)) and not isinstance(severity, bool):
-            return max(0.05, 1.0 + 0.45 * (severity - 7.0))
+            # 5.53 = Bakun-Wentworth zero-crossing: MMI VI radius = 0 ⇒
+            # (1.68·Mw − 3.29 − 6) / 0.0206 = 0 ⇒ Mw ≈ 5.53. Below that the
+            # MMI VI shell has no physical extent so damage is honestly zero —
+            # the previous `max(0.05, …)` floor produced phantom 3.5 %
+            # wood-frame damage at M5.0 even though M5.0 quakes produce
+            # essentially no filed claims in real-world catalogues. Mirror of
+            # lib/sim/severity.ts PERIL_SCALES.earthquake.multiplier.
+            if severity < 5.53:
+                return 0.0
+            return 1.0 + 0.45 * (severity - 7.0)
         return _INTENSITY_SCALE.get(severity, 1.0)
     if peril == "hail":
         if isinstance(severity, (int, float)) and not isinstance(severity, bool):
-            return max(0.05, 0.55 + 0.0225 * (severity - 25.0))
+            # Calibrated to real-world hail damage thresholds — mirrors
+            # lib/sim/severity.ts. Anchors: 20 mm = 0 (damage threshold,
+            # below NWS "significant severe" cutoff at 25 mm), 45 mm = 1.0
+            # (severe). No 0.05 floor — sub-threshold hail honestly returns 0.
+            return max(0.0, 0.04 * (severity - 20.0))
         return _INTENSITY_SCALE.get(severity, 1.0)
     levels = _PERIL_LEVEL_MULT.get(peril, {})
     if severity in levels:
@@ -88,8 +127,28 @@ def perturbation_sigmas(peril: str) -> dict[str, float]:
     return dict(_PERTURB.get(peril, {"vertex_deg": 0.003}))
 
 
+# Track unknown build_types we've already warned about so a corrupted seed
+# doesn't spam stderr per policy iteration across K draws.
+_warned_unknown_build_types: set[str] = set()
+
+
 def _damage_ratio(peril: str, build_type: str, severity) -> float:
-    row = _HAZUS_MATRIX.get(build_type) or _HAZUS_MATRIX["wood_frame"]
+    row = _HAZUS_MATRIX.get(build_type)
+    if row is None:
+        # No silent fallback — that's how "manufactured" was being modelled as
+        # wood_frame and under-estimating tornado/hail/earthquake loss by
+        # 50–100 % on ~15 % of the book. Surface the miss, contribute zero
+        # loss, and let the operator/test catch it.
+        if build_type not in _warned_unknown_build_types:
+            _warned_unknown_build_types.add(build_type)
+            import sys
+            print(
+                f'[_damage_ratio] unknown build_type "{build_type}" — contributing 0 to '
+                "gross loss. Add it to _HAZUS_MATRIX in api_py/sim_loss.py "
+                "(and mirror in lib/sim/severity.ts).",
+                file=sys.stderr,
+            )
+        return 0.0
     base = row.get(peril, 0.0)
     scaled = base * _damage_multiplier(peril, severity)
     return max(0.0, min(1.0, scaled))

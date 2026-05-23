@@ -10,7 +10,7 @@ const TAMPA_POLY: GeoJSON.Polygon = {
 const POLICIES: Policy[] = [
   { id: 1, lat: 27.7, lon: -82.3, tiv: 500_000, build_type: 'wood_frame', zip3: '337' },     // inside
   { id: 2, lat: 27.8, lon: -82.2, tiv: 800_000, build_type: 'masonry',    zip3: '337' },     // inside
-  { id: 3, lat: 30.0, lon: -85.0, tiv: 400_000, build_type: 'mobile_home', zip3: '325' },    // outside
+  { id: 3, lat: 30.0, lon: -85.0, tiv: 400_000, build_type: 'manufactured', zip3: '325' },  // outside
 ];
 
 describe('previewImpact', () => {
