@@ -12,13 +12,20 @@ import type { OptimizedAction, ActionName } from '../portfolio-actions';
 import { ACTION_LABELS } from '../portfolio-actions';
 
 export function renderRecommendation(actions: OptimizedAction[]): string {
-  if (actions.length === 0) return 'No MIP recommendation available.';
-  if (actions.length === 1) {
-    const a = actions[0];
+  // Schema v5: dominant_action can be null under an Infeasible solve.
+  // Filter those out — the optimizer didn't produce a recommendation for
+  // them, and rendering "FORGE recommends null" would be worse than
+  // silence.
+  const decided = actions.filter(
+    (a): a is OptimizedAction & { dominant_action: ActionName } => a.dominant_action !== null,
+  );
+  if (decided.length === 0) return 'No MIP recommendation available.';
+  if (decided.length === 1) {
+    const a = decided[0];
     return `FORGE recommends ${ACTION_LABELS[a.dominant_action].toLowerCase()} on cohort ${a.cohort_id} (${Math.round(a.dominant_share * 100)}%).`;
   }
   const counts: Partial<Record<ActionName, number>> = {};
-  for (const a of actions) counts[a.dominant_action] = (counts[a.dominant_action] ?? 0) + 1;
+  for (const a of decided) counts[a.dominant_action] = (counts[a.dominant_action] ?? 0) + 1;
   const parts = (Object.entries(counts) as [ActionName, number][])
     .sort((a, b) => b[1] - a[1])
     .map(([action, n]) => `${ACTION_LABELS[action].toLowerCase()} ${n} cohort${n > 1 ? 's' : ''}`);

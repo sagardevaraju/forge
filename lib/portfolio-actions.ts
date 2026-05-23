@@ -40,7 +40,14 @@ export type ActionName =
 
 export type OptimizedAction = {
   cohort_id: string;
-  dominant_action: ActionName;
+  /**
+   * `null` when the solver returned `status === "Infeasible"` and every
+   * action share is zero — surfacing `null` (rather than `argmax` of
+   * all zeros which arbitrarily returns the first action and inflates
+   * action_summary with a fake "retain" allocation) lets downstream
+   * consumers render "— infeasible" honestly.
+   */
+  dominant_action: ActionName | null;
   dominant_share: number;
 } & {
   [K in ActionName]: number;
@@ -70,7 +77,27 @@ export interface PortfolioOptimization {
   status: string;
   /** P2.8: solver_mode is 'milp' or 'lp_relaxed_rounded'. */
   solver_mode?: string;
-  objective: number;
+  /**
+   * Schema v5 (2026-05-23): `objective` is `number | null`. Null when the
+   * solver returned `status === "Infeasible"` — the UI must render "—"
+   * over an infeasible solve instead of a fake margin (the pre-v5 code
+   * read `pulp.value(prob.objective)` blindly and got a contaminated
+   * internal LP-relaxed value, which a "RECOMMENDATION" badge then
+   * dressed up as a real recommendation).
+   */
+  objective: number | null;
+  /**
+   * Schema v5 — realized retained tail under the materialized action mix
+   * (mean of the top 1 % of book-loss scenarios after applying each
+   * cohort's chosen action, including the per-scenario `retained_xs`
+   * integration for `cede_xs` cohorts). This is the right scalar to
+   * compare against `budgets.capital_budget`; `book_totals.loss_p99` /
+   * `book_totals.tvar_99` are *gross* book exposure (invariant to the
+   * action mix) and the pre-v5 "Tail exposure" card that read them was
+   * tautological. Null when cohorts lacked `loss_scenarios` or the
+   * solve was infeasible.
+   */
+  retained_tvar_99?: number | null;
   /**
    * Task 24 — treaty-year horizon (ISO ``YYYY-MM-DD``). Defaults to the
    * industry cat treaty cycle (Jul 1 → Jun 30). Optional so older cached
@@ -88,6 +115,13 @@ export interface PortfolioOptimization {
     premium: number;
     loss_p50: number;
     loss_p99: number;
+    /**
+     * Schema v5 — mean of the top 1 % of book-aggregated loss scenarios
+     * BEFORE actions (gross exposure). Reflects the merged sim+prior
+     * empirical tail; pre-v5 there was no honest book-TVaR field and
+     * downstream code conflated `loss_p99` with TVaR-99.
+     */
+    tvar_99?: number;
   };
   action_summary: Record<ActionName, { count: number; tiv: number }>;
   cohorts: OptimizedCohort[];

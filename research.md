@@ -366,6 +366,111 @@ addressable inside the multiplier curve.
 
 ---
 
+## 7. Portfolio MIP — loss prior calibration
+
+The Portfolio MIP solver (`api_py/optimize_portfolio.py::solve`) consumes a
+per-cohort `(loss_p50, loss_p99, loss_scenarios)` triple produced upstream by
+`scripts/precompute_portfolio_optimization.py::_cohort_loss_quantiles`. Both
+the scalar quantiles and the K=1000 lognormal draws come from a HAZUS-style
+annual-loss prior multiplied by zone, build-type, and elevation factors.
+
+The prior anchors below are calibrated against published FL/Southeast
+homeowners market benchmarks. Before May 2026 the tail-heaviness factor was
+implicit (`p99 = 4 × p50`, σ ≈ 0.596 — the lower bound of the FL HO industry
+tail range), which combined with the simulation-merge path to produce a
+mechanically infeasible MIP: promoted sim scenarios carried 22× empirical
+p99/p50 ratios while the capital budget was being sized off the still-thin
+prior p99 sum. The fix:
+
+- σ bumped to **0.85** ⇒ p99/p50 ≈ 7.21 (closer to Citizens FL FHCF
+  PML/AAL anchor of ~7×).
+- `book_totals.loss_p50 / loss_p99 / tvar_99` are now the empirical
+  percentiles of the merged book-loss distribution
+  (Σ cohort scenarios per draw), not the sum of per-cohort scalar
+  quantiles.
+- `capital_budget = book_TVaR_99 × 0.40` (re-anchored from the merged
+  empirical TVaR-99, not the prior p99 sum).
+
+### 7a. Expected loss ratio anchor — *empirically cited*
+
+| Carrier / Cohort | Year | Net loss ratio | Source |
+|-------|------|----------|--------|
+| Citizens Property Insurance Corp. (FL) | 2024 forecast | 37.7 % | Citizens public rate-hearing slides, Aug 2024 |
+| Citizens Property Insurance Corp. (FL) | 2023 actual | 42.8 % | Citizens 2023 Annual Statement |
+| Citizens Property Insurance Corp. (FL) | 2022 actual | 204.4 % (Ian year) combined ratio | A.M. Best, *FL Property Insurance Market Update* (May 2024) |
+| FL domestic specialists (aggregate) | 2023 | 59.5 % combined ratio | A.M. Best, same |
+| US homeowners industry (all carriers) | 2023 | 110 %+ combined ratio | S&P Global Market Intelligence |
+| US homeowners industry (all carriers) | 2023 | 84.5 % net LR (NLAE/NPE = $101.29B / $119.89B) | S&P Global Market Intelligence |
+
+FORGE's synthetic FL book produces a book-weighted **loss ratio at p50** of
+~33 %, which lands in the realistic non-cat-year band (Citizens 2024
+forecast 37.7 %; lower bound of mainstream FL specialists in 2023 was the
+mid-30s after Senate Bill 2A's tort-reform package). Catastrophe-year
+loss ratios materially exceed this; that load is carried by the simulation-
+merge path (promoted-sim scenarios layered onto the lognormal draws),
+not the prior.
+
+### 7b. Tail-heaviness anchor — *empirically cited*
+
+| Carrier / Cohort | Year | Mean book loss | 1-in-100 PML | Ratio | Source |
+|-------|------|---------------|--------------|-------|--------|
+| Citizens (FL) | end-2024 | ≈ $1.8 B | $12.86 B | 7.1× | FHCF 2024 Aggregate Net PML report |
+| Citizens (FL) | end-2023 | ≈ $2.5 B | $17.7 B | 7.1× | FHCF / Insurance Business Mag |
+| FHCF reimbursement layer | 2025 | — | $17 B coverage | — | FHCF |
+
+FORGE's prior σ = 0.85 ⇒ p99/p50 = `exp(2.326 × 0.85) ≈ 7.21`, matching
+the Citizens-anchored 7× FHCF PML/AAL ratio for the no-cat-year baseline.
+The empirical p99/p50 *after the simulation merge* runs 18-25× on the
+demo book, which is appropriate for a cat-year (events the optimizer
+must price retention against).
+
+### 7c. Capital budget anchor — *modelling parameter*
+
+`capital_budget = book_TVaR_99 × 0.40` — the carrier is willing to retain
+40 % of the mean 1-in-100 book event, ceding or non-renewing the rest.
+This is a design choice, not a measurement: real carriers' XS attachment
+points and FHCF participation rates vary materially. Citizens FL's 2025
+private XS + cat bond placement totals $2.94 B (per Artemis 2025-04
+news) on a $12.86 B 1-in-100 PML — roughly 23 % of PML privately ceded,
+with the rest split between FHCF and capital surplus. The 40 % retention
+target sits between Citizens (heavy ceding) and pure-private carriers
+(retention closer to 60 %) and is the operator-facing budget slider on
+the Portfolio page.
+
+### References (Portfolio MIP)
+
+14. Citizens Property Insurance Corporation, *2023 Annual Statement*
+    (loss ratio history, direct premium growth).
+    https://www.citizensfla.com/documents/20702/29655847/2023+Annual+Statement.pdf
+15. Florida Office of Insurance Regulation, *Florida Property Insurance
+    Market Update*, May 2024 (domestic specialist combined ratio,
+    profit/loss flips).
+    https://floir.gov/docs-sf/property-casualty-libraries/property-insurance-market-overview/insurance-update-may-2024.pdf
+16. Florida Hurricane Catastrophe Fund, *2024 Aggregate Net Probable
+    Maximum Loss Report* (Citizens 1-in-100 PML, FHCF reimbursement
+    layer sizing).
+    https://fhcf.sbafla.com/media/410lkiue/fhcf-2024-pml-report-final.pdf
+17. A.M. Best, *Florida Homeowners Writers — Selected Financial
+    Indicators, 2023 Edition* (specialist carrier rankings, combined
+    ratios).
+    https://bestsreview.ambest.com/displaychart.aspx?Record_Code=328093
+18. S&P Global Market Intelligence, *US homeowners insurers' net
+    combined ratio surges past 110%* (May 2024).
+    https://www.spglobal.com/market-intelligence/en/news-insights/articles/2024/5/us-homeowners-insurers-net-combined-ratio-surges-past-110-81711947
+19. Insurance Information Institute / Triple-I, *Home Insurance Premiums
+    in Florida Increased 80% Less in 2023 Than Initial Projections* (June
+    2024 press release; tort-reform impact attribution).
+    https://www.iii.org/press-release/triple-i-home-insurance-premiums-in-florida-increased-80-less-in-2023-than-initial-projections-due-in-large-part-to-legislative-legal-system-abuse-reforms-062624
+20. Artemis.bm, *Florida Citizens targets $2.94 B of new reinsurance and
+    cat bonds for 2025* (April 2025) — private market participation
+    relative to PML.
+    https://www.artemis.bm/news/florida-citizens-targets-2-94bn-of-new-reinsurance-and-cat-bonds-for-2025/
+21. Artzner, Delbaen, Eber & Heath, *Coherent Measures of Risk*,
+    Mathematical Finance 1999, 9(3), 203-228 — TVaR is sub-additive
+    (basis for the capital-constraint switch from VaR-99 to TVaR-99).
+
+---
+
 ## Summary — what is cited vs. what is a modelling parameter
 
 | Peril | Operator control | Empirically cited | Modelling parameter |

@@ -1,18 +1,19 @@
 /**
- * Task P2.18 — Persona toggle modes wired across /portfolio and /events.
+ * Task P2.18 — Persona toggle modes wired across /portfolio.
  *
  * Five-persona toggle (Cat-ops · Actuary · Reinsurance · Field-ops ·
  * Academic) backed by `?persona=<id>` in the URL. Each persona renders a
- * tuned ExecCard set plus quick-links. The tests below mock
- * `next/navigation` so the URL-backed components observe a controlled
- * query string and assert against the rendered cards / links.
+ * tuned ExecCard set on /portfolio. The tests below mock `next/navigation`
+ * so the URL-backed components observe a controlled query string and
+ * assert against the rendered cards. (Phase 3 cleanup removed the `/events`
+ * surface — EventsPersonaScope was deleted along with `/events` being
+ * dropped from PERSONA_AWARE_ROUTES because it never reshaped that page.)
  */
 import { describe, test, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 
 import { PersonaToggle, PersonaToggleUrl } from '@/components/grammar/PersonaToggle';
 import { PortfolioPersonaScope } from '@/components/PortfolioPersonaScope';
-import { EventsPersonaScope } from '@/components/EventsPersonaScope';
 import {
   PERSONAS,
   PERSONA_VALUES,
@@ -228,11 +229,15 @@ describe('PortfolioPersonaScope — per-persona content', () => {
     expect(within(header).getByText('Cession spend')).toBeInTheDocument();
   });
 
-  test('?persona=actuary swaps margin → VaR-99 proxy + adds CRPS + shows /calibration', () => {
+  test('?persona=actuary swaps margin → Retained TVaR-99 + adds CRPS + shows /calibration', () => {
     renderScope('persona=actuary');
     const header = screen.getByTestId('portfolio-header');
     expect(header.getAttribute('data-persona')).toBe('actuary');
-    expect(within(header).getByText('VaR-99 (proxy)')).toBeInTheDocument();
+    // 2026-05-23: card label renamed from "VaR-99 (proxy)" to
+    // "Retained TVaR-99" — schema v5 now ships a real coherent tail
+    // measure (mean of top 1 % of merged book-loss scenarios) rather
+    // than re-purposing book_totals.loss_p99 as a VaR proxy.
+    expect(within(header).getByText('Retained TVaR-99')).toBeInTheDocument();
     expect(within(header).queryByText('Expected margin')).toBeNull();
     expect(within(header).getByText('CRPS')).toBeInTheDocument();
     // Quick-links band carries the /calibration link.
@@ -291,41 +296,6 @@ describe('PortfolioPersonaScope — per-persona content', () => {
     expect(within(gapCard as HTMLElement).getByText('—')).toBeInTheDocument();
     // The trust badge for the synthetic card should read "Demo".
     expect(within(gapCard as HTMLElement).getByText('Demo')).toBeInTheDocument();
-  });
-});
-
-// --- EventsPersonaScope — quick-links surface on /events -------------------
-
-describe('EventsPersonaScope', () => {
-  test('cat-ops (default) renders nothing — no quick-links band', () => {
-    // Cat-ops has no configured quick-links, and the persona toggle now
-    // lives in the global LayoutSubBanner, so this scope renders nothing
-    // at all. Empty DOM is the contract.
-    mockedQuery = '';
-    mockedPathname = '/events';
-    const { container } = render(<EventsPersonaScope />);
-    expect(container.firstChild).toBeNull();
-    expect(screen.queryByTestId('persona-quick-links')).toBeNull();
-  });
-
-  test('?persona=reinsurance surfaces /treaty quick-link', () => {
-    mockedQuery = 'persona=reinsurance';
-    mockedPathname = '/events';
-    render(<EventsPersonaScope />);
-    const links = screen.getByTestId('persona-quick-links');
-    expect(
-      within(links).getByText('Treaty layers').closest('a')?.getAttribute('href'),
-    ).toBe('/treaty');
-  });
-
-  test('?persona=field-ops surfaces adjuster-load (claims) quick-link', () => {
-    mockedQuery = 'persona=field-ops';
-    mockedPathname = '/events';
-    render(<EventsPersonaScope />);
-    const links = screen.getByTestId('persona-quick-links');
-    expect(
-      within(links).getByText('Adjuster-load').closest('a')?.getAttribute('href'),
-    ).toBe('/claims');
   });
 });
 

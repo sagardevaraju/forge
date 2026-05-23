@@ -200,24 +200,39 @@ export function PortfolioWhatIfShell({
     setWarning(null);
   }, [baseline, baselineBudgets]);
 
-  // Derive the ExecCard inputs from the latest solve. capital_used is the
-  // gross VaR-99 carried on book_totals.loss_p99; the matching card label is
-  // "Tail exposure / capital budget" (see PortfolioHeader::capital_used).
+  // Derive the ExecCard inputs from the latest solve.
+  //
+  // capitalUsed is the **realized retained TVaR-99** under the chosen
+  // action mix (`retained_tvar_99` from the artifact / re-solve). Pre-2026
+  // this card read `book_totals.loss_p99` — i.e., the *gross* prior-derived
+  // p99 sum, invariant to the action mix → the card was tautological
+  // ("40 % of X used by X"). Falls back to gross book TVaR-99 (or loss_p99
+  // for v4 artifacts) when the new field is absent so old caches still
+  // render.
+  //
   // cessionSpend is summed scenario-by-scenario from the cohort × action
   // matrix using CESSION_COST_RATE — the previous hardcoded 0 contradicted
   // every solve that recommended cede_qs or cede_xs.
-  const capitalUsed = current.book_totals.loss_p99;
+  const grossBookTail = current.book_totals.tvar_99 ?? current.book_totals.loss_p99;
+  const capitalUsed = current.retained_tvar_99 ?? grossBookTail;
   const cessionSpend = computeProjectedCessionSpend(current);
   const nonrenewUsedTiv = current.action_summary?.non_renew?.tiv ?? 0;
   const nonrenewCapTiv = totalTiv * current.budgets.max_nonrenew_pct;
 
-  // Baseline reference values for delta computation.
-  const baseObjective = baseline.objective;
-  const baseCapitalUsed = baseline.book_totals.loss_p99;
+  // Baseline reference values for delta computation. We follow the same
+  // realized-retained-tail rule for the baseline, so deltas reflect the
+  // operator's intent: "I moved the budget; did the retained tail move?"
+  // — not "did the gross book p99 stay the same?" (which it always does).
+  const baseObjective = baseline.objective ?? 0;
+  const baseGrossTail = baseline.book_totals.tvar_99 ?? baseline.book_totals.loss_p99;
+  const baseCapitalUsed = baseline.retained_tvar_99 ?? baseGrossTail;
   const baseNonrenewUsed = baseline.action_summary?.non_renew?.tiv ?? 0;
 
   const onBaseline = current === baseline;
-  const objectiveDelta = onBaseline ? undefined : formatDeltaM(current.objective - baseObjective) ?? undefined;
+  const currentObj = current.objective ?? 0;
+  const objectiveDelta = onBaseline || current.objective === null
+    ? undefined
+    : formatDeltaM(currentObj - baseObjective) ?? undefined;
   const capitalUsedDelta = onBaseline ? undefined : formatDeltaM(capitalUsed - baseCapitalUsed) ?? undefined;
   const nonrenewUsedDelta = onBaseline ? undefined : formatDeltaM(nonrenewUsedTiv - baseNonrenewUsed) ?? undefined;
 
@@ -232,6 +247,7 @@ export function PortfolioWhatIfShell({
       <div>
         <PortfolioHeader
           totalTiv={totalTiv}
+          status={current.status}
           objective={current.objective}
           capitalUsed={capitalUsed}
           capitalBudget={current.budgets.capital_budget}

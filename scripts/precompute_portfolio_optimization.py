@@ -87,9 +87,26 @@ HORIZON_END = "2027-06-30"
 
 
 # ---------------------------------------------------------------------------
-# HAZUS-derived annual loss prior. Values calibrated so that the worst
-# cohorts (manufactured + VE flood zone, top-quintile TIV) carry ~4-5% annual
-# expected loss ratios, matching FL coastal book benchmarks.
+# HAZUS-derived annual loss prior. Calibrated against published FL/SE
+# coastal homeowners benchmarks:
+#
+#   * Citizens Property Insurance Corp. — 2024 forecast net loss ratio
+#     37.7 % (2023: 42.8 %); FL OIR public hearing slides Aug 2024.
+#   * A.M. Best — *Florida Property Insurance Market Update*, May 2024:
+#     domestic-specialist combined ratio improved from 204 % (2022, Ian
+#     year) to 59.5 % (2023); 18 of 22 largest carriers posted profit.
+#   * FHCF — *2024 Aggregate Net PML Report*: Citizens 1-in-100 PML
+#     $12.86 B end-2024 (was $17.7 B end-2023); mean book AAL ≈ $1.8 B
+#     ⇒ PML/AAL ≈ 7×.
+#
+# Resulting book-weighted statistics (with `premium_annual ≈ 1.65 % of
+# TIV` from `seed_policy_book.py`):
+#
+#   * Expected loss ratio at p50 ~ 35-45 % (Citizens FL 2024 forecast)
+#   * Tail σ = 0.85 ⇒ p99/p50 ≈ 7× (matches Citizens FHCF PML/AAL
+#     anchor; thinner than full-cat AEP curves but appropriate for the
+#     base prior — the heavy cat tail enters via merged sim scenarios,
+#     §K_SCENARIOS docstring + the `_resolve_sim_ids` path).
 # ---------------------------------------------------------------------------
 FLOOD_ZONE_SEVERITY: dict[str, float] = {
     "X": 0.6,   # minimal flood risk
@@ -103,6 +120,19 @@ BUILD_VULNERABILITY: dict[str, float] = {
     "manufactured": 1.9,
 }
 
+# Tail σ for the lognormal posterior on each cohort's annual loss.
+# Previously implicit-from-p99=4×p50 ⇒ σ ≈ 0.596 (too thin for a coastal
+# book; lower bound of FL HO industry tails). Bumped to σ = 0.85 so
+# p99/p50 = exp(2.326 × σ) ≈ 7.2 — anchored to the Citizens FL FHCF PML/
+# AAL ratio (~7×) for the no-cat-year baseline. Heavier cat tails enter
+# the artifact via promoted simulation scenarios when --include-sims=all
+# is passed; recomputation of `book_totals.loss_p99` from the merged
+# samples (below in main()) captures them.
+PRIOR_SIGMA: float = 0.85
+# p99/p50 multiplier under PRIOR_SIGMA. Used by `_cohort_loss_quantiles`
+# to derive p99 from p50 consistently with the lognormal draws.
+PRIOR_P99_P50: float = math.exp(PHI_INV_99 * PRIOR_SIGMA)  # ≈ 7.21
+
 
 def _cohort_loss_quantiles(
     total_tiv: float,
@@ -114,21 +144,30 @@ def _cohort_loss_quantiles(
 ) -> tuple[float, float, list[float]]:
     """Return ``(loss_p50, loss_p99, loss_scenarios)`` for the cohort.
 
-    The scalar quantiles match the HAZUS-style prior used since Task 16:
-    ``p50 = total_tiv × annual_loss_rate`` and ``p99 = 4 × p50`` (heavy-
-    tailed coastal book).
+    The scalar quantiles use a HAZUS-derived prior calibrated to FL/SE
+    homeowners benchmarks (see module-level FLOOD_ZONE_SEVERITY /
+    BUILD_VULNERABILITY citations):
+
+        p50 = total_tiv × annual_loss_rate
+        p99 = p50 × PRIOR_P99_P50   (≈ 7.21 under PRIOR_SIGMA = 0.85)
+
+    Tail-heaviness anchor: FHCF 2024 Aggregate Net PML report puts
+    Citizens FL 1-in-100 PML / mean book loss at ≈ 7×. Pre-2026 the
+    ratio was hard-coded to 4× (σ ≈ 0.596), which is the lower end of
+    the Florida HO range and produced a structurally infeasible MIP
+    once promoted simulation scenarios entered the mix (their empirical
+    p99/p50 was 22× and they tripped the capital constraint, but the
+    capital BUDGET was being computed from the still-thin 4× prior).
+    σ = 0.85 ⇒ p99/p50 ≈ 7.21 closes most of that gap; the rest enters
+    via `main()` recomputing book_totals from merged samples.
 
     Task P2.0 additionally emits ``loss_scenarios`` — a list of K = 1000
     draws from the lognormal posterior whose median is ``p50`` and whose
-    99th percentile is ``p99``. The (μ, σ) of the lognormal are derived
-    from the two scalar quantiles:
+    σ equals ``PRIOR_SIGMA``. The (μ, σ) of the lognormal:
 
         X ~ Lognormal(μ, σ²)
         median(X) = exp(μ)              ⇒ μ = log(p50)
-        P99(X)    = exp(μ + Φ⁻¹(0.99) σ) ⇒ σ = (log(p99) − log(p50)) / 2.326
-
-    With ``p99 = 4 × p50`` that gives σ ≈ log(4) / 2.326 ≈ 0.596 — the
-    same shape as the prior, just resolved into samples.
+        P99(X)    = exp(μ + Φ⁻¹(0.99) σ) ⇒ p99 = p50 × exp(2.326 × σ)
 
     The draws are seeded with ``hash((zip3, build_type, q)) & 0xFFFFFFFF``
     so that the artifact is reproducible *within a single precompute
@@ -143,18 +182,19 @@ def _cohort_loss_quantiles(
     elev_factor = max(0.5, 1.0 - 0.08 * max(0.0, avg_elevation_m))
     annual_loss_rate = 0.012 * zone_factor * build_factor * elev_factor
     p50 = total_tiv * annual_loss_rate
-    # Heavy-tailed: p99 ≈ 4× p50 in the FL/TX coastal book empirically.
-    p99 = p50 * 4.0
+    # p99 = p50 × exp(Φ⁻¹(0.99) × σ). Derived from PRIOR_SIGMA so the
+    # scalar quantile and the K=1000 draws stay consistent.
+    p99 = p50 * PRIOR_P99_P50
 
     # Reconstruct (μ, σ) of the lognormal posterior and draw K samples.
     if p50 > 0:
         mu = math.log(p50)
-        sigma = (math.log(p99) - math.log(p50)) / PHI_INV_99
         seed = hash((zip3, build_type, tiv_quintile)) & 0xFFFFFFFF
         rng = np.random.default_rng(seed=seed)
         # ``lognormal`` parameterized by (mean, sigma) of the underlying
-        # normal — exactly what we derived above.
-        scenarios = rng.lognormal(mean=mu, sigma=sigma, size=K_SCENARIOS)
+        # normal. σ comes from PRIOR_SIGMA so the empirical p99 of these
+        # draws matches the scalar p99 above (to within sampling noise).
+        scenarios = rng.lognormal(mean=mu, sigma=PRIOR_SIGMA, size=K_SCENARIOS)
         loss_scenarios = [float(x) for x in scenarios]
     else:
         # Pathological zero-TIV cohort: deterministic zeros.
@@ -309,28 +349,77 @@ def main(argv: list[str] | None = None) -> None:
 
     total_tiv = sum(c["total_tiv"] for c in cohorts)
     total_premium = sum(c["total_premium"] for c in cohorts)
-    expected_loss_p50 = sum(c["loss_p50"] for c in cohorts)
-    expected_loss_p99 = sum(c["loss_p99"] for c in cohorts)
+
+    # ── Recompute book_totals from MERGED loss_scenarios ──────────────────
+    # Pre-2026 the artifact emitted book_totals.loss_p50 / loss_p99 as
+    # `sum(c.loss_p50)` / `sum(c.loss_p99)` — i.e., the **scalar** prior
+    # quantiles, even when sims had been merged onto each cohort's
+    # `loss_scenarios`. Those scalars are tail-thin (p99/p50 ≈ 7×) and do
+    # not reflect the heavy cat tail that promoted-sim scenarios bring.
+    # The UI then displayed "Tail exposure $78M" while the solver's
+    # constraint was actually fighting the $400M+ merged TVaR-99, producing
+    # mechanical infeasibility on every refresh.
+    #
+    # Fix: compute book_totals.loss_p50 / loss_p99 / tvar_99 as the
+    # **diversified** empirical percentiles of the book-level aggregated
+    # loss distribution (Σ cohort losses per scenario). This captures
+    # both the lognormal prior and any merged sim event scenarios, and
+    # gives credit for portfolio diversification (independent lognormal
+    # draws → book tail much thinner than sum-of-cohort tails). Anchors
+    # are documented in research.md § "Portfolio loss prior calibration".
+    scenarios_matrix = np.array(
+        [c.get("loss_scenarios") or [] for c in cohorts], dtype=float,
+    )
+    if scenarios_matrix.size > 0 and scenarios_matrix.shape[1] > 0:
+        book_loss_scenarios = scenarios_matrix.sum(axis=0)
+        expected_loss_p50 = float(np.percentile(book_loss_scenarios, 50))
+        expected_loss_p99 = float(np.percentile(book_loss_scenarios, 99))
+        # TVaR-99 of the merged book distribution — mean of the top 1 %
+        # of book-loss scenarios (the diversified statistic).
+        threshold = float(np.percentile(book_loss_scenarios, 99))
+        tail = book_loss_scenarios[book_loss_scenarios >= threshold]
+        book_tvar_99 = float(tail.mean()) if tail.size > 0 else float(book_loss_scenarios.max())
+        # Conservative gross sum-of-cohort p99 — ignores diversification.
+        # This is the actuarial worst-case retained tail under the
+        # default treaty layers (every cohort independently breaches p99
+        # in the same year). The capital budget anchors here, NOT on the
+        # diversified book_tvar_99, because:
+        #
+        #   * The diversified book_tvar_99 collapses to ≈ p50 + light
+        #     tail on a prior-only artifact (no cat events) — making
+        #     0.40 × book_tvar_99 tighter than the minimum retained tail
+        #     even with full cede_xs, so the baseline solve is
+        #     infeasible on a fresh book without sim merges.
+        #   * The sum-of-cohort p99 grows monotonically with merged
+        #     sims (each promoted hurricane pushes the per-cohort
+        #     empirical p99 up), so the budget tracks cat exposure
+        #     correctly under the merge path.
+        sum_cohort_p99 = float(np.percentile(scenarios_matrix, 99, axis=1).sum())
+    else:
+        expected_loss_p50 = sum(c["loss_p50"] for c in cohorts)
+        expected_loss_p99 = sum(c["loss_p99"] for c in cohorts)
+        book_tvar_99 = expected_loss_p99
+        sum_cohort_p99 = expected_loss_p99
+
     print(f"  Book TIV: ${total_tiv:,.0f}")
     print(f"  Book premium: ${total_premium:,.0f}")
-    print(f"  Aggregate expected loss (p50): ${expected_loss_p50:,.0f}")
-    print(f"  Aggregate tail loss (p99):     ${expected_loss_p99:,.0f}")
+    print(f"  Book p50 loss (diversified):       ${expected_loss_p50:,.0f}")
+    print(f"  Book p99 loss (diversified):       ${expected_loss_p99:,.0f}")
+    print(f"  Book TVaR-99 (mean top 1 %, div):  ${book_tvar_99:,.0f}")
+    print(f"  Σ per-cohort p99 (gross):           ${sum_cohort_p99:,.0f}")
+    print(f"  Implied loss ratio at p50:          {expected_loss_p50/total_premium*100:.1f}%")
 
-    # Budgets calibrated to the synthetic FL/TX/LA/NC book.
-    #
-    # Task P2.7 update: bumped capital_budget multiplier 0.30 → 0.40 to
-    # accommodate the new honest ``cede_xs`` capital coefficient. Before
-    # P2.7, ``cede_xs`` zeroed its retained-tail capital (a mock-grade
-    # shortcut — see ``api_py.optimize_portfolio.solve()`` docstring),
-    # which left the 0.30 budget feasible only because XS was a "free"
-    # capital lever. P2.7 prices ``cede_xs`` at its real retained tail
-    # (~0.375 × loss_p99 with default treaty layers), so the minimum
-    # achievable book capital is ~0.32 × loss_p99 with the 0.15 non_renew
-    # cap. The 0.40 budget gives the solver a usable margin without
-    # forcing every cohort into ``non_renew``.
-    capital_budget = expected_loss_p99 * 0.40   # tolerate 40% of book p99
+    # Capital budget anchored on Σ per-cohort p99 (gross, no
+    # diversification credit) at 0.40 ×. This is the actuarial
+    # conservative anchor: retain up to 40 % of the worst-case
+    # one-in-100 tail if every cohort breached independently. Yields a
+    # feasible solve at the prior-only baseline AND tracks cat exposure
+    # when sims are merged (Σ per-cohort empirical p99 climbs with each
+    # promoted hurricane).
+    capital_budget = sum_cohort_p99 * 0.40
     max_nonrenew_pct = 0.15                     # may non-renew up to 15% of TIV
     cession_budget = total_premium * 0.10       # 10% of premium for cession
+    print(f"  ⇒ capital_budget = ${capital_budget:,.0f} (40 % of Σ per-cohort p99)")
 
     result = solve(
         cohorts=cohorts,
@@ -341,22 +430,45 @@ def main(argv: list[str] | None = None) -> None:
         horizon_end=HORIZON_END,
         risk_measure="tvar_99" if sim_ids else "var_99",
     )
+    is_infeasible = result["status"] == "Infeasible"
+    obj_value = result.get("objective")
+    obj_display = "—" if obj_value is None else f"${obj_value:,.0f}"
     print(
         f"MIP status: {result['status']}  "
         f"solver_mode: {result.get('solver_mode', 'milp')}  "
-        f"objective: ${result['objective']:,.0f}"
+        f"objective: {obj_display}"
     )
+    if is_infeasible:
+        print(
+            "  ⚠ Infeasible — capital_budget tighter than the minimum"
+            " achievable retained tail under the 15 % non-renew cap +"
+            " cession headroom. The artifact is being written with"
+            " objective=null and zeroed action shares so the UI can"
+            " surface a banner instead of a fake margin number."
+        )
 
     # Decorate each action row with the dominant action label + dominant share
     # so the front-end doesn't need to recompute argmax. ACTIONS is sourced
     # from optimize_portfolio.py so the schema stays in lock-step with the
     # MILP definition (Task P2.8: 11 actions = retain + 7-bucket rate grid +
     # non_renew + cede_qs + cede_xs).
+    #
+    # Infeasible solves are special-cased: every action row has all-zero
+    # shares from the solver, so the `max(ACTIONS, key=...)` argmax
+    # would arbitrarily pick "retain" and inflate the action_summary
+    # with a 570-cohort "retain" allocation that doesn't exist. We
+    # instead leave the summary empty (every action count = 0) and mark
+    # each row's dominant_action as None so downstream consumers can
+    # render "— infeasible" rather than a fabricated dominant action.
     cohort_by_id = {c["id"]: c for c in cohorts}
     enriched_actions = []
     action_summary = {a: {"count": 0, "tiv": 0.0} for a in ACTIONS}
     for row in result["actions"]:
         cid = row["cohort_id"]
+        if is_infeasible:
+            enriched = {**row, "dominant_action": None, "dominant_share": 0.0}
+            enriched_actions.append(enriched)
+            continue
         dominant = max(ACTIONS, key=lambda a: row.get(a, 0.0))
         enriched = {
             **row,
@@ -408,15 +520,31 @@ def main(argv: list[str] | None = None) -> None:
         #       (typically exactly one at 1.0 under the MILP path).
         #       Holders of v3 artifacts must re-run
         #       `python -m scripts.precompute_portfolio_optimization`.
-        # Holders of v1/v2/v3 artifacts must re-run
+        #   5 — 2026-05-23: book_totals.loss_p50/loss_p99 are now the
+        #       empirical p50/p99 of the BOOK-LEVEL aggregated loss
+        #       distribution (Σ cohort losses per scenario), not the
+        #       sum of per-cohort scalar quantiles. Adds
+        #       book_totals.tvar_99 (mean of top 1 % of book-loss
+        #       scenarios). Adds top-level `retained_tvar_99`: the
+        #       realized retained tail under the materialized action mix
+        #       (what the "Tail exposure" UI card should actually read).
+        #       Adds top-level `infeasibility_reason` (string | null) so
+        #       the UI can explain why an Infeasible solve happened
+        #       without inventing a reason from constraint deltas.
+        # Holders of v1/v2/v3/v4 artifacts must re-run
         # `python -m scripts.precompute_portfolio_optimization` to refresh.
-        "schema_version": 4,
+        "schema_version": 5,
         "status": result["status"],
         # P2.8: surface which solver path produced this artifact (milp vs
         # lp_relaxed_rounded). UI consumers can render a footnote if the
         # fallback engaged.
         "solver_mode": result.get("solver_mode", "milp"),
         "objective": result["objective"],
+        # Realized retained tail under the materialized action mix.
+        # Mirrors api_py/optimize_portfolio.py::solve() return value;
+        # null when the solver could not compute it (no loss_scenarios on
+        # cohorts, or status=Infeasible).
+        "retained_tvar_99": result.get("retained_tvar_99"),
         "horizon_start": result["horizon_start"],
         "horizon_end": result["horizon_end"],
         "budgets": {
@@ -429,6 +557,7 @@ def main(argv: list[str] | None = None) -> None:
             "premium": total_premium,
             "loss_p50": expected_loss_p50,
             "loss_p99": expected_loss_p99,
+            "tvar_99": book_tvar_99,
         },
         "action_summary": action_summary,
         "cohorts": cohorts_for_artifact,

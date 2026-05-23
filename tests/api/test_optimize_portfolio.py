@@ -944,3 +944,168 @@ def test_p28_lp_relaxed_fallback_via_unsolvable_milp_returns_one_pick() -> None:
         rounded = {a: (1.0 if a == best else 0.0) for a in ACTIONS}
         assert sum(rounded.values()) == 1.0
         assert rounded[best] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Infeasible-handling regression tests
+#
+# These guard the contract that ``solve()`` MUST refuse to publish a junk
+# numeric objective when CBC reports ``Infeasible``. The pre-fix code returned
+# ``pulp.value(prob.objective)`` blindly, which under infeasibility reflects
+# an internal LP-relaxed value (typically the unbounded objective of an all-
+# zero assignment) — a bogus number that the Portfolio UI rendered under a
+# "Recommendation" badge as a fake "expected margin".
+# ---------------------------------------------------------------------------
+def test_solve_returns_null_objective_on_infeasible() -> None:
+    """An impossibly tight capital budget yields status=Infeasible and
+    objective=None (not a contaminated pulp.value reading)."""
+    cohorts = [
+        {
+            "id": "c1",
+            "total_tiv": 1e6,
+            "total_premium": 20_000,
+            "loss_p50": 50_000,
+            "loss_p99": 200_000,
+            "zip3": "330",
+        }
+    ]
+    result = solve(
+        cohorts,
+        # Tighter than ANY single action can satisfy — even cede_xs +
+        # non_renew can't drive retained tail below $1, so this is
+        # mechanically infeasible.
+        capital_budget=1.0,
+        max_nonrenew_pct=0.0,
+        cession_budget=1.0,
+    )
+    assert result["status"] == "Infeasible"
+    assert result["objective"] is None
+    # And every action share is zero (no contaminated allocation leaks out).
+    a = result["actions"][0]
+    for k in (
+        "retain",
+        "reprice_n20",
+        "reprice_n10",
+        "reprice_0",
+        "reprice_p5",
+        "reprice_p10",
+        "reprice_p15",
+        "reprice_p20",
+        "non_renew",
+        "cede_qs",
+        "cede_xs",
+    ):
+        assert a[k] == 0.0, f"infeasible solve leaked non-zero share on {k}"
+
+
+def test_solve_emits_realized_retained_tvar_99() -> None:
+    """``solve()`` now emits ``retained_tvar_99`` — the realized retained
+    tail under the materialized action mix. This is what the
+    PortfolioHeader's "Tail exposure" card should read against the
+    capital_budget constraint (the prior code read book_totals.loss_p99,
+    which is invariant to the action mix → tautological card).
+
+    With a profitable cohort and a generous budget, the optimizer picks
+    a retain-style action, so the realized tail ≈ p99 of the cohort's
+    loss_scenarios."""
+    import numpy as np
+
+    rng = np.random.default_rng(seed=42)
+    scenarios = rng.lognormal(mean=np.log(10_000), sigma=0.5, size=1000).tolist()
+    cohorts = [
+        {
+            "id": "c1",
+            "total_tiv": 1e6,
+            # Premium = 5 × loss_p50 — retain is the strict objective winner
+            # because cede_xs gives up ~45% of loss (0.3·L + 0.15·L) for no
+            # offsetting gain in the objective.
+            "total_premium": 50_000,
+            "loss_p50": 10_000,
+            "loss_p99": 40_000,
+            "loss_scenarios": scenarios,
+        }
+    ]
+    result = solve(
+        cohorts,
+        capital_budget=1e8,
+        max_nonrenew_pct=0.5,
+        cession_budget=1.0,  # zero out cession headroom — forces retain
+    )
+    assert result["status"] == "Optimal"
+    # Sanity: a retain-style action won (no ceding).
+    a = result["actions"][0]
+    assert a["cede_qs"] == 0.0 and a["cede_xs"] == 0.0, (
+        f"expected retain-style action; got {a}"
+    )
+    assert "retained_tvar_99" in result
+    rt = result["retained_tvar_99"]
+    assert rt is not None
+    # Under any retain-style action (incl. rate-grid moves) LOSS_FACTOR=1,
+    # so the realized retained tail equals the cohort's scenario TVaR-99
+    # to within numpy/CBC rounding.
+    expected = float(np.mean([x for x in scenarios if x >= np.percentile(scenarios, 99)]))
+    assert abs(rt - expected) / expected < 0.05
+
+
+def test_retained_tvar_99_drops_when_action_is_cede_xs() -> None:
+    """``retained_tvar_99`` must reflect the chosen action mix: a cede_xs
+    cohort retains only the below-attachment + above-exhaustion slice
+    of each per-scenario draw, so its contribution to the realized
+    TVaR-99 is a fraction of the raw cohort tail. Compared to a baseline
+    that retains, cede_xs should materially reduce ``retained_tvar_99``.
+
+    Construction:
+      * baseline — premium >> loss, no cession headroom → optimizer
+        retains; retained TVaR-99 ≈ scenarios TVaR-99.
+      * cede path — block non_renew (max_nonrenew_pct=0) and tighten the
+        capital budget so retain (~loss_p99) breaches but cede_xs
+        (retained_xs math: below attachment + above exhaustion) fits.
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(seed=7)
+    scenarios = rng.lognormal(mean=np.log(50_000), sigma=0.9, size=1000).tolist()
+    base_cohort = {
+        "id": "c1",
+        "total_tiv": 1e6,
+        # premium=300000, p50=50000, p99=200000 — retain is profitable
+        # but cede_xs only loses 45% of loss for 100% of premium ⇒ when
+        # the budget allows it, retain still wins on the objective.
+        "total_premium": 300_000,
+        "loss_p50": 50_000,
+        "loss_p99": 200_000,
+        "loss_scenarios": scenarios,
+    }
+    # Path A: generous capital + no cession headroom → retain wins.
+    r_retain = solve([base_cohort], capital_budget=1e8, max_nonrenew_pct=0.0, cession_budget=1.0)
+    # Path B: tight capital + non_renew blocked + cession headroom → cede_xs wins.
+    # With default treaty: att = 50000*1.5 = 75000, exh = 200000*2 = 400000.
+    # retain consumes loss_p99 = 200000; cede_xs consumes retained_xs(200000, 75000, 400000) = 75000.
+    r_cede = solve(
+        [base_cohort], capital_budget=100_000, max_nonrenew_pct=0.0, cession_budget=1e6
+    )
+    assert r_retain["status"] == "Optimal"
+    assert r_cede["status"] == "Optimal"
+    # Confirm the two solves picked different actions.
+    assert r_retain["actions"][0]["retain"] + sum(
+        r_retain["actions"][0].get(k, 0.0)
+        for k in (
+            "reprice_n20",
+            "reprice_n10",
+            "reprice_0",
+            "reprice_p5",
+            "reprice_p10",
+            "reprice_p15",
+            "reprice_p20",
+        )
+    ) > 0.5, f"path A should retain; got {r_retain['actions'][0]}"
+    assert r_cede["actions"][0]["cede_xs"] > 0.5, (
+        f"path B should cede_xs; got {r_cede['actions'][0]}"
+    )
+    # The cede path should materially reduce the realized retained tail.
+    assert r_cede["retained_tvar_99"] is not None
+    assert r_retain["retained_tvar_99"] is not None
+    assert r_cede["retained_tvar_99"] < 0.7 * r_retain["retained_tvar_99"], (
+        f"cede_xs failed to reduce retained tail: retain={r_retain['retained_tvar_99']:.0f}  "
+        f"cede={r_cede['retained_tvar_99']:.0f}"
+    )
