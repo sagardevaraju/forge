@@ -1,31 +1,17 @@
 # FORGE — Controlled User Study Protocol (Task P3.26)
 
-**Status:** Pre-registered protocol (per autonomous-execution charter).
-**OSF pre-registration:** [TBD — Sagar files manually]
+**Status:** Committed design protocol — *not* formally pre-registered.
 
-> The autonomous-execution charter explicitly defers OSF filing to the
-> human in the loop (see `memory/auth-vercel-deferred.md` for the
-> external-service handling pattern). This doc commits the protocol so
-> the OSF pre-registration is a paste, not a write.
-
-## Manual follow-up for Sagar
-
-A paste-ready version of this protocol — mapped 1:1 to the OSF form's
-required fields — lives at **`docs/USER_STUDY_PROTOCOL_OSF_FORM.md`**.
-The flow shrinks to:
-
-1. Visit https://osf.io/registries/ and select the **OSF Preregistration**
-   template (or **Preregistration Challenge** for the AsPredicted short
-   form).
-2. Open `docs/USER_STUDY_PROTOCOL_OSF_FORM.md` — each `## OSF Field N`
-   heading maps to one field on the OSF UI. Copy the body of each section
-   into the matching field.
-3. Submit and copy the resulting DOI back into the `OSF pre-registration:`
-   line above. Re-commit as `docs(FORGE): P3.26 OSF DOI - <DOI>`.
-
-Keep this protocol document and `USER_STUDY_PROTOCOL_OSF_FORM.md` in sync
-if you edit before submission (this document is source-of-truth; the
-form-extract is a paste-buffer view of it).
+> **Pre-registration scope.** The original Phase 3 plan called for an OSF
+> preregistration to make the user study peer-review-grade. After
+> reviewing the actual use-case (FORGE is a portfolio / demo project, not
+> a paper-pipeline submission), the OSF preregistration was scoped out
+> deliberately. This protocol is committed to the repo as a **design
+> document** and reproducibility reference — it locks the hypotheses,
+> design, sample size, and analysis plan so any future study run against
+> FORGE can be evaluated against a written-down standard. If FORGE later
+> moves toward an academic submission, this doc is the paste-ready basis
+> for an OSF (or equivalent) preregistration at that point.
 
 ---
 
@@ -173,7 +159,7 @@ plan-mandated sample size (per the autonomous handoff charter).
 
 ## 9. Stopping rule
 
-n = 20 is fixed at pre-registration; no early stopping.
+n = 20 is fixed at protocol commit; no early stopping.
 
 ## 10. Ethics
 
@@ -189,12 +175,12 @@ n = 20 is fixed at pre-registration; no early stopping.
   ingest. Storage on the same Turso DB as FORGE production data
   under an `study_<participant_id>` schema partition.
 
-## 11. Pre-registration time-stamps
+## 11. Time-stamps
 
-- **Protocol committed:** 2026-05-24 (this commit)
-- **OSF DOI:** TBD (Sagar files manually per §Manual follow-up)
-- **Data-collection start:** TBD (post-DOI)
-- **Data-collection end:** TBD (post-DOI + N=20)
+- **Protocol committed:** 2026-05-24
+- **Pre-registration:** not filed (see status note at top of document)
+- **Data-collection start:** TBD (study not yet scheduled)
+- **Data-collection end:** TBD
 - **Analysis lockdown:** at data-collection end
 
 ## 12. References
@@ -206,11 +192,13 @@ n = 20 is fixed at pre-registration; no early stopping.
    of NASA-TLX (Task Load Index)*. North-Holland.
 3. Likert, R. (1932). *A Technique for the Measurement of Attitudes.*
    Archives of Psychology 140.
-4. OSF Preregistration template:
+4. OSF Preregistration template (reference for future use, if the
+   study is ever submitted to peer review):
    https://help.osf.io/article/158-create-a-preregistration
 
 ---
 
-**Status flag:** This is a Phase 3 deliverable. The actual study
-will run after Sagar files the OSF pre-registration. Until then the
-protocol is committed for review.
+**Status flag:** This is a Phase 3 deliverable committed as a design
+document. The actual study would run on demand; this protocol locks
+the hypotheses, design, and analysis plan so any execution can be
+audited against a written-down standard.
