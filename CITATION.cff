@@ -7,13 +7,14 @@ title: "FORGE — Synthetic Policy Book + Multi-Peril Scenario Set"
 version: "0.1.0"
 abstract: >
   FORGE is a scenario-coupled catastrophe-operations console for primary
-  insurers and reinsurers. A single Monte-Carlo scenario set drives three
-  optimization layers simultaneously — Portfolio MIP (CBC + PuLP), Operational
-  LP (VRP for adjuster routing), and a claims pre-flagger — through a shared
-  Decision Reconciler. The deposit bundles the synthetic 10,000-policy book,
-  the multi-peril scenario set (hurricane, severe-convective-storm, wildfire,
-  earthquake, winter storm), and the full codebase that generates and
-  consumes them.
+  insurers and reinsurers. One Monte-Carlo scenario set drives three
+  optimization layers in parallel: a Portfolio MIP (CBC + PuLP), an
+  Operational LP (VRP for adjuster routing), and a claims pre-flagger.
+  A shared Decision Reconciler joins their outputs and flags cross-layer
+  conflicts. The deposit contains the synthetic 10,000-policy book, the
+  multi-peril scenario set (hurricane, severe-convective-storm, wildfire,
+  earthquake, winter storm), and the codebase that generates and consumes
+  both.
 authors:
   - family-names: Devaraju
     given-names: Sagar
