@@ -405,4 +405,75 @@ __all__ = [
     "parse_hurdat2_text",
     "landfall_records",
     "track_pit_histogram",
+    "is_in_region",
+    "REGION_BBOXES",
 ]
+
+
+# ── geographic region filters (Task P3.18 — basin expansion) ───────────────
+#
+# HURDAT2 covers the entire Atlantic basin (US Atlantic + Caribbean +
+# Atlantic Canada + Bahamas / Bermuda / Mexico). The original AUDIT.4
+# calibration treated the parquet as "Atlantic basin" without any
+# geographic filter — implicitly US-Atlantic-dominated (735 / 1111 ≈
+# 66% of HURDAT2 landfalls 1851-2024 are in CONUS). P3.18 makes the
+# region split explicit so callers can fit US-only, Caribbean-only,
+# Canadian-only, or full-basin distributions and compare.
+#
+# Region bounding boxes are loose so a Hurricane Maria (PR) landfall
+# isn't filtered out by overly-tight Greater Antilles boundaries, and
+# so a Sandy hooks-into-NJ landfall stays in `us_atlantic`. The boxes
+# are NOT mutually exclusive by design — a landfall in Bermuda is
+# `caribbean=False, us_atlantic=False, atlantic_canada=False,
+# full_atlantic=True`. The `full_atlantic` predicate is a catchall
+# that always returns True (subject to lat/lon being finite).
+
+REGION_BBOXES: dict[str, dict[str, float]] = {
+    # CONUS Atlantic / Gulf Coast — Florida Keys to Maine, Texas Gulf to
+    # the Eastern Seaboard. Excludes Puerto Rico and US Virgin Islands
+    # (which are Caribbean in this taxonomy).
+    "us_atlantic": {
+        "lat_min": 24.0, "lat_max": 49.0,
+        "lon_min": -100.0, "lon_max": -65.0,
+    },
+    # Caribbean basin — Greater + Lesser Antilles, Puerto Rico, USVI,
+    # Cuba, Hispaniola, Jamaica, Bahamas, southern Gulf approaches.
+    "caribbean": {
+        "lat_min": 10.0, "lat_max": 24.0,
+        "lon_min": -85.0, "lon_max": -60.0,
+    },
+    # Atlantic Canada — Nova Scotia, New Brunswick, PEI, Newfoundland.
+    # Excludes the central / western interior (cold-air dominated, not
+    # tropical-cyclone-prone) and arctic islands.
+    "atlantic_canada": {
+        "lat_min": 43.0, "lat_max": 53.0,
+        "lon_min": -75.0, "lon_max": -50.0,
+    },
+}
+
+
+def is_in_region(lat: float, lon: float, region: str) -> bool:
+    """Return True if ``(lat, lon)`` falls inside the named region.
+
+    ``region`` must be one of ``"us_atlantic"``, ``"caribbean"``,
+    ``"atlantic_canada"``, or ``"full_atlantic"`` (catchall).
+
+    Raises :class:`ValueError` for unknown region names. Non-finite
+    coordinates always return False (defensive — HURDAT2 has no
+    missing-coord sentinels but downstream callers may not be as
+    careful).
+    """
+    finite = bool(np.isfinite(lat) and np.isfinite(lon))
+    if region == "full_atlantic":
+        return finite
+    if region not in REGION_BBOXES:
+        raise ValueError(
+            f"Unknown region '{region}'. Valid: "
+            f"{sorted(REGION_BBOXES) + ['full_atlantic']}"
+        )
+    bbox = REGION_BBOXES[region]
+    return bool(
+        finite
+        and bbox["lat_min"] <= lat <= bbox["lat_max"]
+        and bbox["lon_min"] <= lon <= bbox["lon_max"]
+    )
