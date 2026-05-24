@@ -731,6 +731,26 @@ function LayerTable({ layers }: LayerTableProps) {
               </tr>
             );
           }
+          // Task P3.22 — per-occurrence remaining capacity. Surface
+          // as part of the reinstatements cell so the operator can see
+          // how much layer width is consumed without a separate column.
+          const reinstatementsCell = (() => {
+            const n = layer.reinstatements_remaining;
+            const initial = layer.initial_capacity_usd;
+            const remaining = layer.remaining_capacity_usd;
+            if (initial === undefined || remaining === undefined) {
+              return String(n);
+            }
+            return (
+              <span
+                data-testid="xs-remaining-capacity"
+                data-initial-capacity={String(initial)}
+                data-remaining-capacity={String(remaining)}
+              >
+                {`${n} · ${roundToMillion(remaining)} of ${roundToMillion(initial)} left`}
+              </span>
+            );
+          })();
           return (
             <tr key={`xs-${idx}`} className="border-b border-zinc-100">
               <td className="py-1 pr-3 font-medium">XS</td>
@@ -738,7 +758,7 @@ function LayerTable({ layers }: LayerTableProps) {
                 {`${roundToMillion(layer.attachment)} to ${roundToMillion(layer.exhaustion)}`}
               </td>
               <td className="py-1 pr-3">{`${Math.round(layer.rol * 100)}%`}</td>
-              <td className="py-1 pr-3">{layer.reinstatements_remaining}</td>
+              <td className="py-1 pr-3">{reinstatementsCell}</td>
               <td className="py-1 text-zinc-600">{layer.description ?? ''}</td>
             </tr>
           );
