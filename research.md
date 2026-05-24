@@ -366,6 +366,56 @@ addressable inside the multiplier curve.
 
 ---
 
+## 2d. Earthquake Monte-Carlo plug-in (Task P3.16)
+
+`ml/perils/eq.py` adds an `EQPeril` subclass that produces Monte-Carlo
+earthquake scenarios. Every scenario carries `peril = "earthquake"` so
+the canonical EQ damage curves (`PERIL_SCALES.earthquake` +
+`_HAZUS_MATRIX[..]["earthquake"]`) drive loss compute without
+modification. Mirror invariant pinned in
+`test_eq_loss_compute_uses_earthquake_curves`.
+
+**Per-event distributions:**
+
+- **Magnitude (Mw)** — truncated exponential draw from the
+  Gutenberg-Richter recurrence law. The GR density is
+  ``∝ 10^(−b·M)`` with the regional ``b`` ≈ 1.0 anchor from
+  Hauksson (2011) Southern California Seismic Network catalog. The
+  draw is truncated at Mw 5.53 (Bakun-Wentworth zero-crossing for
+  MMI VI — below this the damage shell has no physical extent and
+  the multiplier is honestly 0; emitting these would bloat the
+  scenario set without contributing to TVaR) and at Mw 8.0 (soft
+  cap above Cascadia subduction max per Goldfinger et al. 2012, but
+  rare enough to cap before they dominate the empirical sample).
+- **Region** — discrete draw across five US high-seismic regions with
+  weights from the USGS NSHM 2023 + COMCAT M ≥ 6 counts 1900-2024:
+  California 55%, Pacific Northwest 10%, Intermountain West 10%,
+  New Madrid 5%, Alaska 20%. Within a region the epicenter is
+  uniform-in-bbox.
+- **MMI-VI damage shell** — Bakun-Wentworth (1997) attenuation
+  ``r(km) = (1.68·Mw − 3.29 − MMI) / 0.0206``, mirrored from
+  `lib/sim/footprint.ts::mmiRadiusKm`. 32-vertex circular polygon
+  (lat/lon converted via 111 km/lat-deg, lon scaled by cos(lat)).
+- **MMI shell radii table** — VI / VII / VIII shells emitted for
+  downstream consumers that want banded loss compute. Mirrored from
+  the operator-side severity scale.
+
+**Calibration sources:**
+
+- Hauksson, E. (2011). "Crustal structure and seismicity distribution
+  adjacent to the Pacific and North America plate boundary in
+  southern California." *Journal of Geophysical Research* 116, B07302.
+  (b ≈ 1.0 anchor.)
+- Goldfinger, C., et al. (2012). "Turbidite event history — Methods
+  and implications for Holocene paleoseismicity of the Cascadia
+  subduction zone." *USGS Professional Paper* 1661-F.
+- Bakun, W. H. & Wentworth, C. M. (1997) — already in references list
+  (MMI attenuation, used as-is).
+- USGS National Seismic Hazard Map 2023.
+  https://www.usgs.gov/programs/earthquake-hazards/national-seismic-hazard-maps
+
+---
+
 ## 5c. Wildfire Monte-Carlo plug-in (Task P3.15)
 
 `ml/perils/wildfire.py` adds a `WildfirePeril` subclass that produces
@@ -1207,6 +1257,17 @@ the caller can switch from `(year, state, event_type)` to
     Communities*; WUI structure growth data.
     https://headwaterseconomics.org/natural-hazards/wildfire/
     (Western US WUI geographic anchor — Task P3.15.)
+21. Hauksson, E. (2011). Crustal structure and seismicity distribution
+    adjacent to the Pacific and North America plate boundary in
+    southern California. *Journal of Geophysical Research* 116, B07302.
+    (Gutenberg-Richter b ≈ 1.0 anchor — Task P3.16.)
+21b. Goldfinger, C., et al. (2012). Turbidite event history—Methods and
+    implications for Holocene paleoseismicity of the Cascadia
+    subduction zone. *USGS Professional Paper* 1661-F.
+    (Cascadia maximum-magnitude soft cap — Task P3.16.)
+21c. USGS National Seismic Hazard Map 2023 — regional weighting
+    among California / PNW / Intermountain West / New Madrid / Alaska.
+    https://www.usgs.gov/programs/earthquake-hazards/national-seismic-hazard-maps
 22. Rouse, J. W., Haas, R. H., Schell, J. A., & Deering, D. W. (1973).
     *Monitoring Vegetation Systems in the Great Plains with ERTS*.
     NASA Goddard Space Flight Center, Third ERTS-1 Symposium.
