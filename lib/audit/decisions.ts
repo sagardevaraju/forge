@@ -114,6 +114,34 @@ export interface ListDecisionsFilter {
   limit?: number;
 }
 
+export interface ReverseDecisionParams {
+  id: string;
+  reversed_by: string;
+  /** Test/replay override for `new Date().toISOString()`. */
+  reversed_at?: string;
+}
+
+export interface ReverseDecisionResult {
+  /**
+   * The post-reversal row, or `null` if no row with the given id exists.
+   * On `already_reversed: true`, this is the originally-reversed row — we
+   * do NOT overwrite the first reversal's attribution.
+   */
+  decision: DecisionRow | null;
+  /**
+   * `true` when the decision's `notices_sent_at` is non-null — the rollback
+   * is recorded in the ledger but the operator must also issue manual
+   * rescissions to the customers who already received notices. P3.6 flag.
+   */
+  manual_reversal_required: boolean;
+  /**
+   * `true` when the decision was already reversed before this call. The
+   * write is a no-op in that case; the original reversed_at + reversed_by
+   * stay put.
+   */
+  already_reversed: boolean;
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // Canonical JSON + hashing — mirrors lib/audit/log.ts (P2.36).
 // ────────────────────────────────────────────────────────────────────────
@@ -312,4 +340,56 @@ export async function markNoticesSent(
     args: [sentAt, id],
   });
   return getDecision(id);
+}
+
+/**
+ * Task P3.6 — Roll back a decision by stamping `reversed_at` + `reversed_by`.
+ *
+ * Idempotent: a repeat call on an already-reversed decision is a no-op;
+ * the original reversal attribution is preserved (we don't overwrite who
+ * pulled the lever first).
+ *
+ * If the decision's `notices_sent_at` is non-null, the result carries
+ * `manual_reversal_required: true` — the rollback row is written, but the
+ * caller (route, UI) must also surface the customer-list payload so the
+ * operator can issue rescissions for the notices already in flight.
+ *
+ * WORM compatibility: the UPDATE here touches only `reversed_at` +
+ * `reversed_by`, both on the lifecycle-column allowlist in
+ * `lib/db/client.ts` (P3.7). A WORM violation here would mean the
+ * allowlist drifted.
+ */
+export async function reverseDecision(
+  params: ReverseDecisionParams,
+): Promise<ReverseDecisionResult> {
+  const reversedBy = params.reversed_by?.trim() ?? '';
+  if (reversedBy.length === 0) {
+    throw new Error('reverseDecision: reversed_by must be a non-empty string');
+  }
+
+  const existing = await getDecision(params.id);
+  if (!existing) {
+    return { decision: null, manual_reversal_required: false, already_reversed: false };
+  }
+
+  if (existing.reversed_at !== null) {
+    return {
+      decision: existing,
+      manual_reversal_required: existing.notices_sent_at !== null,
+      already_reversed: true,
+    };
+  }
+
+  const reversedAt = params.reversed_at ?? new Date().toISOString();
+  await db.execute({
+    sql: 'UPDATE decisions SET reversed_at = ?, reversed_by = ? WHERE id = ?',
+    args: [reversedAt, reversedBy, params.id],
+  });
+
+  const updated = await getDecision(params.id);
+  return {
+    decision: updated,
+    manual_reversal_required: updated?.notices_sent_at !== null,
+    already_reversed: false,
+  };
 }
