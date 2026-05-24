@@ -243,6 +243,100 @@ def ils_annual_coupon(principal: float, coupon_rate: float) -> float:
     return p * r
 
 
+# ── Task P3.22 — Reinstatement modeling (per-occurrence capacity) ─────────
+#
+# A reinstatement clause lets an XS layer be "reset" after a covered
+# loss: the reinsurer's capacity is refreshed, the cedant pays a
+# reinstatement premium equal to a pro-rata fraction of the original
+# premium times a factor (the standard cat-XS convention is
+# "100% at 100%" — exhausting the layer costs the full original
+# premium again). FORGE surfaces remaining capacity in /treaty as a
+# MIP **input** (visible to the operator and to downstream cession-
+# sizing logic) NOT as a constraint — per-event capacity bounds are
+# not enforced in the precompute solve.
+#
+# State variables:
+#   - initial_capacity = (N + 1) · width    (N reinstatements after the
+#                                            initial layer fire)
+#   - remaining_capacity = current available capacity after losses
+#                          to date
+
+
+def initial_layer_capacity(
+    attachment: float,
+    exhaustion: float,
+    reinstatements: int,
+) -> float:
+    """Initial per-occurrence layer capacity, in dollars.
+
+    ``capacity = (reinstatements + 1) · width``. A 2-reinstatement
+    $40M xs $20M layer (width $40M) has initial capacity $120M (the
+    layer can absorb the full $40M three times). Negative inputs
+    clamp at 0.
+    """
+    width = max(0.0, exhaustion - attachment)
+    n = max(0, int(reinstatements))
+    return width * (n + 1)
+
+
+def apply_loss_to_layer(
+    loss: float,
+    attachment: float,
+    exhaustion: float,
+    remaining_capacity: float,
+) -> tuple[float, float]:
+    """Apply a single-event loss to a layer with capped capacity.
+
+    Returns ``(ceded_amount, new_remaining_capacity)``:
+
+    - ``ceded_amount`` is the amount the reinsurer pays — equal to
+      :func:`ceded_xs` clipped at the remaining capacity. If the layer
+      is exhausted (``remaining_capacity == 0``) before any loss is
+      applied, ``ceded_amount = 0``.
+    - ``new_remaining_capacity = max(0, remaining_capacity − ceded_amount)``.
+
+    The cedant's retention is *not* returned by this function — the
+    portion of the loss that escapes the capacity-capped layer
+    (because the layer is exhausted) falls back on the cedant on
+    top of the standard XS retention; callers compute that explicitly
+    if they need it.
+    """
+    cap = max(0.0, remaining_capacity)
+    raw_ceded = ceded_xs(loss, attachment, exhaustion)
+    ceded = min(raw_ceded, cap)
+    return ceded, max(0.0, cap - ceded)
+
+
+def reinstatement_premium(
+    loss_paid_in_layer: float,
+    layer_width: float,
+    original_premium: float,
+    reinstatement_factor: float = 1.0,
+) -> float:
+    """Reinstatement premium owed by the cedant for refreshing the layer.
+
+    The standard cat-XS pricing convention is "100% at 100%": the
+    cedant pays the original premium multiplied by the pro-rata
+    fraction of the layer that the reinsurer paid out, multiplied
+    by the reinstatement factor (typically 1.0).
+
+        reinstatement_premium = (loss_paid_in_layer / layer_width)
+                              · original_premium · reinstatement_factor
+
+    Discounted reinstatements (e.g. "100% at 50%") use
+    ``reinstatement_factor = 0.5``; free reinstatements use 0.0.
+    Inputs are clamped non-negative; a zero or negative ``layer_width``
+    returns 0 (degenerate layer).
+    """
+    width = max(0.0, layer_width)
+    if width <= 0.0:
+        return 0.0
+    paid = max(0.0, loss_paid_in_layer)
+    prem = max(0.0, original_premium)
+    factor = max(0.0, reinstatement_factor)
+    return (paid / width) * prem * factor
+
+
 __all__ = [
     "retained_xs",
     "ceded_xs",
@@ -253,4 +347,7 @@ __all__ = [
     "retained_ils",
     "ceded_ils",
     "ils_annual_coupon",
+    "initial_layer_capacity",
+    "apply_loss_to_layer",
+    "reinstatement_premium",
 ]

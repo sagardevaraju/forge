@@ -142,21 +142,40 @@ def _build_layers(
             "rol": 0.18,
             "description": "Quota Share — 50% of every policy ceded.",
         },
+        # Task P3.22 — Working XS with 1 reinstatement. initial_capacity
+        # = (1 + 1) · 40M = 80M. remaining_capacity surfaced as a MIP
+        # input not a constraint (operator-visible, not enforced).
+        # reinstatement_premium_factor = 1.0 = "100% at 100%" (cat-XS
+        # market standard per Guy Carpenter "Reinstatement Terms" 2024).
         {
             "type": "xs",
             "attachment": 20_000_000,
             "exhaustion": 60_000_000,
             "rol": 0.10,
             "reinstatements_remaining": 1,
-            "description": "Working XS layer — $40M xs $20M.",
+            "initial_capacity_usd": 80_000_000,
+            "remaining_capacity_usd": 80_000_000,
+            "reinstatement_premium_factor": 1.0,
+            "description": (
+                "Working XS layer — $40M xs $20M, 1 reinstatement "
+                "(100% at 100%); $80M initial capacity."
+            ),
         },
+        # Task P3.22 — Cat XS with 2 reinstatements. initial_capacity
+        # = (2 + 1) · 60M = 180M.
         {
             "type": "xs",
             "attachment": 60_000_000,
             "exhaustion": 120_000_000,
             "rol": 0.06,
             "reinstatements_remaining": 2,
-            "description": "Cat XS layer — $60M xs $60M.",
+            "initial_capacity_usd": 180_000_000,
+            "remaining_capacity_usd": 180_000_000,
+            "reinstatement_premium_factor": 1.0,
+            "description": (
+                "Cat XS layer — $60M xs $60M, 2 reinstatements "
+                "(100% at 100%); $180M initial capacity."
+            ),
         },
         # Task P3.21 — synthetic ILS / cat-bond layer above the cat XS.
         # Anchors on Artemis Q4-2024 cat-bond ROL median (≈ 8.5% for
@@ -188,7 +207,7 @@ def main() -> None:
     book_p99 = _load_book_p99()
     layers = _build_layers(book_p99, include_fronting=include_fronting)
     payload: dict[str, Any] = {
-        "schema_version": 4,  # P3.21 bumped to 4 with ILSLayer added
+        "schema_version": 5,  # P3.22 bumped to 5 with XS reinstatement fields
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "data_source": "synthetic_demo",
         "book_p99": book_p99,

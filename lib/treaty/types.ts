@@ -35,6 +35,35 @@ export type XSLayer = {
   reinstatements_remaining: number;
   /** Rate-on-line — premium / layer width, in `[0, 1]`. */
   rol: number;
+  /**
+   * Task P3.22 — per-occurrence remaining capacity. Surfaces in
+   * /treaty as a MIP input (NOT a constraint per plan: the operator
+   * sees how much layer width is consumed so they can size the next
+   * decision against it, but the precompute MIP does not enforce
+   * remaining_capacity_usd as an upper bound on cession).
+   *
+   * - `initial_capacity_usd` is the layer width at issuance, including
+   *   reinstatements. For an XS layer with width `(exhaustion -
+   *   attachment)` and N reinstatements: `(N + 1) * width`.
+   * - `remaining_capacity_usd` is the amount still available after
+   *   losses to date.
+   *
+   * Both default to undefined for legacy artifacts so pre-P3.22
+   * readers continue to render. New artifacts (schema_version ≥ 5)
+   * always carry them.
+   */
+  initial_capacity_usd?: number;
+  remaining_capacity_usd?: number;
+  /**
+   * Task P3.22 — reinstatement premium factor. Multiplier on the
+   * pro-rata fraction of the original premium that the cedant pays
+   * to refresh the layer after a loss. 1.0 = "100% at 100%" (the
+   * standard cat-XS convention — exhausting the layer costs the full
+   * original premium again); 0.5 = "100% at 50%" (discounted
+   * reinstatement); 0.0 = free reinstatement (rare). Defaults to 1.0
+   * when unspecified.
+   */
+  reinstatement_premium_factor?: number;
   /** Human-readable description shown in the data table beneath the ladder. */
   description?: string;
 };
@@ -222,11 +251,12 @@ export type TreatyLayer = QSLayer | XSLayer | FrontingLayer | CaptiveLayer | ILS
 export interface TreatyStack {
   /**
    * Schema version. Bumped to 2 in P3.19 (FrontingLayer), 3 in P3.20
-   * (CaptiveLayer), and 4 in P3.21 (ILSLayer). Each older reader is
-   * forward-compatible — they'll simply ignore any layer whose `type`
-   * doesn't appear in their union.
+   * (CaptiveLayer), 4 in P3.21 (ILSLayer), and 5 in P3.22 (per-occurrence
+   * remaining-capacity fields on XSLayer). Older readers are
+   * forward-compatible — additive fields default to undefined and
+   * unknown layer types are simply ignored by older typed unions.
    */
-  schema_version: 1 | 2 | 3 | 4;
+  schema_version: 1 | 2 | 3 | 4 | 5;
   /** ISO-8601 timestamp written by the precompute script. */
   generated_at: string;
   /**
