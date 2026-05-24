@@ -246,6 +246,47 @@ def load_shard_geometries(quadkey: str) -> tuple["shapely.geometry.base.BaseGeom
     )
 
 
+@lru_cache(maxsize=_SHARD_CACHE_SIZE)
+def load_shard_index(quadkey: str):
+    """Return ``(geometries, STRtree)`` for ``quadkey`` — spatial index over the shard.
+
+    Builds a ``shapely.strtree.STRtree`` over the decoded polygons exactly
+    once per shard. Per-chip bbox queries are then O(log N) instead of
+    O(N) over the 100-300k geometries inside a US zoom-9 shard — the
+    difference is ~1 ms vs ~1 s per chip, which is what makes the 10k
+    precompute finish in minutes rather than hours.
+
+    The cached return is a tuple ``(geoms, tree)`` so callers can use the
+    tree for the prefilter and the geoms tuple for indexing back into.
+    Building the tree itself adds ~0.5 s to a fresh shard load; the
+    one-time cost is dwarfed by the per-policy savings.
+    """
+    from shapely.strtree import STRtree  # noqa: PLC0415
+
+    geoms = load_shard_geometries(quadkey)
+    tree = STRtree(list(geoms))
+    return geoms, tree
+
+
+def reduce_with_index(
+    geoms: tuple,  # noqa: ANN001
+    tree,         # noqa: ANN001 — shapely.strtree.STRtree
+    chip_bbox: tuple[float, float, float, float],
+) -> RoofComplexity:
+    """Same contract as :func:`reduce_geometries` but uses a pre-built STRtree.
+
+    The tree's ``query()`` does a bbox prefilter in O(log N); we then
+    centroid-check the candidates the same way :func:`reduce_geometries`
+    does to keep behaviour identical on edge cases (buildings whose
+    centroid is outside the bbox even though the bbox intersects them).
+    """
+    import shapely.geometry as sg  # noqa: PLC0415
+
+    candidates_idx = tree.query(sg.box(*chip_bbox))
+    candidate_geoms = [geoms[i] for i in candidates_idx]
+    return reduce_geometries(candidate_geoms, chip_bbox)
+
+
 def label_for_policy(
     lat: float,
     lon: float,
@@ -270,6 +311,6 @@ def label_for_policy(
     from ml.cv.labels.quadkey import latlon_to_quadkey  # noqa: PLC0415
 
     qk = latlon_to_quadkey(lat, lon, zoom=9)
-    geometries = load_shard_geometries(qk)
+    geoms, tree = load_shard_index(qk)
     bbox = chip_bbox if chip_bbox is not None else default_chip_bbox(lat, lon)
-    return reduce_geometries(geometries, bbox)
+    return reduce_with_index(geoms, tree, bbox)

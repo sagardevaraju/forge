@@ -151,13 +151,17 @@ function cohort(over: Partial<Cohort>): Cohort {
     policy_count: 5,
     total_tiv: 1_000_000,
     total_premium: 25_000,
-    // Task 13 — typed CvFeatures (5 modeled dims; 3 unmodeled dropped).
+    // Task P2.37 — typed CvFeatures with all 8 dims modeled + per-dim
+    // source pointer (`bandmath` | `esa_worldcover` | `ms_buildings`).
     avg_cv_features: {
-      vegetation_density: { value: 0, modeled: true },
-      fuel_proximity: { value: 0, modeled: true },
-      water_proximity: { value: 0, modeled: true },
-      elevation_bucket: { value: 0, modeled: true },
-      structure_density: { value: 0, modeled: true },
+      vegetation_density: { value: 0, modeled: true, source: 'bandmath' },
+      imperviousness: { value: 0, modeled: true, source: 'esa_worldcover' },
+      fuel_proximity: { value: 0, modeled: true, source: 'bandmath' },
+      roof_complexity: { value: 0, modeled: true, source: 'ms_buildings' },
+      water_proximity: { value: 0, modeled: true, source: 'bandmath' },
+      elevation_bucket: { value: 0, modeled: true, source: 'bandmath' },
+      tree_overhang: { value: 0, modeled: true, source: 'esa_worldcover' },
+      structure_density: { value: 0, modeled: true, source: 'bandmath' },
     },
     modal_flood_zone: 'X',
     avg_elevation_m: 3,
@@ -394,17 +398,20 @@ describe('PortfolioDrillDown', () => {
     expect(screen.queryByRole('img', { name: /vegetation density/i })).toBeNull();
   });
 
-  test('populated cv_features render per-dim bars and values', () => {
+  test('populated cv_features render per-dim bars and values (all 8 dims)', () => {
     const cohorts: Cohort[] = [
       cohort({
         id: '330_wood_frame_q0',
         zip3: '330',
         avg_cv_features: {
-          vegetation_density: { value: 0.42, modeled: true },
-          fuel_proximity: { value: 0.18, modeled: true },
-          water_proximity: { value: 0.55, modeled: true },
-          elevation_bucket: { value: 0.7, modeled: true },
-          structure_density: { value: 0.33, modeled: true },
+          vegetation_density: { value: 0.42, modeled: true, source: 'bandmath' },
+          imperviousness: { value: 0.61, modeled: true, source: 'esa_worldcover' },
+          fuel_proximity: { value: 0.18, modeled: true, source: 'bandmath' },
+          roof_complexity: { value: 0.29, modeled: true, source: 'ms_buildings' },
+          water_proximity: { value: 0.55, modeled: true, source: 'bandmath' },
+          elevation_bucket: { value: 0.7, modeled: true, source: 'bandmath' },
+          tree_overhang: { value: 0.14, modeled: true, source: 'esa_worldcover' },
+          structure_density: { value: 0.33, modeled: true, source: 'bandmath' },
         },
       }),
     ];
@@ -412,9 +419,42 @@ describe('PortfolioDrillDown', () => {
 
     // No unpopulated callout when real values are present.
     expect(screen.queryByTestId('property-features-unpopulated')).toBeNull();
-    // The numeric readouts for each dim are present.
-    expect(screen.getByText('0.42')).toBeInTheDocument();
-    expect(screen.getByText('0.18')).toBeInTheDocument();
-    expect(screen.getByText('0.55')).toBeInTheDocument();
+    // The numeric readouts for the band-math + ESA WC + MS Buildings dims
+    // are present (one representative per source).
+    expect(screen.getByText('0.42')).toBeInTheDocument();   // bandmath
+    expect(screen.getByText('0.61')).toBeInTheDocument();   // esa_worldcover
+    expect(screen.getByText('0.29')).toBeInTheDocument();   // ms_buildings
+  });
+
+  // Task P2.37 — the panel surfaces a citation footer listing every
+  // upstream data source actually used by the visible cohorts (ESA
+  // WorldCover under CC-BY-4.0 + MS Building Footprints under ODbL-1.0,
+  // plus the band-math source identifier). Required to satisfy the
+  // ODbL attribution clause for derivative works.
+  test('property-features footer cites every upstream source with license', () => {
+    const cohorts: Cohort[] = [
+      cohort({
+        id: '330_wood_frame_q0',
+        zip3: '330',
+        avg_cv_features: {
+          vegetation_density: { value: 0.42, modeled: true, source: 'bandmath' },
+          imperviousness: { value: 0.61, modeled: true, source: 'esa_worldcover' },
+          fuel_proximity: { value: 0.18, modeled: true, source: 'bandmath' },
+          roof_complexity: { value: 0.29, modeled: true, source: 'ms_buildings' },
+          water_proximity: { value: 0.55, modeled: true, source: 'bandmath' },
+          elevation_bucket: { value: 0.7, modeled: true, source: 'bandmath' },
+          tree_overhang: { value: 0.14, modeled: true, source: 'esa_worldcover' },
+          structure_density: { value: 0.33, modeled: true, source: 'bandmath' },
+        },
+      }),
+    ];
+    render(<PortfolioDrillDown zip3="330" cohorts={cohorts} enablePins={false} onClose={() => {}} />);
+
+    const citations = screen.getByTestId('cv-feature-citations');
+    expect(citations.textContent).toMatch(/Sentinel-2 band math/);
+    expect(citations.textContent).toMatch(/ESA WorldCover/);
+    expect(citations.textContent).toMatch(/CC-BY-4\.0/);
+    expect(citations.textContent).toMatch(/Microsoft US Building Footprints/);
+    expect(citations.textContent).toMatch(/ODbL-1\.0/);
   });
 });

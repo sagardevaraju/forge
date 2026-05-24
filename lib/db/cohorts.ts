@@ -22,14 +22,14 @@
  *   bucket cutpoints + groupings in JS. This keeps the code portable and is
  *   measurably faster than firing 10k single-row queries.
  * - `cv_features` on the row is a JSON string of 8 floats emitted by the
- *   CV head (see `ml/cv/inference.py`). We average element-wise but ONLY
- *   surface the 5 modeled dims (indices 0, 2, 4, 5, 7). Phase 1 ships with
- *   3 dims (`imperviousness` @ idx 1, `roof_complexity` @ idx 3,
- *   `tree_overhang` @ idx 6) that have no real label signal — they are
- *   dropped here and re-introduced under Phase 2 / Task P2.37 once NLCD +
- *   OSM weak labels are wired in. `CvFeatures` is a typed object (not a
- *   raw `number[]`) so consumers can't accidentally render an unmodeled
- *   dim as if it were real.
+ *   CV head (see `ml/cv/inference.py`). We average element-wise across
+ *   all 8 modeled dims. Phase 2 / Task P2.37 added external weak-label
+ *   supervision for the 3 previously-unmodeled positions (idx 1
+ *   `imperviousness` ← ESA WorldCover class 50, idx 3 `roof_complexity`
+ *   ← MS Building Footprints Polsby-Popper, idx 6 `tree_overhang` ← ESA
+ *   WorldCover class 10); see `ml/cv/labels/`. `CvFeatures` carries a
+ *   per-dim `source` pointer so the drill-down can render the right
+ *   citation footer without the React layer hard-coding the mapping.
  * - `flood_zone` is aggregated as the mode (most frequent value in the
  *   cohort). Ties are broken by lexical order, which is deterministic.
  */
@@ -49,15 +49,41 @@ export { UNMODELED_CV_DIMS };
 
 /**
  * Position of each modeled dim inside the raw 8-float `cv_features` JSON
- * vector emitted by the CV head. Single source of truth — keep in sync with
- * `ml/cv/inference.py::predict_chip_mock`.
+ * vector emitted by the CV head. Single source of truth — keep in sync
+ * with `ml/cv/inference.py` and `ml/cv/train.py::WEAK_LABEL_INDICES`.
+ *
+ * Phase 2 / Task P2.37 added the three previously-unmodeled positions
+ * (`imperviousness` idx 1, `roof_complexity` idx 3, `tree_overhang`
+ * idx 6) backed by external weak labels (ESA WorldCover, MS Buildings).
  */
+import type { CvFeatureSource } from '../portfolio/cv-features';
+
 const MODELED_DIM_INDEX = {
   vegetation_density: 0,
+  imperviousness: 1,
   fuel_proximity: 2,
+  roof_complexity: 3,
   water_proximity: 4,
   elevation_bucket: 5,
+  tree_overhang: 6,
   structure_density: 7,
+} as const;
+
+/**
+ * Per-dim citation pointer rendered in the drill-down panel. Three
+ * sources cover the 8 dims; the granular mapping lives here so a future
+ * source split (e.g. NLCD impervious replacing ESA WC) is a single-line
+ * change without ripple in the React layer.
+ */
+const DIM_SOURCE: Record<keyof typeof MODELED_DIM_INDEX, CvFeatureSource> = {
+  vegetation_density: 'bandmath',
+  imperviousness: 'esa_worldcover',
+  fuel_proximity: 'bandmath',
+  roof_complexity: 'ms_buildings',
+  water_proximity: 'bandmath',
+  elevation_bucket: 'bandmath',
+  tree_overhang: 'esa_worldcover',
+  structure_density: 'bandmath',
 } as const;
 
 export interface Cohort {
@@ -222,22 +248,42 @@ export async function aggregateCohorts(): Promise<Cohort[]> {
       vegetation_density: {
         value: avgRaw[MODELED_DIM_INDEX.vegetation_density],
         modeled: true,
+        source: DIM_SOURCE.vegetation_density,
+      },
+      imperviousness: {
+        value: avgRaw[MODELED_DIM_INDEX.imperviousness],
+        modeled: true,
+        source: DIM_SOURCE.imperviousness,
       },
       fuel_proximity: {
         value: avgRaw[MODELED_DIM_INDEX.fuel_proximity],
         modeled: true,
+        source: DIM_SOURCE.fuel_proximity,
+      },
+      roof_complexity: {
+        value: avgRaw[MODELED_DIM_INDEX.roof_complexity],
+        modeled: true,
+        source: DIM_SOURCE.roof_complexity,
       },
       water_proximity: {
         value: avgRaw[MODELED_DIM_INDEX.water_proximity],
         modeled: true,
+        source: DIM_SOURCE.water_proximity,
       },
       elevation_bucket: {
         value: avgRaw[MODELED_DIM_INDEX.elevation_bucket],
         modeled: true,
+        source: DIM_SOURCE.elevation_bucket,
+      },
+      tree_overhang: {
+        value: avgRaw[MODELED_DIM_INDEX.tree_overhang],
+        modeled: true,
+        source: DIM_SOURCE.tree_overhang,
       },
       structure_density: {
         value: avgRaw[MODELED_DIM_INDEX.structure_density],
         modeled: true,
+        source: DIM_SOURCE.structure_density,
       },
     };
 

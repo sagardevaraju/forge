@@ -17,6 +17,7 @@ from ml.cv.labels.ms_buildings import (
     RoofComplexity,
     polsby_popper,
     reduce_geometries,
+    reduce_with_index,
 )
 
 
@@ -102,6 +103,32 @@ class TestReduceGeometries:
         out = reduce_geometries(geoms, chip_bbox=(0, 0, 1, 1))
         # Count is capped; scanned reflects the early break.
         assert out.n_buildings == MAX_BUILDINGS_PER_CHIP
+
+
+class TestReduceWithIndex:
+    """``reduce_with_index`` must agree with ``reduce_geometries`` for the
+    same input set — the STRtree is a prefilter, not a behaviour change."""
+
+    @staticmethod
+    def _setup(geoms, bbox):
+        from shapely.strtree import STRtree
+        tree = STRtree(list(geoms))
+        return reduce_with_index(tuple(geoms), tree, bbox), reduce_geometries(geoms, bbox)
+
+    def test_matches_naive_on_squares(self):
+        geoms = [sg.box(cx, 0.5, cx + 0.01, 0.5 + 0.01) for cx in (0.1, 0.3, 0.5, 0.7, 0.9)]
+        with_idx, naive = self._setup(geoms, (0, 0, 1, 1))
+        assert with_idx.value == naive.value
+        assert with_idx.n_buildings == naive.n_buildings
+
+    def test_matches_naive_on_empty(self):
+        with_idx, naive = self._setup([], (0, 0, 1, 1))
+        assert with_idx.value == naive.value == 0.0
+
+    def test_matches_naive_outside_bbox(self):
+        geoms = [sg.box(10, 10, 10.01, 10.01), sg.box(-5, -5, -4.99, -4.99)]
+        with_idx, naive = self._setup(geoms, (0, 0, 1, 1))
+        assert with_idx.n_buildings == naive.n_buildings == 0
 
 
 class TestRoofComplexityDataclass:

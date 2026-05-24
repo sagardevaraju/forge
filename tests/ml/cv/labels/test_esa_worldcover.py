@@ -15,6 +15,7 @@ from ml.cv.labels.esa_worldcover import (
     WC_CLASS_BUILTUP,
     WC_CLASS_TREE,
     WorldCoverFractions,
+    _scene_id_for,
     fractions_from_chip,
     label_for_chip_array,
 )
@@ -117,3 +118,37 @@ class TestLabelForChipArray:
         a = fractions_from_chip(chip)
         b = label_for_chip_array(chip)
         assert a == b
+
+
+class TestSceneIdFor:
+    """ESA WC tile id encodes the SW corner of the 3°×3° tile.
+
+    Verified empirically — MPC STAC search for the point (28.55, -82.45)
+    returns the item ``ESA_WorldCover_10m_2021_v200_N27W084``, so the tile
+    "N27W084" covers latitudes [27°, 30°] (not [24°, 27°]) and longitudes
+    [-84°, -81°] (with W084 being the western edge).
+    """
+
+    def test_fl_hernando_resolves_n27w084(self):
+        assert _scene_id_for(28.55, -82.45) == "N27W084"
+
+    def test_nc_mountain_resolves_n33w084(self):
+        # Asheville, NC ~ 35.5°N -82.5°W → tile spanning [33°, 36°] × [-84°, -81°]
+        assert _scene_id_for(35.5, -82.5) == "N33W084"
+
+    def test_southern_hemisphere(self):
+        # Sydney, Australia ~ -33.87°S 151.21°E → tile [-36°, -33°] × [150°, 153°]
+        assert _scene_id_for(-33.87, 151.21) == "S36E150"
+
+    def test_negative_longitude_at_three_degree_boundary(self):
+        # Right at -82° longitude, west of -82 ≡ tile W084.
+        assert _scene_id_for(28.5, -82.0) == "N27W084"
+        # A pinch east of -81° puts us in the next tile east.
+        assert _scene_id_for(28.5, -80.99) == "N27W081"
+
+    def test_zoom_invariant_to_lat_within_band(self):
+        # Lats 27.0 and 29.999 should both land in N27W084 (band [27, 30]).
+        assert _scene_id_for(27.0, -82.45) == "N27W084"
+        assert _scene_id_for(29.999, -82.45) == "N27W084"
+        # Lat 30.0 crosses into the next tile north.
+        assert _scene_id_for(30.0, -82.45) == "N30W084"

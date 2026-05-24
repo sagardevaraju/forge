@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
@@ -112,65 +113,107 @@ def fractions_from_chip(wc_chip: np.ndarray) -> WorldCoverFractions:
     )
 
 
+def _scene_id_for(lat: float, lon: float) -> str:
+    """Return the ESA WorldCover scene id covering (lat, lon).
+
+    ESA WorldCover ships as 3°×3° tiles. The id encodes the **SW corner**
+    in degrees: ``N27W084`` covers latitudes ``[27°, 30°]`` and longitudes
+    ``[-84°, -81°]`` (verified empirically against the MPC STAC catalog —
+    a search for the point ``(28.55, -82.45)`` returns
+    ``ESA_WorldCover_10m_2021_v200_N27W084``).
+
+    The "N27" label is the lower (southward) edge of the latitude band,
+    not the upper, so we use ``floor(lat / 3) * 3`` not ``ceil``. The
+    longitude side reads the western edge — for negative lon the western
+    edge is ``floor(lon / 3) * 3`` (floor over signed floats works
+    correctly here).
+    """
+    lat_sw = int(math.floor(lat / 3.0) * 3.0)
+    lon_sw = int(math.floor(lon / 3.0) * 3.0)
+    ns = "N" if lat_sw >= 0 else "S"
+    ew = "E" if lon_sw >= 0 else "W"
+    return f"{ns}{abs(lat_sw):02d}{ew}{abs(lon_sw):03d}"
+
+
+@lru_cache(maxsize=32)
+def _open_scene(scene_id: str, year: int = 2021):
+    """Resolve + open one ESA WorldCover scene; reuse across many policies.
+
+    Returns a ``rasterio.io.DatasetReader``. Caller must not close it —
+    it's owned by the cache. The cache size (32) covers all ~20 scenes
+    needed for the synthetic FORGE policy book without thrashing.
+
+    The Microsoft Planetary Computer signed URL is valid for ~24 h, well
+    past any single precompute run.
+    """
+    import planetary_computer  # noqa: PLC0415
+    import pystac_client  # noqa: PLC0415
+    import rasterio  # noqa: PLC0415
+
+    catalog = pystac_client.Client.open(
+        "https://planetarycomputer.microsoft.com/api/stac/v1",
+        modifier=planetary_computer.sign_inplace,
+    )
+    # Match items by id substring — every WC asset id contains the
+    # scene NW-corner string (e.g. ``ESA_WorldCover_10m_2021_v200_N27W084``).
+    # We do an unbounded search and filter locally; the alternative
+    # (intersects=Point) returns thousands of items globally.
+    items = list(catalog.search(
+        collections=["esa-worldcover"],
+        ids=[f"ESA_WorldCover_10m_{year}_v200_{scene_id}",
+             f"ESA_WorldCover_10m_{year}_v100_{scene_id}"],
+        max_items=2,
+    ).items())
+    if not items:
+        # Fall back to bbox search — gives the same result but slightly slower.
+        # Scene id encodes the SW corner; the tile spans
+        # ``[lat_sw, lat_sw + 3] × [lon_sw, lon_sw + 3]``.
+        lat_sw = int(scene_id[1:3]) * (1 if scene_id[0] == "N" else -1)
+        lon_sw = int(scene_id[4:7]) * (1 if scene_id[3] == "E" else -1)
+        items = list(catalog.search(
+            collections=["esa-worldcover"],
+            bbox=[lon_sw + 0.001, lat_sw + 0.001, lon_sw + 3 - 0.001, lat_sw + 3 - 0.001],
+            max_items=5,
+        ).items())
+        items = [it for it in items if scene_id in it.id and f"_{year}_" in it.id]
+    if not items:
+        raise RuntimeError(f"No ESA WorldCover {year} item for scene {scene_id}")
+    return rasterio.open(items[0].assets["map"].href)
+
+
 def fetch_chip(lat: float, lon: float, year: int = 2021,
                window_px: int = DEFAULT_WINDOW_PX) -> np.ndarray:
     """Read a ``window_px × window_px`` ESA WorldCover window centred on (lat, lon).
 
-    Lazily imports ``pystac_client`` / ``planetary_computer`` / ``rasterio``
-    so the rest of the module is importable in test environments without
-    geospatial deps. STAC search resolves to one ESA WorldCover scene
-    (the 2021 product is a single global mosaic split into 3°×3° tiles).
-
-    The window is read in the asset's native EPSG:4326 grid, which is
-    pre-aligned to the same global graticule as Sentinel-2 L2A — pixel
-    centres are at ``(n + 0.5) × 1/12000°``, so a 256×256 window covers
-    exactly the same ground extent the cached chip pipeline targets
-    (modulo the UTM-vs-geographic resampling difference, which is
-    sub-pixel at the chip scale).
+    The owning 3°×3° scene is resolved + opened once via
+    :func:`_open_scene` (LRU-cached, so adjacent policies share the same
+    GDAL dataset and the bottleneck collapses from per-policy STAC roundtrips
+    to per-scene). ESA WorldCover is published in EPSG:4326 with pixel centres
+    on the global graticule, so a 256×256 window centred on the policy's
+    (lat, lon) covers ~2.56 km × 2.56 km — sub-pixel-aligned to the cached
+    Sentinel-2 chip extent.
 
     Raises
     ------
     RuntimeError
         If no scene intersects the requested coordinate.
     """
-    import planetary_computer  # noqa: PLC0415
-    import pystac_client  # noqa: PLC0415
     import rasterio  # noqa: PLC0415
     from rasterio.windows import Window  # noqa: PLC0415
 
-    catalog = pystac_client.Client.open(
-        "https://planetarycomputer.microsoft.com/api/stac/v1",
-        modifier=planetary_computer.sign_inplace,
-    )
-    delta = 0.01
-    items = list(catalog.search(
-        collections=["esa-worldcover"],
-        bbox=[lon - delta, lat - delta, lon + delta, lat + delta],
-        max_items=5,
-    ).items())
-    # Filter to requested year (ids encode year, e.g. ESA_WorldCover_10m_2021_v200_N27W084)
-    items_year = [it for it in items if f"_{year}_" in it.id]
-    if not items_year:
-        items_year = items
-    if not items_year:
-        raise RuntimeError(
-            f"No ESA WorldCover {year} item intersects ({lat:.4f}, {lon:.4f})."
-        )
-
-    item = items_year[0]
-    asset = item.assets["map"]
+    src = _open_scene(_scene_id_for(lat, lon), year=year)
     half = window_px // 2
-    with rasterio.open(asset.href) as src:
-        py, px = src.index(lon, lat)
-        win = Window(col_off=max(px - half, 0), row_off=max(py - half, 0),
-                     width=window_px, height=window_px)
-        data = src.read(1, window=win)
-        # Pad with no-data (0) if the window clips the tile edge.
-        if data.shape != (window_px, window_px):
-            padded = np.zeros((window_px, window_px), dtype=data.dtype)
-            padded[: data.shape[0], : data.shape[1]] = data
-            data = padded
-        return data.astype(np.uint8, copy=False)
+    py, px = src.index(lon, lat)
+    win = Window(col_off=max(px - half, 0), row_off=max(py - half, 0),
+                 width=window_px, height=window_px)
+    data = src.read(1, window=win)
+    # Pad with no-data (0) if the window clips the tile edge — at the
+    # boundary between two ESA WC tiles a chip can straddle the edge.
+    if data.shape != (window_px, window_px):
+        padded = np.zeros((window_px, window_px), dtype=data.dtype)
+        padded[: data.shape[0], : data.shape[1]] = data
+        data = padded
+    return data.astype(np.uint8, copy=False)
 
 
 def label_for_policy(lat: float, lon: float) -> WorldCoverFractions:
