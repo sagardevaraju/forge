@@ -12,11 +12,16 @@ const EXPECTED_TOOL_NAMES = [
   'generate_scenarios',
   'query_book_exposure',
   'draft_sitrep',
+  // AUDIT.5 (2026-05-24) — cone → ZIP3 resolver composes fetch_nhc_cone
+  // with zip3Centroids + pointInPolygon. Free-mode-callable now;
+  // procedure-mode runbook wiring deferred until the executor can
+  // thread one step's result into the next step's args.
+  'resolve_cone_to_zip3s',
 ];
 
 describe('tool-registry', () => {
-  test('exposes exactly 9 tools', () => {
-    expect(TOOLS).toHaveLength(9);
+  test('exposes exactly 10 tools', () => {
+    expect(TOOLS).toHaveLength(10);
   });
 
   test('every expected tool name is present', () => {
