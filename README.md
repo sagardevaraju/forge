@@ -1,5 +1,7 @@
 # FORGE
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20368096.svg)](https://doi.org/10.5281/zenodo.20368096)
+
 **Forecast-driven Operational Risk Governance Engine**
 
 A catastrophe decision intelligence platform for U.S. P&C insurance carriers. FORGE collapses the Monday cat-ops meeting — meteorology brief, actuarial run, field-ops spreadsheet, reinsurance model — into one scenario-coupled console where portfolio, operations, and claims decisions all consume the same Monte Carlo scenario set.
@@ -257,6 +259,33 @@ vercel --prod
 
 ---
 
+## Citation
+
+If you reference FORGE in academic or industry work, please cite the
+dataset card:
+
+```bibtex
+@dataset{forge_2026,
+  title        = {FORGE -- Synthetic Policy Book + Multi-Peril Scenario Set},
+  author       = {Devaraju, Sagar},
+  year         = {2026},
+  month        = {may},
+  publisher    = {Zenodo},
+  version      = {0.1.0},
+  doi          = {10.5281/zenodo.20368096},
+  url          = {https://doi.org/10.5281/zenodo.20368096}
+}
+```
+
+GitHub's "Cite this repository" sidebar (via `CITATION.cff`) renders this
+automatically.
+
+See [`docs/DATASET_CARD.md`](docs/DATASET_CARD.md) for the full
+Datasheets-for-Datasets (Gebru et al. 2018) documentation.
+
 ## License
 
-Educational / class project — no license declared.
+- **Dataset + documentation:** CC-BY-4.0 (as declared in
+  [`docs/DATASET_CARD.md`](docs/DATASET_CARD.md) and `.zenodo.json`)
+- **Code:** no formal license declared yet — treat as
+  "all rights reserved" pending an explicit decision
