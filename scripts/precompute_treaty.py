@@ -114,6 +114,27 @@ def _build_layers(
                 "6% fronting fee on premium."
             ),
         })
+        # Task P3.20 — synthetic captive vehicle absorbing the fronted
+        # cession. Capital position anchored at 1.5× book p99 (consistent
+        # with industry-typical 1.2-2.0× PML capital ratios for cat-
+        # exposed captives per AICAP 2023 single-parent captive survey).
+        # Trapped composition (industry-typical for a 5-year-old captive):
+        #   60% outstanding reserves (open claims)
+        #   25% collateral pledged to fronter (LOC + trust account)
+        #   10% UPR (unearned premium reserve, pro-rata)
+        #   5% free
+        total_capital = book_p99 * 1.5
+        layers.append({
+            "type": "captive",
+            "total_capital_usd": total_capital,
+            "outstanding_reserves_usd": total_capital * 0.60,
+            "collateral_pledged_usd": total_capital * 0.25,
+            "unearned_premium_reserve_usd": total_capital * 0.10,
+            "description": (
+                "Captive absorbing the fronted cession. ~95% trapped "
+                "(reserves + collateral + UPR); ~5% free for redeployment."
+            ),
+        })
     layers.extend([
         {
             "type": "qs",
@@ -149,7 +170,7 @@ def main() -> None:
     book_p99 = _load_book_p99()
     layers = _build_layers(book_p99, include_fronting=include_fronting)
     payload: dict[str, Any] = {
-        "schema_version": 2,  # P3.19 bumped to 2 with FrontingLayer added
+        "schema_version": 3,  # P3.20 bumped to 3 with CaptiveLayer added
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "data_source": "synthetic_demo",
         "book_p99": book_p99,
@@ -162,10 +183,14 @@ def main() -> None:
     n_qs = sum(1 for l in layers if l["type"] == "qs")
     n_xs = sum(1 for l in layers if l["type"] == "xs")
     n_fr = sum(1 for l in layers if l["type"] == "fronting")
+    n_cap = sum(1 for l in layers if l["type"] == "captive")
     print(f"Wrote {OUT_PATH.relative_to(ROOT)}  ({size:,} bytes)")
     print(f"  data_source: synthetic_demo")
     print(f"  book_p99:    ${book_p99:,.0f}")
-    print(f"  layers:      {len(layers)} ({n_fr} fronting + {n_qs} QS + {n_xs} XS)")
+    print(
+        f"  layers:      {len(layers)} "
+        f"({n_fr} fronting + {n_cap} captive + {n_qs} QS + {n_xs} XS)"
+    )
 
 
 if __name__ == "__main__":

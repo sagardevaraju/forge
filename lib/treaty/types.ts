@@ -90,16 +90,75 @@ export type FrontingLayer = {
   description?: string;
 };
 
-export type TreatyLayer = QSLayer | XSLayer | FrontingLayer;
+/**
+ * Task P3.20 — Captive vehicle (trapped vs free capital).
+ *
+ * A captive is an insurance subsidiary the parent owns and uses to
+ * absorb risk that the open market would price unfavorably, or that the
+ * parent wants to retain economically. Captives are typically the
+ * underlying capital provider behind a fronting arrangement
+ * (FrontingLayer.capital_provider === 'captive').
+ *
+ * The central state variable is **trapped vs free capital**:
+ *
+ *   - **Trapped** capital is locked inside the captive to back
+ *     outstanding loss reserves, ceded-collateral letters of credit /
+ *     trust accounts pledged to fronting carriers, and unearned
+ *     premium reserves. It cannot be released as a dividend to the
+ *     parent until the underlying obligation runs off.
+ *   - **Free** capital is the captive's surplus above trapped capital.
+ *     This is what can be dividended out, redeployed into a sidecar /
+ *     ILS investment, or used to absorb a new underwriting line.
+ *
+ *   free_capital = total_capital
+ *                  - outstanding_reserves
+ *                  - collateral_pledged
+ *                  - unearned_premium_reserve
+ *
+ *   trapped_capital = total_capital - free_capital
+ *   trapped_share   = trapped_capital / total_capital
+ *
+ * The TreatyLadder renders this as a side-panel beneath the fronting
+ * band rather than as another vertical layer, because the captive's
+ * capital position is not in the cession waterfall — it's the
+ * destination of the cession.
+ *
+ * Units are USD throughout. Negative values are clipped at write time.
+ */
+export type CaptiveLayer = {
+  type: 'captive';
+  /** Total capital sitting in the captive, in USD. */
+  total_capital_usd: number;
+  /**
+   * Sum of outstanding incurred-but-unpaid loss reserves backing
+   * recognised liabilities. Trapped until claims close.
+   */
+  outstanding_reserves_usd: number;
+  /**
+   * Cash / letters of credit / trust assets pledged to fronting
+   * carriers as collateral. Trapped until the fronting carrier
+   * releases it (typically annually after a loss-run review).
+   */
+  collateral_pledged_usd: number;
+  /**
+   * Unearned premium reserve — premium written but not yet earned.
+   * Trapped on a pro-rata basis as the policy period elapses.
+   */
+  unearned_premium_reserve_usd: number;
+  /** Human-readable description shown in the data table beneath the ladder. */
+  description?: string;
+};
+
+export type TreatyLayer = QSLayer | XSLayer | FrontingLayer | CaptiveLayer;
 
 export interface TreatyStack {
   /**
-   * Schema version. Bumped to 2 in P3.19 to mark the addition of the
-   * `FrontingLayer` variant. Pre-P3.19 readers (`schema_version === 1`)
-   * are forward-compatible — they'll simply ignore any `type: 'fronting'`
-   * layer entries because their union doesn't include the variant.
+   * Schema version. Bumped to 2 in P3.19 (FrontingLayer), and to 3 in
+   * P3.20 (CaptiveLayer). Each older reader is forward-compatible —
+   * they'll simply ignore any layer whose `type` doesn't appear in
+   * their union.
    */
-  schema_version: 1 | 2;
+  schema_version: 1 | 2 | 3;
   /** ISO-8601 timestamp written by the precompute script. */
   generated_at: string;
   /**

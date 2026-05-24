@@ -35,7 +35,29 @@ import type {
   XSLayer,
   QSLayer,
   FrontingLayer,
+  CaptiveLayer,
 } from '@/lib/treaty/types';
+
+// ---------------------------------------------------------------------------
+// Task P3.20 — captive trapped-vs-free helper. Mirrors the python
+// `captive_state` math in api_py/treaty.py so the UI doesn't depend on
+// a server round-trip for a derived quantity.
+
+function captiveDerived(layer: CaptiveLayer): {
+  total: number;
+  trapped: number;
+  free: number;
+  trapped_share: number;
+} {
+  const total = Math.max(0, layer.total_capital_usd);
+  const reserves = Math.max(0, layer.outstanding_reserves_usd);
+  const collateral = Math.max(0, layer.collateral_pledged_usd);
+  const upr = Math.max(0, layer.unearned_premium_reserve_usd);
+  const trapped = reserves + collateral + upr;
+  const free = Math.max(0, total - trapped);
+  const rawShare = total > 0 ? trapped / total : 0;
+  return { total, trapped, free, trapped_share: Math.min(1, rawShare) };
+}
 
 // ---------------------------------------------------------------------------
 // Chart geometry — inline SVG, no chart-library dependency.
@@ -392,6 +414,131 @@ function LadderSvg({ stack, yMax }: LadderSvgProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Task P3.20 — Captive vehicle trapped-vs-free panel. Rendered beneath
+// the ladder (the captive sits *outside* the cession waterfall; it's
+// the destination of the fronted cession, not another reinsurance
+// layer). A single horizontal bar shows the trapped split, color-coded
+// by composition (red = outstanding reserves; amber = collateral
+// pledged; yellow = unearned premium reserve; green = free).
+
+interface CaptivePanelProps {
+  layer: CaptiveLayer | null;
+}
+
+const RESERVES_FILL = '#dc2626';   // red-600 — open claim liabilities
+const COLLATERAL_FILL = '#f59e0b'; // amber-500 — pledged to fronter
+const UPR_FILL = '#fde047';        // yellow-300 — unearned premium reserve
+const FREE_FILL = '#22c55e';       // green-500 — free / redeployable
+
+function CaptivePanel({ layer }: CaptivePanelProps) {
+  if (layer === null) return null;
+  const { total, trapped, free, trapped_share } = captiveDerived(layer);
+  const reserves = Math.max(0, layer.outstanding_reserves_usd);
+  const collateral = Math.max(0, layer.collateral_pledged_usd);
+  const upr = Math.max(0, layer.unearned_premium_reserve_usd);
+  // Visual segment fractions — segments don't have to sum to 1 because
+  // trapped can exceed total (over-reserved captive). Defensive divisor
+  // uses max(total, trapped) so the bar is always inside [0, 1].
+  const denom = Math.max(total, trapped) || 1;
+  const segR = reserves / denom;
+  const segC = collateral / denom;
+  const segU = upr / denom;
+  const segF = free / denom;
+
+  // Risk tier: ≥ 95% trapped is a "fully-reserved" badge — operator
+  // should know new underwriting needs parent capital injection.
+  const tierLabel =
+    trapped_share >= 0.95
+      ? 'fully reserved'
+      : trapped_share >= 0.80
+        ? 'heavily reserved'
+        : trapped_share >= 0.50
+          ? 'moderately reserved'
+          : 'redeployable';
+
+  const fmt = (n: number) => formatMoneyM(n);
+  return (
+    <div
+      data-testid="captive-panel"
+      data-trapped-share={String(trapped_share.toFixed(4))}
+      className="rounded border border-zinc-200 bg-white p-3 flex flex-col gap-2"
+    >
+      <div className="flex items-center justify-between text-sm">
+        <span className="font-medium">Captive vehicle</span>
+        <span
+          data-testid="captive-trapped-share"
+          className="text-xs text-zinc-600 tabular-nums"
+        >
+          {`${Math.round(trapped_share * 100)}% trapped · ${tierLabel}`}
+        </span>
+      </div>
+      <div
+        data-testid="captive-bar"
+        className="relative w-full h-5 rounded overflow-hidden border border-zinc-200 bg-zinc-50"
+      >
+        <div
+          data-testid="captive-bar-reserves"
+          className="absolute top-0 left-0 h-full"
+          style={{ width: `${segR * 100}%`, backgroundColor: RESERVES_FILL }}
+          title={`Outstanding reserves · ${fmt(reserves)}`}
+        />
+        <div
+          data-testid="captive-bar-collateral"
+          className="absolute top-0 h-full"
+          style={{
+            left: `${segR * 100}%`,
+            width: `${segC * 100}%`,
+            backgroundColor: COLLATERAL_FILL,
+          }}
+          title={`Collateral pledged · ${fmt(collateral)}`}
+        />
+        <div
+          data-testid="captive-bar-upr"
+          className="absolute top-0 h-full"
+          style={{
+            left: `${(segR + segC) * 100}%`,
+            width: `${segU * 100}%`,
+            backgroundColor: UPR_FILL,
+          }}
+          title={`Unearned premium reserve · ${fmt(upr)}`}
+        />
+        <div
+          data-testid="captive-bar-free"
+          className="absolute top-0 h-full"
+          style={{
+            left: `${(segR + segC + segU) * 100}%`,
+            width: `${segF * 100}%`,
+            backgroundColor: FREE_FILL,
+          }}
+          title={`Free capital · ${fmt(free)}`}
+        />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+        <div className="flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-sm" style={{ backgroundColor: RESERVES_FILL }} />
+          <span className="text-zinc-700">Reserves {fmt(reserves)}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-sm" style={{ backgroundColor: COLLATERAL_FILL }} />
+          <span className="text-zinc-700">Collateral {fmt(collateral)}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-sm" style={{ backgroundColor: UPR_FILL }} />
+          <span className="text-zinc-700">UPR {fmt(upr)}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-sm" style={{ backgroundColor: FREE_FILL }} />
+          <span data-testid="captive-free-label" className="text-zinc-700">Free {fmt(free)}</span>
+        </div>
+      </div>
+      {layer.description && (
+        <p className="text-xs text-zinc-600">{layer.description}</p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Layer parameters table — rendered beneath the ladder so operators can
 // read off exact terms without hovering.
 
@@ -427,6 +574,28 @@ function LayerTable({ layers }: LayerTableProps) {
                     ? layer.reinstatements_remaining
                     : '—'}
                 </td>
+                <td className="py-1 text-zinc-600">{layer.description ?? ''}</td>
+              </tr>
+            );
+          }
+          if (layer.type === 'captive') {
+            // Task P3.20 — render a single row that points at the
+            // captive panel above (the trapped/free split lives there).
+            const d = captiveDerived(layer);
+            return (
+              <tr
+                key={`captive-${idx}`}
+                data-testid="treaty-table-row-captive"
+                className="border-b border-zinc-100"
+              >
+                <td className="py-1 pr-3 font-medium">Captive</td>
+                <td className="py-1 pr-3">
+                  {`${formatMoneyM(d.total)} total · ${Math.round(
+                    d.trapped_share * 100,
+                  )}% trapped`}
+                </td>
+                <td className="py-1 pr-3">—</td>
+                <td className="py-1 pr-3">—</td>
                 <td className="py-1 text-zinc-600">{layer.description ?? ''}</td>
               </tr>
             );
@@ -559,6 +728,11 @@ export function TreatyLadder({ stack }: TreatyLadderProps) {
       <div className="border rounded bg-white p-3">
         <LadderSvg stack={visibleStack} yMax={yMax} />
       </div>
+      <CaptivePanel
+        layer={
+          visibleStack.layers.find((l): l is CaptiveLayer => l.type === 'captive') ?? null
+        }
+      />
       <LayerTable layers={visibleStack.layers} />
       <ProvenanceFootnote
         source="artifacts/treaty.json"
