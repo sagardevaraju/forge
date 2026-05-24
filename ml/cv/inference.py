@@ -52,6 +52,21 @@ BAND_B11 = 4   # SWIR-1
 _S2_MAX = 10_000.0
 OUTPUT_DIM = 8
 
+# Stable feature-name vector — matches the per-index docstring at the
+# top of the file. Mirrored into the CV inference HTTP route so
+# downstream consumers don't have to maintain a parallel list.
+OUTPUT_FEATURE_NAMES: tuple[str, ...] = (
+    "vegetation_density",
+    "impervious_surface",
+    "fuel_proximity",
+    "roof_condition_proxy",
+    "water_proximity",
+    "elevation_bucket",
+    "ndvi_seasonal_var",
+    "structure_density",
+)
+assert len(OUTPUT_FEATURE_NAMES) == OUTPUT_DIM
+
 ARTIFACT_DIR = Path(__file__).resolve().parent.parent.parent / "artifacts"
 HEAD_ARTIFACT = ARTIFACT_DIR / "cv_head.pt"
 
