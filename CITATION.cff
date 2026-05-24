@@ -1,0 +1,38 @@
+# Citation File Format — https://citation-file-format.github.io/
+# Rendered by GitHub as a "Cite this repository" sidebar link.
+cff-version: 1.2.0
+message: "If you use FORGE in academic or industry research, please cite it as below."
+type: dataset
+title: "FORGE — Synthetic Policy Book + Multi-Peril Scenario Set"
+version: "0.1.0"
+abstract: >
+  FORGE is a scenario-coupled catastrophe-operations console for primary
+  insurers and reinsurers. A single Monte-Carlo scenario set drives three
+  optimization layers simultaneously — Portfolio MIP (CBC + PuLP), Operational
+  LP (VRP for adjuster routing), and a claims pre-flagger — through a shared
+  Decision Reconciler. The deposit bundles the synthetic 10,000-policy book,
+  the multi-peril scenario set (hurricane, severe-convective-storm, wildfire,
+  earthquake, winter storm), and the full codebase that generates and
+  consumes them.
+authors:
+  - family-names: Devaraju
+    given-names: Sagar
+    affiliation: FORGE
+license: CC-BY-4.0
+repository-code: "https://github.com/sagardevaraju/forge"
+url: "https://github.com/sagardevaraju/forge"
+keywords:
+  - reinsurance
+  - catastrophe modeling
+  - portfolio optimization
+  - synthetic data
+  - HAZUS
+  - HURDAT2
+  - Monte Carlo
+  - stochastic optimization
+  - insurance
+  - natural hazards
+# date-released will be populated when v0.1.0 is tagged on GitHub.
+# The Zenodo↔GitHub integration mints the DOI on release; paste it into
+# docs/DATASET_CARD.md front-matter (line 19) and the front-matter of this
+# file (add `identifiers:` block per https://citation-file-format.github.io).
