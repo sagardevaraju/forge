@@ -482,6 +482,52 @@ the Portfolio page.
 | Wildfire | Low/Moderate/High | dNBR burn-severity classes (USGS) | recalibrated 3-step (off the spine; dNBR-anchored) |
 | Winter | WSSI 5 categories | NWS WSSI | recalibrated 5-step (off the spine; Uri/Buffalo-anchored) |
 
+## 8. CV property features — Sentinel-2 band math & mock-mode noise asymptotes
+
+### 8a. Sentinel-2 indices — *empirically cited (formulas)*
+
+The five modeled CV dims surfaced in the Portfolio drill-down derive from
+band-math indices computed on **Sentinel-2 L2A** surface-reflectance chips:
+
+| Dim | Formula | Source |
+|---|---|---|
+| `vegetation_density` | `NDVI = (B08 − B04) / (B08 + B04)` rescaled to `[0,1]` | Rouse et al. 1973 — NASA NDVI definition [22] |
+| `water_proximity` | `NDWI = (B03 − B08) / (B03 + B08)` rescaled to `[0,1]` | McFeeters 1996 — *Int J Remote Sens* 17(7) [23] |
+| `fuel_proximity` | `B11 (SWIR-1) / 10000` (dry-vegetation proxy) | ESA Sentinel-2 SR scale [24] |
+| `elevation_bucket` | `hash(chip_bytes) mod 5 / 4` (deterministic proxy) | placeholder — not derived from a DEM |
+| `structure_density` | Sobel-like gradient mean on NIR, ×20 | Sobel 1968 — operator definition [25] |
+
+Real values require a real Sentinel-2 chip: `scripts/populate_cv_features.py
+--mode {cached,real}` against either a pre-fetched chip cache
+(`ml/cv/data_loaders.py::fetch_chip` → Microsoft Planetary Computer
+`sentinel-2-l2a` collection [26]) or a live PC fetch.
+
+### 8b. Why mock-mode populations are forbidden — *derivation*
+
+`ml/cv/data_loaders.py::mock_chip(lat, lon)` returns `rng.integers(0, 10001,
+size=(5, 256, 256))` — i.e. uniformly-distributed `uint16` noise per band,
+deterministically seeded by lat/lon. Applying the band-math formulas above to
+uniform `[0, 10000]` noise gives closed-form **asymptotic means** that are
+identical for every policy:
+
+| Dim | Asymptotic mean over `U(0, 10000)` noise |
+|---|---|
+| `vegetation_density` | NDVI of i.i.d. uniform bands has expectation 0 → rescaled to **0.50** |
+| `water_proximity` | NDWI of i.i.d. uniform bands has expectation 0 → rescaled to **0.50** |
+| `fuel_proximity` | `E[U/10000] = 0.50` → **0.50** |
+| `elevation_bucket` | hash mod 5 / 4 ∈ {0, 0.25, 0.5, 0.75, 1.0} uniform → mean **0.50** |
+| `structure_density` | edge density of pure noise ≈ 0.05–0.1 × ×20 scaling saturates → **1.00** |
+
+These are the values observed in an earlier draft of this PR — vegetation
+0.50, fuel 0.50, water 0.50, elevation ~0.52, structure 1.00 — when
+`populate_cv_features.py --mode mock` was wired into the seed. They are not
+Sentinel-2 observations; they are the mathematical fingerprint of running
+NDVI/NDWI/SWIR/edge-density on uniform noise. Per CLAUDE.md "no fictional
+data": the drill-down hides the bar chart and surfaces an amber
+"unpopulated" callout when `cv_features = NULL`, and the populate script
+refuses `--mode mock` unless `--allow-mock` is passed explicitly (offline
+training pipelines that need a non-null column to exercise downstream code).
+
 ## References
 
 1. NWS Norman — The Enhanced Fujita Scale. https://www.weather.gov/oun/efscale
@@ -512,3 +558,20 @@ the Portfolio page.
 13. Insurance Information Institute — *Facts + Statistics: Winter Storms*
     (annual industry losses, per-claim severity, frozen-pipe frequency).
     https://www.iii.org/fact-statistic/facts-statistics-winter-storms
+22. Rouse, J. W., Haas, R. H., Schell, J. A., & Deering, D. W. (1973).
+    *Monitoring Vegetation Systems in the Great Plains with ERTS*.
+    NASA Goddard Space Flight Center, Third ERTS-1 Symposium.
+    https://ntrs.nasa.gov/citations/19740022614
+23. McFeeters, S. K. (1996). The use of the Normalized Difference Water
+    Index (NDWI) in the delineation of open water features. *Int J Remote
+    Sens* 17(7), 1425–1432.
+    https://doi.org/10.1080/01431169608948714
+24. ESA Sentinel-2 User Handbook — Level-2A scaled surface reflectance,
+    quantification value 10 000.
+    https://sentinels.copernicus.eu/documents/247904/685211/Sentinel-2_User_Handbook
+25. Sobel, I. (1968). *A 3×3 Isotropic Gradient Operator for Image
+    Processing*. Stanford AI Project, presented Talk at the Stanford
+    Artificial Intelligence Project. (Standard discrete-gradient operator
+    used as the structure_density proxy on the NIR band.)
+26. Microsoft Planetary Computer — `sentinel-2-l2a` STAC collection.
+    https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a

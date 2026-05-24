@@ -384,7 +384,11 @@ describe('PortfolioDrillDown', () => {
 
     const placeholder = screen.getByTestId('property-features-unpopulated');
     expect(placeholder.textContent).toMatch(/cv head not run/i);
-    expect(placeholder.textContent).toMatch(/populate_cv_features/);
+    // Copy must call out *why* mock mode is not a substitute — the
+    // band-math-on-noise asymptotes are spelled out so a reviewer can't
+    // be talked into populating with --mode mock to "fill in the gap."
+    expect(placeholder.textContent).toMatch(/uniform-noise/i);
+    expect(placeholder.textContent).toMatch(/--mode (cached|real)/);
     // The misleading per-dim "0.00" bars are NOT rendered when the panel
     // is in the unpopulated state.
     expect(screen.queryByRole('img', { name: /vegetation density/i })).toBeNull();

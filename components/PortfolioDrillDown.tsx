@@ -635,16 +635,24 @@ export function PortfolioDrillDown({
                   }}
                 >
                   <strong style={{ fontWeight: 600 }}>
-                    CV head not run on this book.
+                    CV head not run on real chips.
                   </strong>{' '}
                   Every policy in the cohort has{' '}
-                  <code style={{ fontFamily: 'monospace' }}>cv_features = NULL</code>{' '}
-                  so the modeled 5-dim vector defaults to zero. Populate with{' '}
+                  <code style={{ fontFamily: 'monospace' }}>cv_features = NULL</code>,
+                  so the modeled 5-dim vector defaults to zero. The panel
+                  intentionally hides the bars rather than displaying
+                  placeholders — running{' '}
                   <code style={{ fontFamily: 'monospace' }}>
-                    python scripts/populate_cv_features.py
-                  </code>
-                  ; values returned here are then real averages over the cohort,
-                  not placeholders.
+                    populate_cv_features.py --mode mock
+                  </code>{' '}
+                  would write band-math statistics over uniform-noise chips
+                  (vegetation ≈ 0.50, water ≈ 0.50, fuel ≈ 0.50, structure ≈
+                  1.00 for every cohort), not Sentinel-2 readings. Populate
+                  with{' '}
+                  <code style={{ fontFamily: 'monospace' }}>--mode cached</code>{' '}
+                  or{' '}
+                  <code style={{ fontFamily: 'monospace' }}>--mode real</code>{' '}
+                  against pre-fetched Sentinel-2 chips for real averages.
                 </div>
               );
             }
