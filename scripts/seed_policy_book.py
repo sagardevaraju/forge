@@ -122,61 +122,20 @@ def generate_policy():
         state, zip3, county, lat, lon,
         tiv, build_year, build_type, flood_zone,
         elevation_m, premium_annual,
-        None,  # cv_features — populated by _populate_cv_features() below
+        # cv_features stays NULL on seed. Populating with `--mode mock` would
+        # be dishonest — mock_chip() emits uniform-random uint16 noise per
+        # band, and NDVI/NDWI/SWIR/edge-density band-math on that noise has
+        # closed-form asymptotic means (NDVI mean = NDWI mean = 0, edges
+        # saturate, hash mod 5 averages to 0.5), so populating mock features
+        # writes the *same five band-math statistics of noise* into every
+        # cohort and the drill-down would render those as if they were real
+        # Sentinel-2 readings. CLAUDE.md "no fictional data": leave NULL,
+        # let the drill-down's amber "CV head not run" callout surface the
+        # honest state, and require `scripts/populate_cv_features.py
+        # --mode {cached,real}` against real Sentinel-2 chips to fill it.
+        None,
         1,  # synthetic — Task 15: tag demo data
     )
-
-
-def _populate_cv_features(db_path: str) -> None:
-    """Run the mock CV head over every seeded policy.
-
-    The seed insert leaves ``cv_features = NULL`` because the lat/lon are
-    not known until the row is materialised — and historically Task 9 ran
-    ``scripts/populate_cv_features.py`` as a separate manual step. That
-    left the documented seeding workflow (a fresh clone + ``python
-    scripts/seed_policy_book.py``) in a degraded state where every
-    ``avg_cv_features`` vector defaulted to zero and the PortfolioDrillDown
-    panel rendered a misleading five-dim chart of 0.00 bars. Wiring the
-    populator at the tail of seed() makes the documented workflow produce
-    a populated book by default; ``scripts/populate_cv_features.py``
-    remains the idempotent re-runner for ``--mode cached`` / ``--mode
-    real`` upgrades.
-    """
-    # Late import: avoids dragging the torch / inference dependency tree into
-    # the seed-only path when CV features aren't going to be populated (tests
-    # that hit seed() against an in-memory DB pass ``populate=False``).
-    from ml.cv.inference import load_chip_features  # noqa: PLC0415
-
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-    cur.execute("SELECT id, lat, lon FROM policies ORDER BY id")
-    rows = cur.fetchall()
-    if not rows:
-        conn.close()
-        return
-    updates: list[tuple[str, int]] = []
-    for policy_id, lat, lon in rows:
-        try:
-            feats = load_chip_features(
-                lat=lat, lon=lon, mode="mock", policy_id=policy_id,
-            )
-            updates.append(
-                (json.dumps([round(float(v), 6) for v in feats]), policy_id),
-            )
-        except Exception:  # noqa: BLE001
-            # Best-effort — a single failure leaves cv_features NULL on that
-            # row; the cohort aggregator handles nulls by skipping them.
-            continue
-    if updates:
-        conn.executemany(
-            "UPDATE policies SET cv_features = ? WHERE id = ?",
-            updates,
-        )
-        conn.commit()
-    cur.execute("SELECT COUNT(*) FROM policies WHERE cv_features IS NOT NULL")
-    populated = cur.fetchone()[0]
-    print(f"  cv_features      : {populated:,} / {len(rows):,} populated")
-    conn.close()
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -214,19 +173,19 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def seed(db_path: str, n: int = N_POLICIES, *, populate_cv_features: bool = True) -> None:
+def seed(db_path: str, n: int = N_POLICIES) -> None:
     """Seed `n` deterministic synthetic policies into the sqlite file at `db_path`.
 
     Idempotent: clears the policies table before inserting. Tagging is
     `synthetic=1` for every row (Task 15) — the CSV upload path is the only
     source of `synthetic=0` rows.
 
-    ``populate_cv_features`` (default ``True``) runs the deterministic mock
-    CV head over every seeded policy after the insert so a fresh-clone
-    workflow lands with a fully-populated book. Pass ``False`` from tests
-    that don't want to drag the inference dependency tree into the seed
-    path (the populator can always be invoked later via
-    ``scripts/populate_cv_features.py``).
+    ``cv_features`` is left NULL on every row by design — populating it
+    requires real Sentinel-2 chips (see ``scripts/populate_cv_features.py
+    --mode {cached,real}``). The drill-down panel surfaces an honest amber
+    "CV head not run" callout for the unpopulated state; running the
+    populator in mock mode would write deterministic band-math statistics
+    over uniform-noise chips, which CLAUDE.md "no fictional data" forbids.
     """
     conn = sqlite3.connect(db_path)
     _ensure_schema(conn)
@@ -276,8 +235,6 @@ def seed(db_path: str, n: int = N_POLICIES, *, populate_cv_features: bool = True
         print(f"    {row[0]}: {row[1]:,}")
 
     conn.close()
-    if populate_cv_features:
-        _populate_cv_features(db_path)
     print("\nDone.")
 
 

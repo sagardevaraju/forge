@@ -60,17 +60,60 @@ def main() -> None:
         default=None,
         choices=["mock", "real", "cached"],
         help=(
-            "Feature extraction path. Default: $FORGE_CV_MODE or 'mock'. "
-            "'cached' requires artifacts/cv_head.pt and a populated chips dir."
+            "Feature extraction path. Default: $FORGE_CV_MODE or 'cached'. "
+            "'cached' requires artifacts/cv_head.pt and a populated chips dir. "
+            "'mock' is REFUSED unless --allow-mock is also passed because "
+            "mock_chip() emits uniform-random uint16 noise and the resulting "
+            "band-math features collapse to the same five asymptotic means "
+            "for every policy — not Sentinel-2 observations."
+        ),
+    )
+    parser.add_argument(
+        "--allow-mock",
+        action="store_true",
+        help=(
+            "Explicitly opt in to mock-mode population. The values written "
+            "are deterministic band-math statistics over uniform noise, NOT "
+            "real CV features — use only for offline training pipelines that "
+            "need a non-null cv_features column to exercise downstream code. "
+            "Never run this against a DB whose drill-down UI a reviewer will "
+            "see: the panel renders the values as if they were real readings."
         ),
     )
     args = parser.parse_args()
 
-    mode = args.mode or os.environ.get("FORGE_CV_MODE", "mock").strip().lower()
+    # Default mode upgraded from 'mock' to 'cached' so the documented
+    # workflow refuses to silently write noise-derived features. Operators
+    # who genuinely want mock-mode (training-pipeline smoke tests) must
+    # pass --mode mock --allow-mock.
+    mode = args.mode or os.environ.get("FORGE_CV_MODE", "cached").strip().lower()
     if mode not in {"mock", "real", "cached"}:
-        mode = "mock"
+        mode = "cached"
+
+    if mode == "mock" and not args.allow_mock:
+        print(
+            "[populate_cv_features] REFUSED: --mode mock without --allow-mock.\n"
+            "  mock_chip() emits uniform-random uint16 noise per band, so the\n"
+            "  resulting NDVI / NDWI / SWIR / edge-density features collapse\n"
+            "  to the same five asymptotic means for every policy:\n"
+            "    vegetation_density ≈ 0.50  (NDVI of noise ≈ 0)\n"
+            "    fuel_proximity     ≈ 0.50  (SWIR mean of uniform[0,10000])\n"
+            "    water_proximity    ≈ 0.50  (NDWI of noise ≈ 0)\n"
+            "    elevation_bucket   ≈ 0.50  (hash mod 5 uniform on {0,…,1})\n"
+            "    structure_density  ≈ 1.00  (edge density of noise saturates)\n"
+            "  These are NOT Sentinel-2 observations and must not be displayed.\n"
+            "  Re-run with --mode {cached,real} against real chips, or pass\n"
+            "  --allow-mock if this is a training-pipeline smoke test.",
+        )
+        raise SystemExit(2)
 
     print(f"[populate_cv_features] mode={mode}  db={DB_PATH}")
+    if mode == "mock":
+        print(
+            "[populate_cv_features] WARNING: mock-mode writes band-math\n"
+            "  statistics over uniform-noise chips. Do not surface the result\n"
+            "  in the UI without a `cv_features_source='mock'` downgrade.",
+        )
 
     # Import here (after path setup) to keep the script runnable from any cwd
     from ml.cv.inference import load_chip_features  # noqa: PLC0415
