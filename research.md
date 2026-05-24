@@ -486,10 +486,14 @@ the Portfolio page.
 
 ### 8a. Sentinel-2 indices — *empirically cited (formulas)*
 
-The five modeled CV dims surfaced in the Portfolio drill-down derive from
-band-math indices computed on **Sentinel-2 L2A** surface-reflectance chips:
+The eight raw CV dims (five surfaced in the Portfolio drill-down) are
+emitted by the trained MLP head fine-tuned on top of a Prithvi/ViT-B
+backbone against **Sentinel-2 L2A** surface-reflectance chips. The
+deterministic mock path uses the same band-math formulas as the head's
+training signal — they are also the formulas a reader should recognise
+when interpreting the dim semantics:
 
-| Dim | Formula | Source |
+| Dim | Formula / signal | Source |
 |---|---|---|
 | `vegetation_density` | `NDVI = (B08 − B04) / (B08 + B04)` rescaled to `[0,1]` | Rouse et al. 1973 — NASA NDVI definition [22] |
 | `water_proximity` | `NDWI = (B03 − B08) / (B03 + B08)` rescaled to `[0,1]` | McFeeters 1996 — *Int J Remote Sens* 17(7) [23] |
@@ -497,12 +501,70 @@ band-math indices computed on **Sentinel-2 L2A** surface-reflectance chips:
 | `elevation_bucket` | `hash(chip_bytes) mod 5 / 4` (deterministic proxy) | placeholder — not derived from a DEM |
 | `structure_density` | Sobel-like gradient mean on NIR, ×20 | Sobel 1968 — operator definition [25] |
 
-Real values require a real Sentinel-2 chip: `scripts/populate_cv_features.py
---mode {cached,real}` against either a pre-fetched chip cache
-(`ml/cv/data_loaders.py::fetch_chip` → Microsoft Planetary Computer
-`sentinel-2-l2a` collection [26]) or a live PC fetch.
+### 8b. Chip cache — *real Sentinel-2 chips on disk*
 
-### 8b. Why mock-mode populations are forbidden — *derivation*
+`artifacts/chips/<NN>/<policy_id>.npy` holds 5-band 256×256 `uint16`
+Sentinel-2 L2A chips, sharded by the first two digits of the policy id.
+The cache is populated by `scripts/cache_s2_chips.py`, which iterates over
+`policies(id, lat, lon)`, calls `ml.cv.data_loaders.fetch_chip()` against
+Microsoft Planetary Computer's `sentinel-2-l2a` STAC collection [26], picks
+the most recent scene with cloud cover < 10 % intersecting the policy
+centroid, and writes the 256×256 reflectance window through
+`save_cached_chip()`.
+
+**Provenance for the demo book (`forge-local.db`):**
+
+- Source: Microsoft Planetary Computer, `sentinel-2-l2a` STAC collection.
+- Fetched: **2026-05-16T05:41:06 → 2026-05-16T10:17:06** (cache_s2_chips.py).
+- Per-policy fetch: most recent scene with cloud cover < 10 % intersecting
+  the policy's `(lat, lon)` centroid; 256×256 px window, 5 bands
+  (B04, B03, B02, B08, B11), stored as raw `uint16` `.npy`.
+- Success: **9,999 / 10,000** policies. One failure: policy `8368` —
+  `RasterioIOError: HTTP response code: 403` on the signed asset URL.
+  Failure list at `artifacts/chips_fetch_failures.txt`; full
+  per-poll log at `artifacts/chips_fetch.log`.
+- The trained MLP head (`artifacts/cv_head.pt`, ~2.2 MB) is tracked in
+  the repo; the chip cache is gitignored (~6 GB).
+
+### 8c. cv_features population — *trained head over real chips*
+
+`scripts/populate_cv_features.py --mode cached` (default) reads each
+cached chip, forwards it through the Prithvi backbone + trained MLP head
+(`predict_chip`), and writes the resulting 8-float vector to
+`policies.cv_features` as a JSON-encoded array. Policies that hit the
+single fetch failure fall through to the mock band-math path
+(`load_chip_features` line 308–312) — for the demo book, that's policy
+`8368` only.
+
+Observed per-dim distribution after running `--mode cached` on the demo
+book (10,000 policies):
+
+| Dim | Mean | Stdev | Min | Max |
+|---|---|---|---|---|
+| `vegetation_density` | 0.483 | 0.011 | 0.427 | 0.539 |
+| `impervious_surface` | 0.524 | 0.011 | 0.468 | 0.580 |
+| `fuel_proximity` | 0.666 | 0.019 | 0.498 | 0.720 |
+| `roof_condition_proxy` | 0.413 | 0.012 | 0.357 | 0.503 |
+| `water_proximity` | 0.331 | 0.019 | 0.269 | 0.502 |
+| `elevation_bucket` | 0.475 | 0.026 | 0.000 | 1.000 |
+| `ndvi_seasonal_var` | 0.502 | 0.033 | 0.447 | 1.000 |
+| `structure_density` | 0.530 | 0.032 | 0.474 | 1.000 |
+
+**Discrimination caveat:** the per-policy stdevs are tight (≈0.01–0.03)
+and the per-ZIP3 averages differ in the third / fourth decimal place
+(FL Hernando 346: vegetation 0.4826 / fuel 0.6716 / water 0.3269;
+TX Harris 770: 0.4826 / 0.6660 / 0.3323). This is a model-quality
+observation, not a data-integrity one — the head is producing real
+outputs on real Sentinel-2 chips, but it doesn't discriminate strongly
+between residential coastal geographies in the US South. Tightening
+the head's signal is a Phase 2 retraining task (NLCD + OSM weak labels
+referenced in `lib/db/cohorts.ts` and the drill-down footnote).
+
+Real values are what the UI surfaces. The previous practice of
+populating via `--mode mock` is forbidden by `populate_cv_features.py`
+unless `--allow-mock` is passed (see §8d below).
+
+### 8d. Why mock-mode populations are forbidden — *derivation*
 
 `ml/cv/data_loaders.py::mock_chip(lat, lon)` returns `rng.integers(0, 10001,
 size=(5, 256, 256))` — i.e. uniformly-distributed `uint16` noise per band,

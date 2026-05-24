@@ -129,9 +129,12 @@ Every commit in the original plan tags a `Task N` from `docs/superpowers/plans/2
 
 ```bash
 npm install                                            # JS deps
-pip install -r requirements.txt                        # Python deps (NOT requirements-train.txt for routes)
+pip install -r requirements.txt                        # Runtime Python deps (NOT requirements-train.txt for routes)
+pip install -r requirements-train.txt                  # Offline-only: torch + timm for CV head inference
 npm run migrate                                        # Create tables in forge-local.db
-python scripts/seed_policy_book.py                     # 10k synthetic policies
+python scripts/seed_policy_book.py                     # 10k synthetic policies (cv_features NULL by design)
+python scripts/cache_s2_chips.py                       # Fetch 10k real Sentinel-2 chips from Microsoft Planetary Computer (~3h, gitignored cache, ~6 GB)
+python scripts/populate_cv_features.py --mode cached   # Run Prithvi+head over real chips → fills cv_features (~10 min)
 python -m scripts.precompute_portfolio_optimization    # Cache the MIP solution
 npm run dev                                            # http://localhost:3000
 
@@ -140,6 +143,8 @@ pytest                                                 # Python tests
 python -m eval.component_metrics                       # Refresh eval JSON
 python -m eval.end_to_end                              # Refresh eval JSON + PNG
 ```
+
+**CV features:** the chip cache + populate step is offline-only and not part of the Vercel build. Without it, `policies.cv_features` stays NULL and the Portfolio drill-down's property-features panel surfaces an honest "CV head not run on real chips" callout instead of any bars. **Never** run `populate_cv_features.py --mode mock` against a UI-facing DB: `mock_chip()` emits uniform-noise bands and the resulting NDVI/NDWI/SWIR/edge-density features collapse to identical band-math asymptotes for every policy (see `research.md` §8b for the derivation). The script refuses `--mode mock` without `--allow-mock` for exactly this reason.
 
 ## Refs
 
