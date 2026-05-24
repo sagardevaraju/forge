@@ -40,11 +40,14 @@ def test_dataset_card_has_cc_by_4_0_license():
     assert "CC-BY-4.0" in text or "Creative Commons Attribution 4.0" in text
 
 
-def test_dataset_card_documents_doi_placeholder_convention():
-    """DOI must be marked TBD with a manual-follow-up callout."""
+def test_dataset_card_carries_real_zenodo_doi():
+    """DOI must be the real Zenodo DOI minted on the v0.1.0 release
+    (no longer a TBD placeholder)."""
     text = _read_card()
-    assert "TBD" in text, "DOI placeholder convention not documented"
-    assert "Sagar reserves" in text, "DOI reservation owner not named"
+    assert "10.5281/zenodo." in text, "no Zenodo DOI in dataset card"
+    # The version-DOI digits are committed verbatim — surfaces typos in
+    # the paste-back step.
+    assert "10.5281/zenodo.20368096" in text
 
 
 def test_dataset_card_lists_artifacts():
@@ -99,8 +102,10 @@ def test_dataset_card_documents_not_recommended_uses():
     assert "regulatory" in text.lower()
 
 
-def test_dataset_card_has_manual_followup_section():
-    """Tells Sagar what to do once he reserves the DOI."""
+def test_dataset_card_has_release_history():
+    """Post-v0.1.0 the 'Manual follow-up' section was replaced with
+    a 'Release history' block tracking minted DOIs."""
     text = _read_card()
-    assert "Manual follow-up" in text
+    assert "Release history" in text
+    assert "v0.1.0" in text
     assert "Zenodo" in text

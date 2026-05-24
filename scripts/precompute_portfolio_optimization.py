@@ -63,7 +63,26 @@ def _load_sim_losses(sim_id: str) -> tuple[dict[str, list[float]], dict]:
     return losses_by_cohort, json.loads(meta.read_text())
 
 from api_py.cohort_keys import cohort_key as _cohort_key, policy_quintile_lookup  # noqa: E402
+from api_py.multi_peril_aal import (  # noqa: E402
+    PERIL_IDS as _MULTI_PERIL_IDS,
+    additional_peril_scenarios as _additional_peril_scenarios,
+)
 from api_py.optimize_portfolio import ACTIONS, solve  # noqa: E402
+
+# Load the zip3 → state geography once. The book is currently CONUS coastal
+# SE (TX/LA/NC/FL — 4 states, 38 zip3s). Out-of-book zip3s fall back to a
+# 'default' AAL rate inside multi_peril_aal.
+_ZIP3_GEO_PATH = ROOT / "lib" / "regulatory" / "zip3_geo.json"
+_ZIP3_GEO: dict[str, dict] = json.loads(_ZIP3_GEO_PATH.read_text())
+
+
+def _state_for_zip3(zip3: str) -> str:
+    """Resolve a zip3 → 2-letter USPS state code. Returns 'XX' (synthetic
+    fallback that hits multi_peril_aal's 'default' branch) for unknown zip3s,
+    rather than raising — the precompute should never crash on a
+    well-formed but unseeded zip3."""
+    entry = _ZIP3_GEO.get(zip3)
+    return entry["state"] if entry else "XX"
 
 # Task P2.0 — Monte-Carlo scenario count per cohort. Sized so that the
 # 99th-percentile order statistic is stable (~30% sampling noise on 1000
@@ -254,7 +273,10 @@ def _cohort_loss_quantiles(
     return p50, p99, loss_scenarios
 
 
-def _aggregate_cohorts_from_sqlite(db_path: Path) -> list[dict]:
+def _aggregate_cohorts_from_sqlite(
+    db_path: Path,
+    multi_peril: bool = True,
+) -> list[dict]:
     """Read the policy book and aggregate into cohorts.
 
     Mirrors the JS aggregation in lib/db/cohorts.ts (same cohort key, quintile
@@ -332,9 +354,36 @@ def _aggregate_cohorts_from_sqlite(db_path: Path) -> list[dict]:
             zip3=b["zip3"],
             tiv_quintile=b["tiv_quintile"],
         )
+
+        cohort_id = b["id"]
+        peril_p99: dict[str, float] = {"hurricane": p99}
+        if multi_peril:
+            # Joint multi-peril TVaR-99: layer SCS / Winter / Wildfire /
+            # Earthquake AAL contributions on top of the hurricane-anchored
+            # prior. The existing prior stays hurricane-only (no
+            # double-counting); per-peril scenarios are independent draws
+            # summed elementwise. See api_py/multi_peril_aal.py for the
+            # calibration and citation sources.
+            state = _state_for_zip3(b["zip3"])
+            base_scenarios = np.asarray(scenarios, dtype=float)
+            extras = _additional_peril_scenarios(
+                total_tiv=b["total_tiv"],
+                state=state,
+                build_type=b["build_type"],
+                cohort_key=cohort_id,
+                n=K_SCENARIOS,
+            )
+            for peril_id in _MULTI_PERIL_IDS:
+                base_scenarios = base_scenarios + extras[peril_id]
+                peril_p99[peril_id] = float(np.percentile(extras[peril_id], 99))
+            # Refresh scalar quantiles to reflect the joint distribution.
+            p50 = float(np.percentile(base_scenarios, 50))
+            p99 = float(np.percentile(base_scenarios, 99))
+            scenarios = [float(x) for x in base_scenarios]
+
         out.append(
             {
-                "id": b["id"],
+                "id": cohort_id,
                 "zip3": b["zip3"],
                 "build_type": b["build_type"],
                 "tiv_quintile": b["tiv_quintile"],
@@ -348,25 +397,39 @@ def _aggregate_cohorts_from_sqlite(db_path: Path) -> list[dict]:
                 # Task P2.0: K=1000 lognormal draws for downstream tail
                 # measures (TVaR-99 in P2.6, per-scenario retained tail in
                 # P2.7, elasticity MILP in P2.8). Stripped server-side
-                # before the front-end ever sees this array.
+                # before the front-end ever sees this array. When
+                # multi_peril=True, these are JOINT (hurricane + SCS +
+                # winter + wildfire + earthquake) draws.
                 "loss_scenarios": scenarios,
+                # Joint multi-peril breakdown — per-peril p99 contribution
+                # (hurricane is the existing prior; others come from
+                # api_py/multi_peril_aal.py). Used by UI to render a
+                # "Tail by peril" breakdown without re-running the MC.
+                # Stays single-key ({"hurricane": p99}) when
+                # multi_peril=False for backward compat.
+                "loss_p99_by_peril": peril_p99,
             }
         )
     out.sort(key=lambda c: c["id"])
     return out
 
 
-def _build_cohorts() -> list[dict]:
+def _build_cohorts(multi_peril: bool = True) -> list[dict]:
     """Load the policy book from forge-local.db and return aggregated cohorts.
 
     Extracted from ``main()`` (Task 7) so ``main(argv)`` can call it cleanly
     before optionally merging in sim losses.
+
+    ``multi_peril=True`` (default) layers SCS / winter / wildfire /
+    earthquake AAL on top of the hurricane-anchored prior to produce JOINT
+    multi-peril ``loss_scenarios`` per cohort.
     """
     db_path = ROOT / "forge-local.db"
     if not db_path.exists():
         raise SystemExit(f"forge-local.db not found at {db_path}")
-    cohorts = _aggregate_cohorts_from_sqlite(db_path)
-    print(f"Aggregated {len(cohorts)} cohorts from {db_path.name}")
+    cohorts = _aggregate_cohorts_from_sqlite(db_path, multi_peril=multi_peril)
+    mode = "joint multi-peril" if multi_peril else "hurricane-only (legacy)"
+    print(f"Aggregated {len(cohorts)} cohorts from {db_path.name} [{mode}]")
     return cohorts
 
 
@@ -382,9 +445,20 @@ def main(argv: list[str] | None = None) -> None:
             "draws onto the per-cohort hurricane scenario set before TVaR-99."
         ),
     )
+    parser.add_argument(
+        "--no-multi-peril",
+        action="store_true",
+        help=(
+            "Disable joint multi-peril aggregation. Reverts to "
+            "hurricane-only loss scenarios (Phase 2 behaviour) for "
+            "backward-compatibility verification. Default OFF: the joint "
+            "SCS / winter / wildfire / earthquake AAL overlay is applied."
+        ),
+    )
     args = parser.parse_args(argv)
 
-    cohorts = _build_cohorts()
+    multi_peril = not args.no_multi_peril
+    cohorts = _build_cohorts(multi_peril=multi_peril)
 
     # Task 7: merge simulated event losses into the joint scenario set.
     sim_ids = _resolve_sim_ids(args.include_sims)
@@ -582,9 +656,24 @@ def main(argv: list[str] | None = None) -> None:
         #       Adds top-level `infeasibility_reason` (string | null) so
         #       the UI can explain why an Infeasible solve happened
         #       without inventing a reason from constraint deltas.
-        # Holders of v1/v2/v3/v4 artifacts must re-run
+        #   6 — 2026-05-24: cohorts now carry `loss_p99_by_peril:
+        #       dict[str, float]` (hurricane + scs + winter + wildfire +
+        #       earthquake). `loss_scenarios` are joint draws (sum of
+        #       per-peril independent lognormals) when multi_peril=True.
+        #       Top-level `multi_peril_enabled: bool` records whether the
+        #       overlay was applied. UI components consuming v5 should
+        #       continue to work (loss_scenarios + loss_p50 + loss_p99
+        #       remain populated); the new fields are additive.
+        # Holders of v1-v5 artifacts must re-run
         # `python -m scripts.precompute_portfolio_optimization` to refresh.
-        "schema_version": 5,
+        "schema_version": 6,
+        "multi_peril_enabled": multi_peril,
+        # Per-peril identifiers shipped in cohort.loss_p99_by_peril. Always
+        # present (single 'hurricane' entry when multi_peril=False) so
+        # consumers can iterate uniformly.
+        "perils_modeled": ["hurricane"] + (
+            list(_MULTI_PERIL_IDS) if multi_peril else []
+        ),
         "status": result["status"],
         # P2.8: surface which solver path produced this artifact (milp vs
         # lp_relaxed_rounded). UI consumers can render a footnote if the

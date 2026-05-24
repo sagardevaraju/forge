@@ -80,12 +80,23 @@ def test_protocol_documents_ethics():
     assert "consent" in text.lower()
 
 
-def test_protocol_has_osf_followup():
-    """Tells Sagar what to do once he files OSF pre-registration."""
+def test_protocol_documents_preregistration_scope_decision():
+    """Pre-2026-05-24 the protocol carried a 'Manual follow-up for Sagar'
+    section linking to an OSF paste-buffer. The protocol was rescoped to
+    a design document (no OSF submission) when FORGE was committed as a
+    portfolio project rather than a paper-pipeline submission. The doc
+    must still explain *why* OSF is not filed so the decision is auditable.
+    """
     text = _read()
-    assert "Manual follow-up" in text
+    assert "Pre-registration scope" in text or "not formally pre-registered" in text
+    # Doc must explain it's a committed design artifact, not a paper-pipeline
+    # submission. Markdown linebreaks ('design\n> document') would beat a
+    # naive substring search, so check the salient nouns independently.
+    lc = text.lower()
+    assert "design" in lc and ("document" in lc or "protocol" in lc)
+    # OSF is still mentioned as 'reference for future use' if FORGE moves
+    # toward an academic submission — make sure the door isn't slammed.
     assert "OSF" in text
-    assert "TBD" in text
 
 
 def test_protocol_documents_reconciler_signal():
