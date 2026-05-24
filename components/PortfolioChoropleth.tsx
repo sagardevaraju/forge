@@ -10,9 +10,9 @@
  *
  * Rendering:
  *   - GeoJSON FeatureCollection of US state polygons from
- *     lib/geo/state_topojson.ts (placeholder bounding-box geometries
- *     for v1 — swap-point for real Census cartographic boundary
- *     files documented in that module).
+ *     lib/geo/state_topojson.ts. v2 ships real Census cartographic
+ *     boundary polygons via us-atlas (Polygon or MultiPolygon per
+ *     state — MapLibre handles both natively).
  *   - Paint expression bins log10(total_tiv) into 6 sequential blues
  *     (no exposure → very-light gray; up to ~$10B → dark blue).
  *
