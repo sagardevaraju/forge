@@ -124,6 +124,80 @@ def _handle_sim_loss(payload: dict) -> int:
     return 0
 
 
+def _handle_cv_inference(payload: dict) -> int:
+    """Dispatch for the real-time CV inference endpoint (Task P3.10).
+
+    Request shape::
+
+        {
+            "lat": float,
+            "lon": float,
+            "mode": "mock" | "cached" | "real",   # default "mock"
+            "policy_id": int,                      # required when mode="cached"
+            "bypass_head": bool                    # default true
+        }
+
+    Response shape::
+
+        {
+            "features": [float] * 8,
+            "feature_names": [str] * 8,
+            "mode_used": str,
+            "bypass_head_used": bool
+        }
+
+    De-Vercel'd: this is invoked by the Next.js Node route
+    ``/api/cv/infer`` via subprocess spawn so we keep the heavy CV
+    dependencies (numpy, torch optional) out of any Vercel function
+    bundle. CPU-only; runs on ``npm run dev`` / Docker / any Node host.
+    """
+    try:
+        from ml.cv.inference import (
+            load_chip_features,
+            OUTPUT_FEATURE_NAMES,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(json.dumps({"error": f"import failed: {e}"}), flush=True)
+        sys.stderr.write(traceback.format_exc())
+        return 1
+
+    try:
+        lat = payload.get("lat")
+        lon = payload.get("lon")
+        if lat is None or lon is None:
+            print(json.dumps({"error": "lat and lon are required"}), flush=True)
+            return 1
+        mode = str(payload.get("mode") or "mock").strip().lower()
+        if mode not in {"mock", "cached", "real"}:
+            print(json.dumps({"error": f"invalid mode: {mode}"}), flush=True)
+            return 1
+        policy_id = payload.get("policy_id")
+        # bypass_head defaults True for real-time inference — the trained
+        # head produces near-constant outputs across the demo book; band
+        # math is the honest default. Operators can opt in to the head
+        # by passing bypass_head=false.
+        bypass_head = bool(payload.get("bypass_head", True))
+        feats = load_chip_features(
+            lat=float(lat),
+            lon=float(lon),
+            mode=mode,
+            policy_id=int(policy_id) if policy_id is not None else None,
+            bypass_head=bypass_head,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(json.dumps({"error": f"cv inference failed: {e}"}), flush=True)
+        sys.stderr.write(traceback.format_exc())
+        return 1
+
+    print(json.dumps({
+        "features": [float(x) for x in feats.tolist()],
+        "feature_names": list(OUTPUT_FEATURE_NAMES),
+        "mode_used": mode,
+        "bypass_head_used": bypass_head,
+    }))
+    return 0
+
+
 def main(target: str | None = None) -> int:
     # When called as `python -m api_py._solve_stdin <target>` the target
     # arrives as argv[1].  When called programmatically (tests), it can be
@@ -147,6 +221,8 @@ def main(target: str | None = None) -> int:
         return _handle_optimize_portfolio(args)
     if resolved_target == "sim_loss":
         return _handle_sim_loss(args)
+    if resolved_target == "cv_inference":
+        return _handle_cv_inference(args)
 
     print(json.dumps({"error": f"unknown target: {resolved_target}"}))
     return 1
