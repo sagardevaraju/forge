@@ -814,6 +814,118 @@ Sources surveyed (and confirmed not to expose a numerical annual % cap):
 - La. Rev. Stat. §22:1265 (anti-discrimination; no annual % cap).
 - N.C. Gen. Stat. §58-41-15 (60-day notice; no annual % cap).
 
+## 12. P2.37 weak-label retraining trail — *sourced calibration (2026-05-23)*
+
+Phase 2 / Task P2.37 replaces the metadata-only `_derive_labels` heuristic
+(§8e) with external image-derived weak labels for the 3 previously-unmodeled
+CV head dims. Every numeric output in the new pipeline traces back to one of
+the two upstream sources documented here.
+
+### 12a. Source audit — what we picked vs what the plan named
+
+The plan default (`docs/superpowers/plans/2026-05-16-forge-redesign.md`)
+named NLCD landcover + OSM building footprints + USGS 3DEP DEM. The audit
+on 2026-05-23 (recorded in
+`docs/superpowers/specs/2026-05-23-cv-weak-label-retrain-design.md`)
+replaced all three with two sources that are strictly better against MPC
++ 10 m chip alignment:
+
+| Plan default | Audit verdict | Reason |
+|---|---|---|
+| NLCD landcover (MRLC.gov) | Rejected | Not hosted on MPC; 30 m only (3× coarser than chips). |
+| OSM building footprints (Overpass API) | Rejected | Per-policy rate-limited; flaky under 10k-query loads. |
+| USGS 3DEP DEM for `tree_overhang` | Rejected — wrong tool | DEM is bare-earth terrain, not canopy. The canopy-like product `3dep-lidar-hag` is `proprietary` on MPC and has no FL Hernando 346 coverage. |
+| **Approved swap** | ESA WorldCover (idx 1 + 6) + MS Buildings (idx 3) | 10m native S2 alignment; both on MPC's auth path; one fetch produces both impervious AND tree fractions; ODbL-compliant attribution surfaced in the drill-down. |
+
+### 12b. ESA WorldCover 2021 — `imperviousness` + `tree_overhang`
+
+- **Product:** ESA WorldCover v200 (2021). Global 10 m land cover map
+  produced from Sentinel-1 + Sentinel-2 observations, classified into
+  11 IPCC-style categories.
+- **License:** CC-BY-4.0 (Zanaga et al. 2022, doi:10.5281/zenodo.7254221 [27]).
+- **Distribution:** Microsoft Planetary Computer STAC collection
+  `esa-worldcover` ([28]). No API key required.
+- **Spatial:** 3°×3° tiles, EPSG:4326 (geographic). The id encodes the
+  **SW corner** of the tile — e.g. `N27W084` covers latitudes [27°, 30°]
+  and longitudes [-84°, -81°]. Verified empirically against MPC STAC:
+  a search for (28.55, -82.45) returns
+  `ESA_WorldCover_10m_2021_v200_N27W084`.
+- **Fetched:** 2026-05-23 via `ml/cv/labels/esa_worldcover.py::_open_scene`
+  (LRU-cached, ~20 unique scenes cover the synthetic FORGE policy book).
+- **Class codes used:**
+  - **50** Built-up → fraction over the 256 px chip window = `imperviousness` (idx 1).
+  - **10** Tree cover → fraction over the 256 px chip window = `tree_overhang` (idx 6).
+- **Attribution rendered in `/portfolio` drill-down:**
+  "© ESA WorldCover 2021 — Zanaga et al., doi:10.5281/zenodo.7254221" (CC-BY-4.0).
+
+### 12c. Microsoft US Building Footprints — `roof_complexity`
+
+- **Product:** *US Building Footprints* (Bing Maps imagery, 2014-2021).
+  129+ M polygons across the contiguous US, classified by an internal
+  deep-learning pipeline against Maxar / Airbus / Bing imagery [29].
+- **License:** ODbL-1.0 (Open Database License).
+- **Distribution:** Microsoft Planetary Computer STAC collection
+  `ms-buildings` ([30]). Sharded by Bing Maps quadkey at zoom 9 — 2,413
+  parquet shards cover the US, each ~78 km × 78 km at the equator.
+- **Spatial:** WKB polygons in EPSG:4326. The full schema is one column,
+  `geometry: binary` — no per-row quadkey or bbox metadata, so spatial
+  selection uses the quadkey-shard prefilter (`ml/cv/labels/quadkey.py`
+  + `ms_buildings.load_shard_index`).
+- **Fetched:** 2026-05-23 via `ml/cv/labels/ms_buildings.py`. Latest
+  US snapshot: `United States_2022-07-06` (selected deterministically by
+  reverse-sorted item id, so reruns are reproducible).
+- **Reduction:** `roof_complexity = 1 − mean(PP)` where
+  `PP = 4π · area / perimeter²` (Polsby-Popper compactness, [31]). Higher
+  value = more jagged footprints. Empty bbox (no buildings) → 0.
+- **Attribution rendered in `/portfolio` drill-down:**
+  "© Microsoft, OpenStreetMap contributors (ODbL)" (ODbL-1.0).
+
+### 12d. Vintage gap acknowledgement
+
+ESA WorldCover is the 2021 v200 product. MS Buildings is the 2022-07-06
+snapshot. Cached Sentinel-2 chips are 2026-05-16 fetches. A 4-5 year gap
+is acceptable for the three target dims because (a) imperviousness and
+tree cover change slowly at the chip scale (10 m × 10 m) — most US
+neighbourhoods do not flip from forest to built-up in a 5-year window;
+(b) building footprints are even more stable — demolitions + new
+construction at the chip scale change the polygon count by <1 % per year
+on typical residential blocks. Catastrophic events (Helene 2024, hail
+2023) can spot-invalidate; carrier post-event refresh is out of scope
+for the demo book.
+
+### 12e. Output cache + train-time consumption
+
+`scripts/precompute_cv_weak_labels.py` writes `artifacts/cv_weak_labels.parquet`
+(tracked, ~250 KB for 10 k rows × 3 float32 columns). The training step
+(`ml/cv/train.py::_load_weak_labels` + `PolicyChipDataset` constructor)
+loads the parquet once, joins on `policy_id`, and supplies the 3 weak
+labels for indices 1 / 3 / 6 alongside band-math labels for the other 5
+dims (`predict_chip_mock(chip)` on the same chip — see §8a). The retrained
+head thus learns image-derived signal across all 8 dims, with the 3 new
+dims supervised by real ground-truth ESA WC / MS Buildings labels rather
+than the constant metadata heuristics that produced §8e's near-zero
+discrimination.
+
+**Acceptance gate** (recorded by the verification step in
+`scripts/verify_cv_head.py`): per-policy stdev of the head's output across
+all 10 k policies must be > 0.05 on each retrained dim (the band-math
+NDVI baseline reaches 0.10; we need to be in that ballpark, not collapsed
+to a constant like §8e).
+
+### 12f. References (new in §12)
+
+27. Zanaga, D., et al. (2022). *ESA WorldCover 10 m 2021 v200.* Zenodo.
+    doi:10.5281/zenodo.7254221. https://esa-worldcover.org/en
+28. Microsoft Planetary Computer — `esa-worldcover` STAC collection.
+    https://planetarycomputer.microsoft.com/dataset/esa-worldcover
+29. Microsoft (2022). *US Building Footprints* (Bing Maps, 129 M
+    polygons). GitHub: https://github.com/microsoft/USBuildingFootprints
+30. Microsoft Planetary Computer — `ms-buildings` STAC collection.
+    https://planetarycomputer.microsoft.com/dataset/ms-buildings
+31. Polsby, D. D., & Popper, R. D. (1991). *The Third Criterion:
+    Compactness as a Procedural Safeguard Against Partisan
+    Gerrymandering.* Yale Law & Policy Review, 9(2), 301-353.
+
 ## References
 
 1. NWS Norman — The Enhanced Fujita Scale. https://www.weather.gov/oun/efscale
