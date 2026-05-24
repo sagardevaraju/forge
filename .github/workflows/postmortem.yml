@@ -1,0 +1,32 @@
+name: postmortem
+on:
+  schedule:
+    - cron: '0 0 1 */3 *'   # 00:00 UTC on the 1st of every third month
+  workflow_dispatch:
+    inputs:
+      quarter:
+        description: 'YYYY-Q{1..4}; blank = previous quarter'
+        required: false
+        default: ''
+jobs:
+  postmortem:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install -r requirements.txt
+      - env: { FORGE_LOCAL_DB: 'forge-local.db' }
+        run: |
+          if [ -n "${{ inputs.quarter }}" ]; then
+            python -m scripts.postmortem --quarter "${{ inputs.quarter }}"
+          else
+            python -m scripts.postmortem
+          fi
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postmortem-report
+          path: artifacts/postmortem/
+          retention-days: 365
