@@ -49,6 +49,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from api_py.calibration import pit_histogram, reliability_curve  # noqa: E402
+from api_py.correlation_fit import (  # noqa: E402
+    fit_common_factor_from_storm_events,
+)
 
 # Φ⁻¹ at p10/p50/p90 — matches the inverse-CDF values used to derive the
 # Portfolio MIP's lognormal scenarios (see precompute_portfolio_optimization).
@@ -114,6 +117,33 @@ def _synthetic_eval_set(rng: np.random.Generator, n: int = 600) -> dict:
     return out
 
 
+def _load_storm_events_rows() -> list[dict] | None:
+    """Pull every ``storm_events`` row from the local SQLite DB.
+
+    Returns ``None`` if the DB or table doesn't exist (a fresh-clone
+    environment) so the caller can skip the common-factor fit cleanly
+    rather than raise. AUDIT.1.
+    """
+    import sqlite3  # noqa: PLC0415 — module-local, only this helper needs it
+
+    db_path = ROOT / "forge-local.db"
+    if not db_path.exists():
+        return None
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        try:
+            cur = conn.execute(
+                "SELECT year, state, event_type, damage_property "
+                "FROM storm_events"
+            )
+        except sqlite3.OperationalError:
+            return None
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 def main() -> None:
     # No live eval-set today: paired (forecast, observation) data lands in
     # P2.10 (HURDAT2 cross-validation) and P2.38 (NHC ensemble swap). Until
@@ -142,8 +172,24 @@ def main() -> None:
     pit_samples = pit_rng.uniform(0.0, 1.0, size=1000)
     pit_counts = pit_histogram(pit_samples, n_bins=10)
 
+    # AUDIT.1 — common-factor β/σ from NOAA Storm Events. The fitter
+    # gates on a minimum-episode count; if the local corpus is too thin
+    # (current default: 8 episodes), we persist an INSUFFICIENT_DATA
+    # note and api_py/sim_loss::_load_correlation falls back to the
+    # literal DEFAULT_BETA/DEFAULT_SIGMA. See api_py/correlation_fit.py.
+    storm_rows = _load_storm_events_rows()
+    if storm_rows is None:
+        common_factor: dict = {
+            "fitted": False,
+            "reason": "STORM_EVENTS_TABLE_MISSING",
+            "n_episodes": 0,
+            "min_episodes": 0,
+        }
+    else:
+        common_factor = dict(fit_common_factor_from_storm_events(storm_rows))
+
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,  # bumped by AUDIT.1 — adds common_factor block
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "data_source": "synthetic_demo",
         "reliability": reliability,
@@ -158,6 +204,7 @@ def main() -> None:
                 ),
             }
         },
+        "common_factor": common_factor,
     }
 
     ARTIFACTS_DIR.mkdir(exist_ok=True)
@@ -169,6 +216,15 @@ def main() -> None:
     for label, pairs in reliability.items():
         print(f"  reliability/{label}: {len(pairs)} bins")
     print(f"  pit/scenario_generator: {sum(pit_counts)} samples in {len(pit_counts)} bins")
+    if "beta" in common_factor:
+        print(
+            f"  common_factor: β={common_factor['beta']:.3f}  "
+            f"σ={common_factor['sigma']}  (n={common_factor['n_episodes']})"
+        )
+    else:
+        print(
+            f"  common_factor: NOT FITTED — {common_factor.get('reason', 'unknown')}"
+        )
 
 
 if __name__ == "__main__":

@@ -1002,6 +1002,65 @@ to a constant like §8e).
     Compactness as a Procedural Safeguard Against Partisan
     Gerrymandering.* Yale Law & Policy Review, 9(2), 301-353.
 
+## 13. AUDIT.1 — common-factor β/σ from NOAA Storm Events (2026-05-24)
+
+The P2.4 docstring on `api_py/correlation.py` flagged its β=0.5 / σ=0.3
+defaults as "sensible starting literals pending NOAA Storm Events
+calibration". AUDIT.1 closes that deferral by shipping a fitter
+(`api_py/correlation_fit.py`) wired into `scripts/precompute_calibration.py`.
+
+### 13a. The model and what's identifiable from data
+
+The simulation-loss generator applies a per-scenario multiplicative
+common factor:
+
+  L'_{s,c} = L_{s,c} · (1 + β · ε_s),   ε_s ~ N(0, σ²)
+
+Only the product **β·σ** appears in the likelihood — β and σ are not
+separately identifiable from observational damage data. The fitter
+adopts the standard σ = 1 (unit-variance latent shock) convention so
+β alone parameterizes the cross-event coefficient of variation.
+
+### 13b. Estimator
+
+For each storm episode in the corpus, sum the per-county property
+damage to get a total `D_e`. Across N episodes:
+
+  β̂ = std(D_e) / mean(D_e)         (sample-CoV under σ=1)
+
+The estimator's standard error is roughly 1/√(2(N-1)) of β̂ — at N=8
+episodes that's ~27% of β̂, which is the threshold we accept as
+"more credible than the literal default". Below that gate, the
+fitter persists an INSUFFICIENT_EPISODES marker to `calibration.json`
+and `api_py.sim_loss::_load_correlation` continues falling back to
+`DEFAULT_BETA / DEFAULT_SIGMA`.
+
+### 13c. Current state — fitter ships, fit doesn't activate yet
+
+At HEAD the `storm_events` table holds 337 county-level reports for
+2024 only (FL, TX, LA, NC × Hurricane / Tropical Storm). Grouped by
+`(year, state, event_type)` — the coarsest grouping the current
+schema supports — that collapses to 7 episodes, just below the 8-
+episode threshold. The fitter therefore correctly emits an
+INSUFFICIENT_EPISODES marker and the loader continues to use defaults.
+
+Enabling the fit requires either:
+  - Extending `scripts/ingest_storm_events.py` to capture the
+    `EPISODE_ID` field NOAA already publishes (one column add +
+    schema migration), then re-ingesting; or
+  - Running `ingest_storm_events.py --years 2018-2024` to broaden
+    the corpus past the 8-episode gate under the current grouping.
+
+The fitter accepts a `group_key` callback so once `episode_id` lands
+the caller can switch from `(year, state, event_type)` to
+`(episode_id,)` for finer-grained grouping.
+
+### 13d. References (new in §13)
+
+32. NOAA — Storm Events Database. https://www.ncdc.noaa.gov/stormevents/
+33. NCEI — Storm Events FTP archive (1950-present, gzip CSV by year).
+    https://www.ncei.noaa.gov/pub/data/swdi/stormevents/csvfiles/
+
 ## References
 
 1. NWS Norman — The Enhanced Fujita Scale. https://www.weather.gov/oun/efscale
