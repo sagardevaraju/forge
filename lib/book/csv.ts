@@ -235,6 +235,12 @@ export function validatePolicies(rawRows: string[][]): ParseResult {
 // ---------------------------------------------------------------------------
 // Task P2.39 — column-mapping wizard helpers + PII deny-list.
 //
+// Task P3.28a (2026-05-24) — the deny-list moved to lib/book/pii_classifier.ts
+// (a dictionary + allow-list classifier). The regex below is retained as
+// the backward-compat surface; new code paths should import classifyPII()
+// from this module so the rationale is preserved in lineage records.
+import { isPIIColumnName } from '@/lib/book/pii_classifier';
+//
 // The /load wizard imports these to suggest carrier-column → FORGE-field
 // mappings and to tag every imported row with a lineage record. The
 // deny-list is a column-NAME filter (not value-level); Phase 3 (Task P3.28)
@@ -286,17 +292,41 @@ export const FORGE_FIELDS: ForgeField[] = [
  * Column-name deny-list. Matches sensitive carrier columns the wizard must
  * refuse — names containing ssn, dob, phone, email, name, or address.
  *
- * KNOWN LIMITATION (per spec): this is a regex, not a classifier. It will
- * false-positive on benign names like `business_name` and false-negative on
- * cryptic ones like `cust_ssn_hash`. Phase 3 (Task P3.28) swaps in Presidio
- * or equivalent. The trade-off is logged in the lineage record so an
- * auditor can trace what was rejected and when.
+ * RETAINED FOR BACKWARD COMPATIBILITY (Task P3.28a). The actual
+ * classifier is now in lib/book/pii_classifier.ts — `isPII()` below
+ * delegates to it. Pre-P3.28a call sites that import `PII_DENY_REGEX`
+ * directly still get the original behaviour.
  */
 export const PII_DENY_REGEX = /(ssn|dob|phone|email|name|address)/i;
 
+/**
+ * Decide whether a CSV column name names PII.
+ *
+ * Task P3.28a — delegates to the enhanced classifier in
+ * `lib/book/pii_classifier.ts`, which:
+ *   - tokenises the name (handles snake_case, camelCase, etc.)
+ *   - matches against an 80+ keyword PII dictionary
+ *   - applies an allow-list so `business_name` is no longer refused
+ *
+ * Trade-off resolved: the P2.39 regex false-positived on `business_name`
+ * and false-negatived on `cust_ssn_hash`; the new classifier handles
+ * both correctly. Call `classifyPII()` (also re-exported from this
+ * module) when you need the rationale (matched token, category,
+ * allow-list win) for audit / regulatory traceability.
+ *
+ * VALUE-LEVEL detection (not just names) — see
+ * `app/api/book/check-pii/route.ts` which wraps Microsoft Presidio
+ * when installed; without Presidio, the route falls back to this
+ * name-level classifier.
+ */
 export function isPII(columnName: string): boolean {
-  return PII_DENY_REGEX.test(columnName);
+  return isPIIColumnName(columnName);
 }
+
+// Re-export the structured classifier so call sites that want the
+// rationale (matched token + category + allow-list win) can import it
+// alongside the boolean helper.
+export { classifyPII, isPIIColumnName, type PIIClassification } from '@/lib/book/pii_classifier';
 
 export interface MappingSuggestion {
   forgeField: string;
