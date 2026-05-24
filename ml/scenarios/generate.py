@@ -86,108 +86,120 @@ _SURGE_DECAY_KM = 30.0
 _SURGE_REF_DEPTH_M = 4.0
 _SURGE_REF_WIND_MPH = 140.0
 
-# ── demo seed track (Cat-4 FL-west-coast landfall) ─────────────────────────
+# ── basin-aware seed tracks from HURDAT2 (AUDIT.3 Phase 2b) ────────────────
 #
-# 21 waypoints (hours 0, 6, 12, …, 120).  Starts west of the Florida
-# Keys, recurves NNW into the Big Bend, makes landfall near hour 60,
-# and weakens inland over GA.
-
-_DEMO_TRACK_FL: list[dict[str, float]] = [
-    {"lat": 24.0, "lon": -83.0, "hours_from_now": 0,   "peak_wind": 110.0},
-    {"lat": 24.5, "lon": -83.3, "hours_from_now": 6,   "peak_wind": 115.0},
-    {"lat": 25.1, "lon": -83.6, "hours_from_now": 12,  "peak_wind": 120.0},
-    {"lat": 25.8, "lon": -83.9, "hours_from_now": 18,  "peak_wind": 125.0},
-    {"lat": 26.5, "lon": -84.0, "hours_from_now": 24,  "peak_wind": 128.0},
-    {"lat": 27.1, "lon": -84.0, "hours_from_now": 30,  "peak_wind": 132.0},
-    {"lat": 27.7, "lon": -83.9, "hours_from_now": 36,  "peak_wind": 135.0},
-    {"lat": 28.2, "lon": -83.6, "hours_from_now": 42,  "peak_wind": 138.0},
-    {"lat": 28.6, "lon": -83.2, "hours_from_now": 48,  "peak_wind": 140.0},
-    {"lat": 29.0, "lon": -82.7, "hours_from_now": 54,  "peak_wind": 140.0},
-    {"lat": 29.3, "lon": -82.1, "hours_from_now": 60,  "peak_wind": 140.0},  # landfall
-    {"lat": 29.7, "lon": -81.6, "hours_from_now": 66,  "peak_wind": 120.0},
-    {"lat": 30.1, "lon": -81.2, "hours_from_now": 72,  "peak_wind": 100.0},
-    {"lat": 30.6, "lon": -80.9, "hours_from_now": 78,  "peak_wind":  85.0},
-    {"lat": 31.1, "lon": -80.6, "hours_from_now": 84,  "peak_wind":  75.0},
-    {"lat": 31.6, "lon": -80.4, "hours_from_now": 90,  "peak_wind":  65.0},
-    {"lat": 32.1, "lon": -80.3, "hours_from_now": 96,  "peak_wind":  55.0},
-    {"lat": 32.6, "lon": -80.2, "hours_from_now": 102, "peak_wind":  50.0},
-    {"lat": 33.1, "lon": -80.1, "hours_from_now": 108, "peak_wind":  45.0},
-    {"lat": 33.6, "lon": -80.0, "hours_from_now": 114, "peak_wind":  40.0},
-    {"lat": 34.1, "lon":  -79.9, "hours_from_now": 120, "peak_wind":  35.0},
-]
-assert len(_DEMO_TRACK_FL) == 21, "demo seed track must be 21 waypoints"
-
-# ── basin-expansion demo tracks (Task P3.18) ──────────────────────────────
+# Previous implementation hand-tabulated three 21-waypoint Cat-4 composites
+# (``_DEMO_TRACK_FL``, ``_DEMO_TRACK_CARIBBEAN``, ``_DEMO_TRACK_ATLANTIC_CANADA``).
+# Per the no-fictional-data contract and the AUDIT.3 Phase 2 scoping doc,
+# each basin's seed track is now sampled from the committed HURDAT2
+# best-track parquet at ``artifacts/hurdat2/best_track.parquet`` (PR #20
+# / Task P2.10), using a landmark major-hurricane landfall per region:
 #
-# Caribbean track: a Cat-4 system tracking WNW out of the central
-# Caribbean, brushing Hispaniola and making landfall on eastern Cuba.
-# Anchored on the historical track shape of Hurricane Matthew 2016
-# (which devastated Haiti as a Cat-4) and Hurricane Maria 2017
-# (PR landfall). 21-waypoint, 6-hour spacing.
+#   us_atlantic      — AL092022  Hurricane Ian   (Cat-4, SW Florida landfall)
+#   caribbean        — AL152017  Hurricane Maria (Cat-4 at PR landfall)
+#   atlantic_canada  — AL072022  Hurricane Fiona (Cat-2 at Nova Scotia landfall)
+#
+# All three are public-domain, well-documented, recent storms that produce
+# clean 21-waypoint 6-hour-cadence tracks in HURDAT2.  ``seed_storm_id=``
+# overrides the landmark default for callers that want a different storm.
 
-_DEMO_TRACK_CARIBBEAN: list[dict[str, float]] = [
-    {"lat": 13.5, "lon": -60.0, "hours_from_now":   0, "peak_wind":  85.0},
-    {"lat": 13.8, "lon": -61.0, "hours_from_now":   6, "peak_wind":  95.0},
-    {"lat": 14.2, "lon": -62.5, "hours_from_now":  12, "peak_wind": 105.0},
-    {"lat": 14.5, "lon": -64.0, "hours_from_now":  18, "peak_wind": 115.0},
-    {"lat": 14.9, "lon": -65.5, "hours_from_now":  24, "peak_wind": 125.0},
-    {"lat": 15.3, "lon": -67.0, "hours_from_now":  30, "peak_wind": 130.0},
-    {"lat": 15.8, "lon": -68.5, "hours_from_now":  36, "peak_wind": 135.0},
-    {"lat": 16.3, "lon": -70.0, "hours_from_now":  42, "peak_wind": 140.0},  # Haiti approach
-    {"lat": 16.8, "lon": -71.5, "hours_from_now":  48, "peak_wind": 140.0},
-    {"lat": 17.4, "lon": -72.8, "hours_from_now":  54, "peak_wind": 135.0},
-    {"lat": 18.0, "lon": -74.0, "hours_from_now":  60, "peak_wind": 130.0},  # Hispaniola south
-    {"lat": 18.7, "lon": -75.2, "hours_from_now":  66, "peak_wind": 125.0},
-    {"lat": 19.5, "lon": -76.4, "hours_from_now":  72, "peak_wind": 120.0},
-    {"lat": 20.2, "lon": -77.5, "hours_from_now":  78, "peak_wind": 115.0},  # eastern Cuba
-    {"lat": 20.9, "lon": -78.5, "hours_from_now":  84, "peak_wind": 105.0},
-    {"lat": 21.6, "lon": -79.3, "hours_from_now":  90, "peak_wind":  95.0},
-    {"lat": 22.3, "lon": -80.0, "hours_from_now":  96, "peak_wind":  85.0},
-    {"lat": 23.0, "lon": -80.5, "hours_from_now": 102, "peak_wind":  75.0},
-    {"lat": 23.7, "lon": -80.8, "hours_from_now": 108, "peak_wind":  65.0},
-    {"lat": 24.4, "lon": -81.0, "hours_from_now": 114, "peak_wind":  55.0},  # FL Keys
-    {"lat": 25.1, "lon": -81.1, "hours_from_now": 120, "peak_wind":  45.0},
-]
-assert len(_DEMO_TRACK_CARIBBEAN) == 21, "Caribbean demo track must be 21 waypoints"
-
-# Atlantic Canada track: post-tropical-transitioning system following
-# the warm Gulf Stream NNE toward Nova Scotia / Newfoundland landfall.
-# Anchored on the historical track of Hurricane Dorian 2019 and
-# Hurricane Fiona 2022 — both major systems that reached Cat-2 strength
-# at Atlantic Canada landfall after transitioning extratropical.
-
-_DEMO_TRACK_ATLANTIC_CANADA: list[dict[str, float]] = [
-    {"lat": 30.0, "lon": -75.0, "hours_from_now":   0, "peak_wind": 130.0},  # Cape Hatteras
-    {"lat": 31.5, "lon": -74.0, "hours_from_now":   6, "peak_wind": 130.0},
-    {"lat": 33.0, "lon": -73.0, "hours_from_now":  12, "peak_wind": 125.0},
-    {"lat": 34.5, "lon": -71.5, "hours_from_now":  18, "peak_wind": 120.0},
-    {"lat": 36.0, "lon": -70.0, "hours_from_now":  24, "peak_wind": 115.0},
-    {"lat": 37.5, "lon": -68.5, "hours_from_now":  30, "peak_wind": 110.0},
-    {"lat": 39.0, "lon": -67.0, "hours_from_now":  36, "peak_wind": 105.0},
-    {"lat": 40.5, "lon": -65.5, "hours_from_now":  42, "peak_wind": 100.0},
-    {"lat": 42.0, "lon": -64.0, "hours_from_now":  48, "peak_wind":  95.0},
-    {"lat": 43.5, "lon": -63.0, "hours_from_now":  54, "peak_wind":  90.0},
-    {"lat": 44.7, "lon": -63.6, "hours_from_now":  60, "peak_wind":  85.0},  # Nova Scotia landfall
-    {"lat": 45.8, "lon": -62.0, "hours_from_now":  66, "peak_wind":  75.0},
-    {"lat": 46.8, "lon": -60.0, "hours_from_now":  72, "peak_wind":  65.0},
-    {"lat": 47.6, "lon": -57.8, "hours_from_now":  78, "peak_wind":  55.0},  # Newfoundland approach
-    {"lat": 48.2, "lon": -55.5, "hours_from_now":  84, "peak_wind":  50.0},
-    {"lat": 48.7, "lon": -53.0, "hours_from_now":  90, "peak_wind":  45.0},
-    {"lat": 49.1, "lon": -50.5, "hours_from_now":  96, "peak_wind":  45.0},
-    {"lat": 49.4, "lon": -48.0, "hours_from_now": 102, "peak_wind":  40.0},
-    {"lat": 49.6, "lon": -45.5, "hours_from_now": 108, "peak_wind":  40.0},
-    {"lat": 49.7, "lon": -43.0, "hours_from_now": 114, "peak_wind":  35.0},
-    {"lat": 49.8, "lon": -40.5, "hours_from_now": 120, "peak_wind":  35.0},
-]
-assert len(_DEMO_TRACK_ATLANTIC_CANADA) == 21, "Atlantic Canada demo track must be 21 waypoints"
-
-# Basin lookup — used by the basin-aware mock fallback in
-# ``fetch_nhc_cone`` and any test that wants a seed track per region.
-BASIN_DEMO_TRACKS: dict[str, list[dict[str, float]]] = {
-    "us_atlantic": _DEMO_TRACK_FL,
-    "caribbean": _DEMO_TRACK_CARIBBEAN,
-    "atlantic_canada": _DEMO_TRACK_ATLANTIC_CANADA,
+_LANDMARK_STORM_BY_BASIN: dict[str, str] = {
+    "us_atlantic": "AL092022",      # Hurricane Ian (2022)
+    "caribbean": "AL152017",        # Hurricane Maria (2017)
+    "atlantic_canada": "AL072022",  # Hurricane Fiona (2022)
 }
+
+# HURDAT2 records track points at standard 6-hour synoptic times (00, 06,
+# 12, 18 UTC) plus intermediate "special advisories" near landfall with
+# off-cadence timestamps (e.g., 19:05 UTC).  We filter to standard times
+# so the 21-row slice has uniform 6-hour spacing.
+_HURDAT2_STANDARD_HOURS = (0, 6, 12, 18)
+
+_KT_TO_MPH_FACTOR = 1.150779  # NIST conversion (1 nm = 1.150779 stat mi).
+
+
+@functools.lru_cache(maxsize=None)
+def sample_basin_seed_track(
+    basin: str,
+    *,
+    seed_storm_id: str | None = None,
+) -> list[dict[str, float]]:
+    """Return a 21-waypoint 6-hour-spacing track sampled from HURDAT2.
+
+    Replaces the hand-tabulated ``_DEMO_TRACK_*`` literals removed in
+    AUDIT.3 Phase 2b.  By default each basin maps to a landmark
+    major-hurricane landfall (Ian / Maria / Fiona); pass ``seed_storm_id=``
+    to override with any HURDAT2 storm id (e.g., ``"AL142016"`` for
+    Hurricane Matthew).
+
+    Deterministic for a given ``(basin, seed_storm_id)`` pair — the
+    function is ``@lru_cache``-memoized on its inputs.
+
+    Parameters
+    ----------
+    basin:
+        One of ``"us_atlantic"``, ``"caribbean"``, ``"atlantic_canada"``.
+    seed_storm_id:
+        Optional HURDAT2 storm id (e.g., ``"AL092022"``); when ``None``
+        uses the basin's landmark default.
+
+    Returns
+    -------
+    list[dict]
+        21 waypoints, each ``{"lat", "lon", "hours_from_now", "peak_wind"}``.
+        Hour 0 is the first standard-cadence row of the storm's HURDAT2
+        record; peak_wind is converted from knots to mph using the NIST
+        factor 1.150779.
+
+    Raises
+    ------
+    ValueError
+        Unknown basin.
+    RuntimeError
+        Storm not in HURDAT2 parquet, or storm has < 21 standard-cadence
+        rows (would be a data-integrity surprise — every landmark default
+        has been verified to have ≥ 21 such rows).
+    """
+    if basin not in _LANDMARK_STORM_BY_BASIN:
+        raise ValueError(
+            f"unknown basin {basin!r}; expected one of "
+            f"{sorted(_LANDMARK_STORM_BY_BASIN)}")
+    storm_id = seed_storm_id or _LANDMARK_STORM_BY_BASIN[basin]
+
+    # Imported lazily so test fixtures that don't need HURDAT2 don't
+    # pay the parquet-load cost on import of this module.
+    from ml.scenarios.hurdat2 import parse_hurdat2  # noqa: PLC0415
+    df = parse_hurdat2()
+    rows = df[df["storm_id"] == storm_id].sort_values("timestamp")
+    if rows.empty:
+        raise RuntimeError(
+            f"storm {storm_id!r} not in HURDAT2 parquet at "
+            f"artifacts/hurdat2/best_track.parquet")
+
+    # Keep only standard 6-hour synoptic-time rows.
+    standard_mask = (
+        (rows["timestamp"].dt.minute == 0)
+        & (rows["timestamp"].dt.hour.isin(_HURDAT2_STANDARD_HOURS))
+    )
+    rows = rows[standard_mask]
+    if len(rows) < 21:
+        raise RuntimeError(
+            f"storm {storm_id!r} has only {len(rows)} standard-cadence "
+            f"rows in HURDAT2; need ≥ 21 for a 5-day seed window")
+    rows = rows.iloc[:21]
+
+    t0 = rows.iloc[0]["timestamp"]
+    track: list[dict[str, float]] = []
+    for _, r in rows.iterrows():
+        hours_from_now = int((r["timestamp"] - t0).total_seconds() // 3600)
+        track.append({
+            "lat": float(r["lat"]),
+            "lon": float(r["lon"]),
+            "hours_from_now": hours_from_now,
+            "peak_wind": round(
+                float(r["max_wind_kts"]) * _KT_TO_MPH_FACTOR, 1),
+        })
+    return track
 
 # ── coastal ZIP3 catalog (Gulf + South-Atlantic exposure) ──────────────────
 #
@@ -497,7 +509,10 @@ def generate_scenarios(
     if ensemble:
         return _scenarios_from_ensemble(storm_id, n, list(ensemble), regime, correlation)
 
-    track = seed_track if seed_track is not None else _DEMO_TRACK_FL
+    track = (
+        seed_track if seed_track is not None
+        else sample_basin_seed_track("us_atlantic")
+    )
     if len(track) < 2:
         raise ValueError("seed_track must have at least 2 waypoints")
 
@@ -609,5 +624,5 @@ def generate_scenarios(
 
 __all__ = [
     "generate_scenarios",
-    "BASIN_DEMO_TRACKS",
+    "sample_basin_seed_track",
 ]
