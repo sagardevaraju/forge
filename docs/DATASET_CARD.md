@@ -74,7 +74,8 @@ Operational LP, the claims pre-flagger, every notebook in
   K=1000 perturbed tracks per `storm_id`.
 - **Multi-peril (P3.13-P3.18):** Five peril plug-ins
   (`ml/perils/{hurricane,scs,wildfire,eq,freeze}.py`) calibrated
-  against published sources — see `research.md` §1c, §2d, §5c, §6c.
+  against published sources. Per-peril citations in `research.md` §1c,
+  §2d, §5c, §6c.
 - **Basin coverage:** US Atlantic + Caribbean + Atlantic Canada
   (Task P3.18). HURDAT2 landfall counts: 735 / 241 / 24.
 
@@ -126,9 +127,9 @@ Operational LP, the claims pre-flagger, every notebook in
   under-represent wildfire / earthquake risk. P3.13-P3.18 added
   multi-peril coverage to mitigate this.
 - **HAZUS-MH calibration.** FEMA's published damage curves are not
-  perfect — they tend to over-estimate damage for well-mitigated
-  modern construction and under-estimate for legacy stock. See
-  research.md §5b discussion.
+  perfect. They tend to over-estimate damage for well-mitigated modern
+  construction and under-estimate it for legacy stock. See research.md
+  §5b discussion.
 
 ## 7. Maintenance
 
@@ -205,8 +206,8 @@ and the FORGE GitHub repository.
   honesty contract).
 
 ### Uses
-- **Has the dataset been used for any tasks already?** Yes —
-  Phase 1 → Phase 3′ FORGE development.
+- **Has the dataset been used for any tasks already?** Yes; it has
+  driven FORGE development from Phase 1 through Phase 3′.
 - **Are there other tasks for which the dataset could be used?**
   Reinsurance pricing experiments, multi-peril Monte Carlo
   benchmarking, MIP decomposition research.
