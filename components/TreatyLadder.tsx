@@ -36,6 +36,7 @@ import type {
   QSLayer,
   FrontingLayer,
   CaptiveLayer,
+  ILSLayer,
 } from '@/lib/treaty/types';
 
 // ---------------------------------------------------------------------------
@@ -97,6 +98,10 @@ const XS_FILLS = ['#34d399', '#10b981', '#047857', '#064e3b']; // emerald 400→
 // XS emerald. One color regardless of capital_provider; the data table
 // surfaces the provider tag explicitly.
 const FRONTING_FILL = '#a78bfa'; // violet-400
+// Task P3.21 — ILS / cat-bond band: cyan to distinguish from the
+// traditional-reinsurance XS column (emerald). Single color regardless
+// of trigger type; the data table surfaces the trigger explicitly.
+const ILS_FILL = '#0891b2';     // cyan-600
 
 function xsFill(idx: number): string {
   return XS_FILLS[Math.min(idx, XS_FILLS.length - 1)];
@@ -127,6 +132,10 @@ function LadderSvg({ stack, yMax }: LadderSvgProps) {
   // precompute emits at most one).
   const frontingLayer =
     stack.layers.find((l): l is FrontingLayer => l.type === 'fronting') ?? null;
+  // Task P3.21 — ILS / cat-bond layers occupy a dollar range like XS
+  // but render in a distinct color so the operator can see the
+  // capital-markets cover apart from traditional XS layers.
+  const ilsLayers = stack.layers.filter((l): l is ILSLayer => l.type === 'ils');
 
   // Fronting visual band — bottom of the column when present, beneath
   // the QS. Same fixed-band convention as QS: no dollar range, just a
@@ -387,6 +396,76 @@ function LadderSvg({ stack, yMax }: LadderSvgProps) {
         );
       })}
 
+      {/* ILS / cat-bond bands — same coordinate system as XS but cyan
+          so the operator can distinguish capital-markets cover from
+          traditional XS layers. */}
+      {ilsLayers.map((layer, idx) => {
+        const yTop = dollarsToY(layer.exhaustion, yMax);
+        const yBottom = dollarsToY(layer.attachment, yMax);
+        const h = Math.max(2, yBottom - yTop);
+        const midY = yTop + h / 2;
+        const principal = layer.exhaustion - layer.attachment;
+        return (
+          <g key={`ils-${idx}`}>
+            <rect
+              data-testid="treaty-band"
+              data-band-type="ils"
+              data-attachment={String(layer.attachment)}
+              data-exhaustion={String(layer.exhaustion)}
+              data-trigger={String(layer.trigger)}
+              data-coupon-rate={String(layer.coupon_rate)}
+              x={PAD_L + 4}
+              y={yTop}
+              width={PLOT_W - 8}
+              height={h}
+              fill={ILS_FILL}
+              fillOpacity={0.85}
+              stroke="#155e75"
+              strokeWidth={1}
+            >
+              <title>{`ILS ${roundToMillion(layer.attachment)} to ${roundToMillion(
+                layer.exhaustion,
+              )} · ${layer.trigger} trigger · coupon ${(layer.coupon_rate * 100).toFixed(
+                1,
+              )}% · ${layer.term_years}yr term`}</title>
+            </rect>
+            <rect
+              data-testid="treaty-band-ils"
+              data-attachment={String(layer.attachment)}
+              data-exhaustion={String(layer.exhaustion)}
+              data-trigger={String(layer.trigger)}
+              x={PAD_L + 4}
+              y={yTop}
+              width={PLOT_W - 8}
+              height={h}
+              fill="transparent"
+              pointerEvents="none"
+            />
+            <text
+              x={PAD_L + PLOT_W / 2}
+              y={midY}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={11}
+              fill="#ffffff"
+              fontWeight={500}
+            >
+              {`ILS · ${roundToMillion(layer.attachment)} to ${roundToMillion(layer.exhaustion)}`}
+            </text>
+            <text
+              x={PAD_L + PLOT_W / 2}
+              y={midY + 14}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontSize={10}
+              fill="#cffafe"
+            >
+              {`${layer.trigger} · coupon ${(layer.coupon_rate * 100).toFixed(1)}% · ${layer.term_years}yr`}
+            </text>
+          </g>
+        );
+      })}
+
       {/* book_p99 reference line */}
       <line
         data-testid="book-p99-line"
@@ -578,6 +657,32 @@ function LayerTable({ layers }: LayerTableProps) {
               </tr>
             );
           }
+          if (layer.type === 'ils') {
+            // Task P3.21 — cat-bond table row. "RoL" surfaces the
+            // coupon rate (the cat-bond analogue of rate-on-line);
+            // "Reinstatements" stays empty (cat-bonds are
+            // collateralized one-shot — exhaustion = end of life,
+            // not a reinstatement).
+            return (
+              <tr
+                key={`ils-${idx}`}
+                data-testid="treaty-table-row-ils"
+                className="border-b border-zinc-100"
+              >
+                <td className="py-1 pr-3 font-medium">ILS</td>
+                <td className="py-1 pr-3">
+                  {`${roundToMillion(layer.attachment)} to ${roundToMillion(layer.exhaustion)}`}
+                </td>
+                <td className="py-1 pr-3">
+                  {`${(layer.coupon_rate * 100).toFixed(1)}% coupon`}
+                </td>
+                <td className="py-1 pr-3">
+                  {`${layer.term_years}yr · ${layer.trigger}`}
+                </td>
+                <td className="py-1 text-zinc-600">{layer.description ?? ''}</td>
+              </tr>
+            );
+          }
           if (layer.type === 'captive') {
             // Task P3.20 — render a single row that points at the
             // captive panel above (the trapped/free split lives there).
@@ -671,7 +776,11 @@ export function TreatyLadder({ stack }: TreatyLadderProps) {
   // and client agree on the SVG `<rect y=...>` attribute strings — without
   // it, React reports a hydration mismatch on the LadderSvg subtree.
   const xsLayers = visibleStack.layers.filter((l): l is XSLayer => l.type === 'xs');
-  const topExhaustion = xsLayers.length ? Math.max(...xsLayers.map((l) => l.exhaustion)) : 0;
+  // Task P3.21 — include ILS layer exhaustions in the y-axis range so
+  // the cat-bond layer is always visible above the cat XS column.
+  const ilsLayers = visibleStack.layers.filter((l): l is ILSLayer => l.type === 'ils');
+  const allExhaustions = [...xsLayers, ...ilsLayers].map((l) => l.exhaustion);
+  const topExhaustion = allExhaustions.length ? Math.max(...allExhaustions) : 0;
   const yMaxRaw = Math.max(topExhaustion, visibleStack.book_p99, 1);
   const yMax = Math.round(yMaxRaw * 1.1);
 

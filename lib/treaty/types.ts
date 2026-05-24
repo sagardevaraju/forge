@@ -149,16 +149,84 @@ export type CaptiveLayer = {
   description?: string;
 };
 
-export type TreatyLayer = QSLayer | XSLayer | FrontingLayer | CaptiveLayer;
+/**
+ * Task P3.21 — ILS (Insurance-Linked Securities) / cat-bond layer.
+ *
+ * A cat-bond is a capital-markets instrument: investors buy bonds with
+ * a coupon; if a covered cat event occurs, the bond principal is
+ * reduced to pay the sponsor's covered loss. From the sponsor's
+ * perspective the layer behaves like XS reinsurance — the difference
+ * is the counterparty (capital-markets investors via an SPV / Special
+ * Purpose Insurer instead of a traditional reinsurer) and the trigger
+ * mechanism that determines how much principal is reduced.
+ *
+ * Trigger types:
+ *
+ *   - **indemnity** (v1 default — plan-locked): principal is reduced by
+ *     the sponsor's actual incurred loss inside the layer
+ *     [attachment, exhaustion]. Mathematically identical to an XS
+ *     treaty; the difference is the counterparty + the existence of
+ *     basis risk = 0 for the sponsor. Adds modelling complexity for
+ *     investors who need to vet sponsor loss data.
+ *   - **industry_loss** (v2): principal reduced based on PCS / Swiss
+ *     Re sigma reported industry losses. Carries basis risk for the
+ *     sponsor (the bond may not pay even if the sponsor takes loss).
+ *   - **parametric** (v2): triggered by event parameters (e.g. EQ Mw
+ *     ≥ 7.0 within a defined zone). Lowest basis risk for investors;
+ *     highest basis risk for sponsor.
+ *   - **modeled_loss** (v2): vendor-modeled loss using event data.
+ *
+ * v1 only supports `trigger = 'indemnity'`; the type is open for
+ * forward-compatibility with v2 triggers without a schema bump.
+ *
+ * The cat-bond layer behaves like XS for loss math (see
+ * `api_py/treaty.retained_ils`). Additional fields capture the
+ * capital-markets economics: coupon rate (interest paid to investors),
+ * term in years (typical 3-5), reset frequency.
+ */
+export type ILSLayer = {
+  type: 'ils';
+  /** Attachment point in dollars — losses below stay with the sponsor. */
+  attachment: number;
+  /** Exhaustion point in dollars — losses above pierce the layer. */
+  exhaustion: number;
+  /**
+   * Trigger mechanism. v1 only supports `'indemnity'`; v2 (out of P3.21
+   * scope) will add industry_loss / parametric / modeled_loss. The
+   * union is open so v2 additions don't require a schema bump.
+   */
+  trigger: 'indemnity' | 'industry_loss' | 'parametric' | 'modeled_loss';
+  /**
+   * Coupon rate paid to investors as fraction of principal per annum
+   * (e.g. 0.07 = 700 bps). The total coupon load on the sponsor is
+   * `coupon_rate * principal` per year; this is the cat-bond analogue
+   * of the XS RoL.
+   */
+  coupon_rate: number;
+  /** Term to maturity in years (typical 3-5). */
+  term_years: number;
+  /**
+   * Reset frequency in years. 0 = no reset (collateralised at issuance
+   * for full term); 1 = annual reset of the trigger parameters.
+   */
+  reset_years: number;
+  /**
+   * Human-readable description shown in the data table beneath the
+   * ladder.
+   */
+  description?: string;
+};
+
+export type TreatyLayer = QSLayer | XSLayer | FrontingLayer | CaptiveLayer | ILSLayer;
 
 export interface TreatyStack {
   /**
-   * Schema version. Bumped to 2 in P3.19 (FrontingLayer), and to 3 in
-   * P3.20 (CaptiveLayer). Each older reader is forward-compatible —
-   * they'll simply ignore any layer whose `type` doesn't appear in
-   * their union.
+   * Schema version. Bumped to 2 in P3.19 (FrontingLayer), 3 in P3.20
+   * (CaptiveLayer), and 4 in P3.21 (ILSLayer). Each older reader is
+   * forward-compatible — they'll simply ignore any layer whose `type`
+   * doesn't appear in their union.
    */
-  schema_version: 1 | 2 | 3;
+  schema_version: 1 | 2 | 3 | 4;
   /** ISO-8601 timestamp written by the precompute script. */
   generated_at: string;
   /**

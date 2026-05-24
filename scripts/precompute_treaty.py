@@ -158,6 +158,24 @@ def _build_layers(
             "reinstatements_remaining": 2,
             "description": "Cat XS layer — $60M xs $60M.",
         },
+        # Task P3.21 — synthetic ILS / cat-bond layer above the cat XS.
+        # Anchors on Artemis Q4-2024 cat-bond ROL median (≈ 8.5% for
+        # multi-peril US wind/quake at attachment around 1-in-50 PML).
+        # 3-year term + annual reset is the modal cat-bond structure
+        # (Artemis Deal Directory 2024 — 56% of issuances).
+        {
+            "type": "ils",
+            "attachment": 120_000_000,
+            "exhaustion": 200_000_000,
+            "trigger": "indemnity",
+            "coupon_rate": 0.085,
+            "term_years": 3,
+            "reset_years": 1,
+            "description": (
+                "Cat-bond — $80M xs $120M, indemnity trigger, "
+                "8.5% coupon, 3yr term, annual reset."
+            ),
+        },
     ])
     return layers
 
@@ -170,7 +188,7 @@ def main() -> None:
     book_p99 = _load_book_p99()
     layers = _build_layers(book_p99, include_fronting=include_fronting)
     payload: dict[str, Any] = {
-        "schema_version": 3,  # P3.20 bumped to 3 with CaptiveLayer added
+        "schema_version": 4,  # P3.21 bumped to 4 with ILSLayer added
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "data_source": "synthetic_demo",
         "book_p99": book_p99,
@@ -184,12 +202,13 @@ def main() -> None:
     n_xs = sum(1 for l in layers if l["type"] == "xs")
     n_fr = sum(1 for l in layers if l["type"] == "fronting")
     n_cap = sum(1 for l in layers if l["type"] == "captive")
+    n_ils = sum(1 for l in layers if l["type"] == "ils")
     print(f"Wrote {OUT_PATH.relative_to(ROOT)}  ({size:,} bytes)")
     print(f"  data_source: synthetic_demo")
     print(f"  book_p99:    ${book_p99:,.0f}")
     print(
         f"  layers:      {len(layers)} "
-        f"({n_fr} fronting + {n_cap} captive + {n_qs} QS + {n_xs} XS)"
+        f"({n_fr} fronting + {n_cap} captive + {n_qs} QS + {n_xs} XS + {n_ils} ILS)"
     )
 
 
