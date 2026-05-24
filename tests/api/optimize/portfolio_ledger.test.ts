@@ -81,7 +81,7 @@ vi.mock('@/lib/db/portfolio_optimization', () => ({
 
 import { POST, _resetCache } from '@/app/api/optimize/portfolio/route';
 import { loadPortfolioOptimization } from '@/lib/db/portfolio_optimization';
-import { db } from '@/lib/db/client';
+import { unsafeExecute } from '@/lib/db/client';
 import { listDecisions } from '@/lib/audit/decisions';
 
 const loaderMock = loadPortfolioOptimization as unknown as ReturnType<typeof vi.fn>;
@@ -163,7 +163,7 @@ beforeAll(async () => {
   // Mirror the schema migration so the ledger write doesn't fail silently
   // (the route swallows write errors, so without the table the side-effect
   // assertions below would always pass on zero rows).
-  await db.execute(
+  await unsafeExecute(
     'CREATE TABLE IF NOT EXISTS decisions (id TEXT PRIMARY KEY, solve_ts TEXT NOT NULL, operator TEXT NOT NULL, inputs_hash TEXT NOT NULL, inputs_json TEXT NOT NULL, outputs_hash TEXT NOT NULL, outputs_json TEXT NOT NULL, executed_at TEXT, reversed_at TEXT, reversed_by TEXT, notices_sent_at TEXT)',
   );
 });
@@ -173,12 +173,14 @@ beforeEach(async () => {
   spawnScripts.length = 0;
   loaderMock.mockReset();
   loaderMock.mockResolvedValue(SAMPLE_OPT);
-  await db.execute('DELETE FROM decisions');
+  // P3.7 WORM blocks DELETE on decisions via the wrapped client; teardown
+  // is the privileged escape hatch.
+  await unsafeExecute('DELETE FROM decisions');
 });
 
 afterEach(async () => {
   vi.clearAllMocks();
-  await db.execute('DELETE FROM decisions');
+  await unsafeExecute('DELETE FROM decisions');
 });
 
 describe('POST /api/optimize/portfolio — decision ledger wire-up (P3.4)', () => {
