@@ -18,6 +18,7 @@ from ml.perils.base import (
     register_peril,
     registered_perils,
 )
+from ml.perils.eq import EQPeril
 from ml.perils.hurricane import HurricanePeril
 from ml.perils.scs import SCSPeril
 from ml.perils.wildfire import WildfirePeril
@@ -30,4 +31,5 @@ __all__ = [
     "HurricanePeril",
     "SCSPeril",
     "WildfirePeril",
+    "EQPeril",
 ]
