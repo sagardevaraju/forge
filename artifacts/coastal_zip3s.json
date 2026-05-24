@@ -1,0 +1,250 @@
+{
+  "catalog": {
+    "275": {
+      "elev_m": 118.3,
+      "lat": 35.78957,
+      "lon": -78.819689,
+      "n_policies": 117
+    },
+    "280": {
+      "elev_m": 227.97,
+      "lat": 35.247575,
+      "lon": -81.188656,
+      "n_policies": 159
+    },
+    "281": {
+      "elev_m": 182.1,
+      "lat": 34.98552,
+      "lon": -80.54697,
+      "n_policies": 148
+    },
+    "282": {
+      "elev_m": 226.8,
+      "lat": 35.224867,
+      "lon": -80.843078,
+      "n_policies": 150
+    },
+    "283": {
+      "elev_m": 70.4,
+      "lat": 35.088856,
+      "lon": -78.981313,
+      "n_policies": 146
+    },
+    "284": {
+      "elev_m": 0.69,
+      "lat": 34.235208,
+      "lon": -77.951196,
+      "n_policies": 138
+    },
+    "285": {
+      "elev_m": 7.45,
+      "lat": 35.265881,
+      "lon": -77.59727,
+      "n_policies": 159
+    },
+    "286": {
+      "elev_m": 349.57,
+      "lat": 35.744341,
+      "lon": -81.325969,
+      "n_policies": 140
+    },
+    "287": {
+      "elev_m": 631.48,
+      "lat": 35.331276,
+      "lon": -82.460137,
+      "n_policies": 157
+    },
+    "289": {
+      "elev_m": 521.09,
+      "lat": 35.106103,
+      "lon": -84.032589,
+      "n_policies": 151
+    },
+    "320": {
+      "elev_m": 1.38,
+      "lat": 29.8861,
+      "lon": -81.296959,
+      "n_policies": 346
+    },
+    "330": {
+      "elev_m": 0.14,
+      "lat": 26.038719,
+      "lon": -80.157576,
+      "n_policies": 342
+    },
+    "331": {
+      "elev_m": 2.41,
+      "lat": 25.771497,
+      "lon": -80.191634,
+      "n_policies": 354
+    },
+    "332": {
+      "elev_m": 1.87,
+      "lat": 25.773189,
+      "lon": -80.194634,
+      "n_policies": 368
+    },
+    "334": {
+      "elev_m": 4.54,
+      "lat": 26.750191,
+      "lon": -80.133988,
+      "n_policies": 309
+    },
+    "335": {
+      "elev_m": 39.52,
+      "lat": 28.017282,
+      "lon": -82.112574,
+      "n_policies": 338
+    },
+    "337": {
+      "elev_m": 15.01,
+      "lat": 27.817429,
+      "lon": -82.676122,
+      "n_policies": 340
+    },
+    "338": {
+      "elev_m": 63.62,
+      "lat": 28.050967,
+      "lon": -81.95736,
+      "n_policies": 331
+    },
+    "339": {
+      "elev_m": 4.87,
+      "lat": 26.622813,
+      "lon": -81.857243,
+      "n_policies": 341
+    },
+    "341": {
+      "elev_m": -1.25,
+      "lat": 26.142174,
+      "lon": -81.789921,
+      "n_policies": 344
+    },
+    "342": {
+      "elev_m": 4.02,
+      "lat": 27.357871,
+      "lon": -82.549826,
+      "n_policies": 363
+    },
+    "346": {
+      "elev_m": 49.05,
+      "lat": 28.508414,
+      "lon": -82.391928,
+      "n_policies": 363
+    },
+    "349": {
+      "elev_m": 2.76,
+      "lat": 27.404831,
+      "lon": -80.387797,
+      "n_policies": 369
+    },
+    "703": {
+      "elev_m": 2.02,
+      "lat": 29.594835,
+      "lon": -90.714481,
+      "n_policies": 189
+    },
+    "704": {
+      "elev_m": 3.47,
+      "lat": 30.365005,
+      "lon": -90.074781,
+      "n_policies": 236
+    },
+    "705": {
+      "elev_m": 10.1,
+      "lat": 30.211753,
+      "lon": -92.033011,
+      "n_policies": 212
+    },
+    "706": {
+      "elev_m": 0.51,
+      "lat": 30.199511,
+      "lon": -93.239079,
+      "n_policies": 234
+    },
+    "707": {
+      "elev_m": 14.35,
+      "lat": 30.48053,
+      "lon": -90.951476,
+      "n_policies": 228
+    },
+    "708": {
+      "elev_m": 16.36,
+      "lat": 30.447299,
+      "lon": -91.177057,
+      "n_policies": 249
+    },
+    "714": {
+      "elev_m": 76.69,
+      "lat": 31.113325,
+      "lon": -93.254371,
+      "n_policies": 212
+    },
+    "770": {
+      "elev_m": 14.27,
+      "lat": 29.757262,
+      "lon": -95.36579,
+      "n_policies": 293
+    },
+    "774": {
+      "elev_m": 20.94,
+      "lat": 29.59536,
+      "lon": -95.613921,
+      "n_policies": 343
+    },
+    "775": {
+      "elev_m": 10.75,
+      "lat": 29.674379,
+      "lon": -95.173641,
+      "n_policies": 302
+    },
+    "776": {
+      "elev_m": 0.4,
+      "lat": 29.875814,
+      "lon": -93.891475,
+      "n_policies": 308
+    },
+    "777": {
+      "elev_m": 5.44,
+      "lat": 30.077234,
+      "lon": -94.129126,
+      "n_policies": 302
+    },
+    "778": {
+      "elev_m": 110.13,
+      "lat": 30.677293,
+      "lon": -96.368808,
+      "n_policies": 314
+    },
+    "783": {
+      "elev_m": 9.17,
+      "lat": 27.741956,
+      "lon": -97.394698,
+      "n_policies": 300
+    },
+    "784": {
+      "elev_m": 9.33,
+      "lat": 27.747576,
+      "lon": -97.399121,
+      "n_policies": 305
+    }
+  },
+  "n_zip3s": 38,
+  "notes": "Replaces the hand-coded _COASTAL_ZIP3S literal previously in ml/scenarios/generate.py.  Every (lat, lon, elev_m) value here is computed from real data (policy table + USGS NED).  Regenerate after any meaningful change to the policy book via `python -m scripts.precompute_coastal_zip3s`.",
+  "source": {
+    "centroid": "AVG(lat,lon) over policies in coastal-state set",
+    "coastal_states": [
+      "FL",
+      "TX",
+      "LA",
+      "AL",
+      "MS",
+      "GA",
+      "SC",
+      "NC"
+    ],
+    "elevation": "USGS EPQS at the ZIP3 centroid",
+    "epqs_url": "https://epqs.nationalmap.gov/v1/json",
+    "min_policies_per_zip3": 50
+  }
+}

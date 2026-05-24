@@ -201,34 +201,48 @@ def sample_basin_seed_track(
         })
     return track
 
-# ── coastal ZIP3 catalog (Gulf + South-Atlantic exposure) ──────────────────
+# ── coastal ZIP3 catalog (AUDIT.3 Phase 4) ────────────────────────────────
 #
-# Representative coastal ZIP3 centroids and approximate ground elevations
-# (m above MSL) for the FORGE book.  Keys are 3-digit ZIP prefixes as
-# strings (matching ``policies.zip3``).  This is intentionally small: the
-# Cat-4 demo storm exposes ~15 ZIP3s across FL, GA, SC, AL, MS, LA.
+# Previously a hand-coded 15-ZIP3 literal with eyeball-estimated lat/lon
+# and elevation.  Replaced by ``artifacts/coastal_zip3s.json`` —
+# regenerable from real data via ``scripts/precompute_coastal_zip3s.py``:
+#
+#   - Each ZIP3's centroid (lat, lon) is the AVG over all policies in
+#     that ZIP3 in the policy table (filtered to coastal-state set).
+#   - Each elevation comes from USGS NED 1/3-arcsec via the EPQS
+#     endpoint at the centroid.
+#
+# The catalog covers ~38 ZIP3s across FL/TX/LA/AL/MS/GA/SC/NC instead
+# of the original cherry-picked 15 — broader coverage is harmless
+# because the surge model's exponential distance decay zeroes the
+# contribution for any ZIP3 the storm doesn't approach.
 
-_COASTAL_ZIP3S: dict[str, dict[str, float]] = {
-    # Florida west coast
-    "335": {"lat": 27.95, "lon": -82.46, "elev_m": 3.0},   # Tampa
-    "337": {"lat": 27.77, "lon": -82.64, "elev_m": 2.0},   # St. Petersburg
-    "339": {"lat": 26.64, "lon": -81.87, "elev_m": 4.0},   # Fort Myers
-    "341": {"lat": 26.14, "lon": -81.79, "elev_m": 2.0},   # Naples
-    "342": {"lat": 27.34, "lon": -82.53, "elev_m": 3.0},   # Sarasota
-    "344": {"lat": 29.65, "lon": -82.33, "elev_m": 14.0},  # Gainesville (inland)
-    "346": {"lat": 28.78, "lon": -82.04, "elev_m": 8.0},   # Brooksville
-    # Florida east coast & panhandle
-    "320": {"lat": 30.33, "lon": -81.65, "elev_m": 5.0},   # Jacksonville
-    "325": {"lat": 30.44, "lon": -84.28, "elev_m": 19.0},  # Tallahassee
-    "326": {"lat": 29.19, "lon": -82.13, "elev_m": 12.0},  # Ocala
-    # Georgia / SC coast
-    "314": {"lat": 32.08, "lon": -81.09, "elev_m": 12.0},  # Savannah
-    "294": {"lat": 32.78, "lon": -79.93, "elev_m": 6.0},   # Charleston
-    # Gulf coast — AL/MS/LA
-    "365": {"lat": 30.69, "lon": -88.04, "elev_m": 3.0},   # Mobile
-    "395": {"lat": 30.40, "lon": -88.89, "elev_m": 2.0},   # Gulfport
-    "704": {"lat": 29.95, "lon": -90.07, "elev_m": 1.0},   # New Orleans
-}
+_COASTAL_ZIP3S_ARTIFACT = (
+    _REPO_ROOT / "artifacts" / "coastal_zip3s.json")
+
+
+@functools.lru_cache(maxsize=1)
+def _load_coastal_zip3_catalog() -> dict[str, dict[str, float]]:
+    """Return ``{zip3: {"lat", "lon", "elev_m"}}`` keyed by 3-digit
+    ZIP3 string.  Reads ``artifacts/coastal_zip3s.json`` lazily on
+    first call and memoizes for the lifetime of the process."""
+    if not _COASTAL_ZIP3S_ARTIFACT.exists():
+        raise RuntimeError(
+            f"coastal ZIP3 catalog missing at "
+            f"{_COASTAL_ZIP3S_ARTIFACT.relative_to(_REPO_ROOT)}; "
+            f"run `python -m scripts.precompute_coastal_zip3s` "
+            f"to regenerate it from the policy book")
+    payload = json.loads(_COASTAL_ZIP3S_ARTIFACT.read_text())
+    # The committed JSON is a dict-of-dicts; strip the n_policies
+    # bookkeeping field that scenario code doesn't need.
+    return {
+        zip3: {
+            "lat": float(entry["lat"]),
+            "lon": float(entry["lon"]),
+            "elev_m": float(entry["elev_m"]),
+        }
+        for zip3, entry in payload["catalog"].items()
+    }
 
 
 # ── NHC climatology loader (AUDIT.3 Phase 2a) ──────────────────────────────
@@ -396,7 +410,7 @@ def _scenarios_from_ensemble(
         peak_wind = round(max(35.0, min(215.0, member_peak)), 1)
         # Per-ZIP3 surge grid identical to the parametric path's model.
         surge_grid: dict[str, float] = {}
-        for zip3, meta in _COASTAL_ZIP3S.items():
+        for zip3, meta in _load_coastal_zip3_catalog().items():
             dist_km = _min_distance_to_track_km(meta["lat"], meta["lon"], path)
             surge_grid[zip3] = _surge_depth(dist_km, peak_wind, meta["elev_m"])
         scenario: dict = {
@@ -580,7 +594,7 @@ def generate_scenarios(
 
         # Per-ZIP3 surge depth grid.
         surge_grid: dict[str, float] = {}
-        for zip3, meta in _COASTAL_ZIP3S.items():
+        for zip3, meta in _load_coastal_zip3_catalog().items():
             dist_km = _min_distance_to_track_km(meta["lat"], meta["lon"], path)
             surge_grid[zip3] = _surge_depth(dist_km, peak_wind, meta["elev_m"])
 
