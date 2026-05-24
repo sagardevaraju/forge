@@ -48,6 +48,8 @@ Full design lives in [`docs/superpowers/specs/2026-05-15-forge-design.md`](docs/
 
 Every numbered surface in FORGE mounts a `TrustTierBadge` so the reader knows where a value came from. The five tiers are **LIVE_FEED** (this-minute API pull), **MODEL_OUTPUT** (calibrated model), **SYNTHETIC_SCAFFOLD** (placeholder distribution standing in for a real feed), **RECOMMENDATION** (optimizer output), and **MANUAL_OVERRIDE** (human-pinned). The grammar contract, magic-constant calibration plan, and `cede_xs` / TVaR-99 / VRP-integrality defenses live in [`docs/methodology.md`](docs/methodology.md) and at `/methodology` in the running app.
 
+**v0.2.0 calibration anchors** (closes AUDIT.3): hurricane track-error σ comes from the [NHC OFCL forecast-error verification climatology](https://www.nhc.noaa.gov/verification/verify7.shtml) (Atlantic, 1989–2023), Monte Carlo seed tracks are sampled from the [HURDAT2](https://www.nhc.noaa.gov/data/#hurdat) best-track database, and the coastal-ZIP3 catalog's elevations come from the [USGS National Elevation Dataset](https://epqs.nationalmap.gov/v1/json) (1/3-arcsec) via EPQS. Full change log in [`docs/releases/v0.2.0.md`](docs/releases/v0.2.0.md); page-level citations for every numeric anchor in [`research.md`](research.md).
+
 ---
 
 ## Tech stack
