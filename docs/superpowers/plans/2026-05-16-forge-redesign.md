@@ -2973,9 +2973,32 @@ git commit -m "test(FORGE): phase 2 e2e smoke"
 
 Phase 3 items are TDD-detailed where the design is fixed, and explicitly marked **"Design decision required before TDD"** where they aren't. The plan still names files, tests, and acceptance criteria so the engineer can pick up at design time without re-planning the whole task.
 
+### Phase 3 / Phase 3′ decoupling (2026-05-23)
+
+The user de-prioritized every auth-tied and Vercel-tied task to remove showcase blockers. The reshuffled execution order is **Phase 3′** — same task set, with 5 tasks **🅿️ PARKED** until a real-customer rollout triggers the auth + Vercel layer.
+
+**🅿️ PARKED — revisit at end of roadmap:**
+- **P3.1** Clerk via Vercel Marketplace (auth + Vercel)
+- **P3.2** RBAC roles (depends on P3.1)
+- **P3.3** Multi-tenancy `tenant_id` (tenant id comes from Clerk session)
+- **P3.5** Two-person rule for non-renew (needs role check)
+- **P3.28b** SOC 2 wiring (split from P3.28 — needs auth)
+
+**⚙️ Active with de-Vercel rewrites:**
+- **P3.9** Quarterly post-mortem — cron moves from `vercel.json` → `.github/workflows/postmortem.yml` (or a documented manual `npm run postmortem` step).
+- **P3.10** Real-time CV inference — dropped "Vercel Python function with CPU-only inference" framing; ships as a generic Next.js Node API route that shells `api_py/cv_inference.py`, runs identically on `npm run dev` / Docker / any Node host.
+- **P3.27** Phase 3 e2e smoke — rewritten around the `X-Forge-Operator` header demo flow (`propose → approve via header swap → /audit → rollback`). Multi-tenant + Clerk login pieces stay in the parked branch.
+- **P3.28a** Presidio PII classifier (independent half of P3.28) — active. **P3.28b** SOC 2 evidentiary wiring (the half that needs auth) — parked.
+
+**Execution order (Phase 3′):** B′ Decision lifecycle → AUDIT cleanup mini-sprint (deferred Tier-3 findings) → D Multi-peril → E Treaty extensions → C′ Scale → F′ Operational. See `memory/forge-phase-roadmap.md` for the current pointer.
+
+---
+
 ### Track P3-A: Auth + RBAC + Multi-tenancy
 
-#### Task P3.1: Clerk auth via Vercel Marketplace
+#### Task P3.1: Clerk auth via Vercel Marketplace 🅿️ PARKED
+
+> **🅿️ PARKED (2026-05-23).** Auth + Vercel coupling; revisit when ready to onboard real customers. The header-based `X-Forge-Operator` swap in P3.4 / P3.6 / P3.8 / P3.27 is intentionally drop-in replaceable here.
 
 **Trade-off:** Clerk is vendor lock-in (monthly per-MAU pricing; egress is a migration). Build-your-own auth would avoid that but multiplies the security surface and removes the SOC 2 inheritance Marketplace integration provides. For a regulated-customer roadmap, that inheritance is worth more than the lock-in.
 
@@ -2996,7 +3019,9 @@ git commit -m "feat(FORGE): Clerk auth via Vercel Marketplace"
 
 ---
 
-#### Task P3.2: RBAC roles
+#### Task P3.2: RBAC roles 🅿️ PARKED
+
+> **🅿️ PARKED (2026-05-23).** Depends on P3.1.
 
 **Files:**
 - Create: `lib/auth/rbac.ts` (role enum, role-required HOC)
@@ -3013,7 +3038,9 @@ git commit -m "feat(FORGE): RBAC roles for viewer/analyst/approver"
 
 ---
 
-#### Task P3.3: Multi-tenancy schema
+#### Task P3.3: Multi-tenancy schema 🅿️ PARKED
+
+> **🅿️ PARKED (2026-05-23).** Tenant id is sourced from the Clerk session; revisit alongside P3.1.
 
 **Files:**
 - Modify: `lib/db/schema.sql` (add `tenant_id` to every table)
@@ -3038,9 +3065,15 @@ git commit -m "feat(FORGE): tenant_id row-level scoping across schema"
 - Modify: `app/api/optimize/portfolio/route.ts` (write decision per solve)
 - Test: `tests/lib/audit/decisions.test.ts`
 
-Schema: `decisions(id, solve_ts, operator, inputs_hash, output_hash, executed_at, reversed_at)`.
+**Design decisions locked (2026-05-23):**
+- **Operator identity:** `X-Forge-Operator` HTTP header → `'demo_operator'` fallback. Drop-in replaceable with the Clerk session id when P3.1 lands.
+- **Payload storage:** plan's hash schema **plus** full `inputs_json` + `outputs_json` columns inline. Keeps `/audit` diff renders self-contained — no joins to a regenerated `artifacts/portfolio_optimization.json`. ~50 KB/decision × 10 k ≈ 500 MB worst-case, trivial for libSQL/SQLite at this scale.
+- **`notices_sent_at` column** on `decisions` (default NULL) — wired in P3.4 so P3.6's `manual_reversal_required` warning has a column to read once the notice-sending pipeline exists.
+- **Hashing:** mirrors `lib/audit/log.ts` (P2.36) — `hashAuditId(input) = sha256(sha256(prompt) + canonicalJson(tool_calls) + sha256(final))`. INSERT ON CONFLICT DO NOTHING for idempotency.
 
-**Acceptance:** every call to `/api/optimize/portfolio` writes one row; hashes are reproducible given the same inputs; `inputs_hash` collisions never overwrite — they UNION.
+Schema (final): `decisions(id TEXT PRIMARY KEY, solve_ts TEXT NOT NULL, operator TEXT NOT NULL, inputs_hash TEXT NOT NULL, inputs_json TEXT NOT NULL, output_hash TEXT NOT NULL, outputs_json TEXT NOT NULL, executed_at TEXT, reversed_at TEXT, reversed_by TEXT, notices_sent_at TEXT)`.
+
+**Acceptance:** every call to `/api/optimize/portfolio` writes one row; hashes are reproducible given the same inputs; `inputs_hash` collisions never overwrite — they UNION (idempotent re-insert returns the same id).
 
 ```bash
 git commit -m "feat(FORGE): versioned decision ledger"
@@ -3048,7 +3081,9 @@ git commit -m "feat(FORGE): versioned decision ledger"
 
 ---
 
-#### Task P3.5: Two-person rule for non-renew
+#### Task P3.5: Two-person rule for non-renew 🅿️ PARKED
+
+> **🅿️ PARKED (2026-05-23).** Requires the RBAC `approver` role from P3.2. The P3.4 ledger schema leaves a `proposed_at` / `executed_at` split in place so the approval column can land without a migration.
 
 **Files:**
 - Modify: `lib/audit/decisions.ts` (add `requires_approval` flag)
@@ -3074,7 +3109,7 @@ git commit -m "feat(FORGE): two-person rule for non-renew at scale"
 
 If notices already sent, surface as a warning + manual reversal flow.
 
-**Acceptance:** rollback writes `reversed_at` + `reversed_by`; when `notices_sent_at IS NOT NULL`, response includes `manual_reversal_required: true` with the customer-list payload the operator needs to issue rescissions.
+**Acceptance:** rollback writes `reversed_at` + `reversed_by` (from the same `X-Forge-Operator` header used in P3.4); when `notices_sent_at IS NOT NULL`, response includes `manual_reversal_required: true` with the customer-list payload the operator needs to issue rescissions.
 
 ```bash
 git commit -m "feat(FORGE): decision rollback with notice-sent warning"
@@ -3117,16 +3152,17 @@ git commit -m "feat(FORGE): /audit view for versioned decision ledger"
 
 ---
 
-#### Task P3.9: Quarterly post-mortem job
+#### Task P3.9: Quarterly post-mortem job (de-Vercel'd)
 
 **Files:**
 - Create: `scripts/postmortem.py` (compares prior decisions to realized outcomes)
-- Modify: `vercel.json` (add quarterly cron — `0 0 1 */3 *`)
+- Create: `.github/workflows/postmortem.yml` (quarterly schedule — `0 0 1 */3 *`)
+- Modify: `package.json` (add `npm run postmortem` script wrapper)
 - Test: `tests/scripts/test_postmortem.py`
 
-> **Design decision required before TDD:** what's the "realized outcome" source? FEMA + carrier-reported NAIC loss runs? Engineer should pick before locking metrics.
+> **Design decision required before TDD:** realized-outcome source. Two options open: (a) **synthetic replay** of the stored K=1000 scenarios against past decisions — honest for the demo book, swap-point documented for real carrier deployment; (b) **OpenFEMA NFIP claims** — real federal source but flood-only. Recommendation pending — synthetic-replay-first is the default unless overridden at design lock.
 
-**Acceptance:** quarterly cron emits a per-decision `realized_minus_proposed` score; the score lands in the next sprint's calibration data; report renders as a single page diff.
+**Acceptance:** quarterly run (GHA cron or `npm run postmortem`) emits a per-decision `realized_minus_proposed` score; the score lands in the next sprint's calibration data; report renders as a single page diff. **De-Vercel'd from the original plan** — cron moved off `vercel.json` so the job runs on GitHub Actions or manually; no Vercel coupling required to ship.
 
 ```bash
 git commit -m "feat(FORGE): quarterly post-mortem job (decision vs realized)"
@@ -3136,15 +3172,16 @@ git commit -m "feat(FORGE): quarterly post-mortem job (decision vs realized)"
 
 ### Track P3-C: Scale + performance
 
-#### Task P3.10: Real-time CV inference endpoint
+#### Task P3.10: Real-time CV inference endpoint (de-Vercel'd)
 
 **Files:**
 - Create: `api_py/cv_inference.py` (load Prithvi checkpoint, run forward pass)
+- Create: `app/api/cv/inference/route.ts` (Node API route that shells out to the Python module)
 - Test: `tests/api/test_cv_inference.py`
 
-> **Design decision required before TDD:** Vercel function or external GPU? Default in this plan: Vercel Python function with CPU-only inference (slow but tenable for a few-per-day rate). Engineer should escalate to a GPU-backed service if volume exceeds ~100/day.
+> **Design decision (locked 2026-05-23):** ship as a generic Next.js Node API route that shells `api_py/cv_inference.py`. Runs identically on `npm run dev`, Docker, or any Node host — no "Vercel Python function" coupling. CPU-only inference at the few-per-day rate the demo needs; escalate to a GPU-backed service only if volume exceeds ~100/day.
 
-**Acceptance:** endpoint returns a CV feature vector for a single chip in <60s on Vercel CPU; reproduces the cached vector when given the same chip; metrics emit p50/p99 latency.
+**Acceptance:** endpoint returns a CV feature vector for a single chip in <60s on local CPU; reproduces the cached vector when given the same chip; metrics emit p50/p99 latency. **De-Vercel'd from the original plan** — no Vercel-specific runtime assumptions.
 
 ```bash
 git commit -m "feat(FORGE): real-time CV inference endpoint (CPU)"
@@ -3422,34 +3459,49 @@ git commit -m "docs(FORGE): controlled user-study protocol"
 
 ---
 
-#### Task P3.28: SOC 2 ingestion + real PII classifier (deferred from P2.39)
+#### Task P3.28a: Presidio PII classifier (active half of original P3.28)
 
-**Trade-off:** Presidio (or equivalent) adds a Python runtime dependency to the ingestion path (~100MB) and a per-row inference cost on upload; we eat that to replace the Phase-2 regex deny-list with a real classifier. SOC 2 audit-trail wiring is the bigger commitment — auth (P3.1) + audit log (P2.36 + P3.7) are prereqs; this task ties them together for the ingestion path.
+**Trade-off:** Presidio (or equivalent) adds a Python runtime dependency to the ingestion path (~100MB) and a per-row inference cost on upload; we eat that to replace the Phase-2 regex deny-list with a real classifier. This is the **auth-independent half** of the original P3.28.
 
 **Files:**
 - Modify: `lib/book/csv.ts` (replace regex deny-list with classifier call)
 - Create: `api_py/pii_classifier.py` (Presidio wrapper)
-- Modify: `lib/audit/decisions.ts` (write ingestion events)
 - Test: `tests/api/test_pii_classifier.py`, `tests/lib/book/csv.test.ts`
 
-**Acceptance:** every CSV upload writes one audit record per row referencing the classifier's per-column decision; the audit trail meets SOC 2 §CC7.2 evidentiary requirements (input → decision → output, immutable).
+**Acceptance:** every CSV upload routes through the classifier; per-column decisions match Presidio's reference labels on a holdout set within 5% F1; regex deny-list removed.
 
 ```bash
-git commit -m "feat(FORGE): SOC 2 ingestion + Presidio-based PII classifier"
+git commit -m "feat(FORGE): Presidio-based PII classifier on ingestion"
 ```
 
 ---
 
-#### Task P3.27: Phase 3 e2e smoke
+#### Task P3.28b: SOC 2 ingestion audit wiring 🅿️ PARKED
+
+> **🅿️ PARKED (2026-05-23).** Split from P3.28; this is the **SOC 2 evidentiary wiring** half — requires auth (P3.1) so audit rows carry a real operator identity. Revisit alongside the auth track.
+
+**Files:**
+- Modify: `lib/audit/decisions.ts` (write ingestion events)
+- Acceptance ties ingestion events back to authenticated operators
+
+**Acceptance:** every CSV upload writes one audit record per row referencing the classifier's per-column decision; the audit trail meets SOC 2 §CC7.2 evidentiary requirements (input → decision → output, immutable).
+
+```bash
+git commit -m "feat(FORGE): SOC 2 ingestion audit wiring (post-auth)"
+```
+
+---
+
+#### Task P3.27: Phase 3 e2e smoke (de-Vercel'd, header-flow)
 
 **Files:**
 - Create: `tests/e2e/phase3.spec.ts`
 
 Prereq: Playwright already installed (Task 28 Step 0).
 
-Smoke: login → portfolio (as analyst) → propose → second login (as approver) → approve → view in /audit → rollback → see warning. Multi-tenant smoke: two tenants, no cross-leakage.
+**Decoupled smoke (2026-05-23):** propose (with `X-Forge-Operator: alice`) → view in /audit → rollback (with `X-Forge-Operator: bob`) → see `manual_reversal_required` warning when notices_sent_at is non-null. The auth-flow halves (login as analyst / second login as approver / multi-tenant cross-leak) **defer to P3.27b** when P3.1–P3.3 unpark.
 
-**Acceptance:** spec exits 0 with both flows green; multi-tenant scoping holds.
+**Acceptance:** spec exits 0 with the header-flow path green. The auth + multi-tenant halves stay parked alongside P3.1–P3.3.
 
 ```bash
 git commit -m "test(FORGE): phase 3 e2e smoke"
