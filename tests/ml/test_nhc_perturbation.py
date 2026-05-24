@@ -32,6 +32,7 @@ from ml.scenarios.generate import (
     _interpolate_at_hour,
     _load_nhc_climatology,
     generate_scenarios,
+    sample_basin_seed_track,
 )
 
 # Same FORECAST_HOURS_PRIMARY as in scripts/fetch_nhc_errors.py.
@@ -140,11 +141,14 @@ def test_scenarios_reconstruct_nhc_cone_within_10_percent() -> None:
     reproduce the empirical NHC cone widths within 10% at the canonical
     verification hours (24/48/72/96/120)."""
     scs = generate_scenarios(storm_id="AL092024_PHASE2A", n=1000)
-    # Reconstruct what seed track was used (the default FL demo path).
-    # Pulling it directly from the module keeps this test honest about
-    # what is being calibrated against.
-    from ml.scenarios.generate import _DEMO_TRACK_FL
-    cone = _empirical_cone_from_scenarios(scs, _DEMO_TRACK_FL)
+    # AUDIT.3 Phase 2b — the default seed is now Hurricane Ian (2022)
+    # sampled from HURDAT2, not the deleted ``_DEMO_TRACK_FL`` literal.
+    # The cone reconstruction is independent of which real storm seeds
+    # the scenarios — what matters is that perturbation σ at each
+    # forecast hour is sized from the NHC climatology, not the seed
+    # track's shape.
+    seed_track = sample_basin_seed_track("us_atlantic")
+    cone = _empirical_cone_from_scenarios(scs, seed_track)
 
     payload = json.loads(_TRACK_ERROR_JSON.read_text())
     empirical = payload["cone_radii_empirical"]["by_hour"]
@@ -164,8 +168,8 @@ def test_scenarios_reconstruct_published_cone_within_20_percent() -> None:
     PR #49 plus the ~10% sampling noise at K=1000 — both expected and
     intentional."""
     scs = generate_scenarios(storm_id="AL092024_PUBLISHED", n=1000)
-    from ml.scenarios.generate import _DEMO_TRACK_FL
-    cone = _empirical_cone_from_scenarios(scs, _DEMO_TRACK_FL)
+    seed_track = sample_basin_seed_track("us_atlantic")
+    cone = _empirical_cone_from_scenarios(scs, seed_track)
 
     payload = json.loads(_TRACK_ERROR_JSON.read_text())
     published = payload["cone_radii_published_2026_nm"]
