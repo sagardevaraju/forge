@@ -94,6 +94,78 @@ _DEMO_TRACK_FL: list[dict[str, float]] = [
 ]
 assert len(_DEMO_TRACK_FL) == 21, "demo seed track must be 21 waypoints"
 
+# ── basin-expansion demo tracks (Task P3.18) ──────────────────────────────
+#
+# Caribbean track: a Cat-4 system tracking WNW out of the central
+# Caribbean, brushing Hispaniola and making landfall on eastern Cuba.
+# Anchored on the historical track shape of Hurricane Matthew 2016
+# (which devastated Haiti as a Cat-4) and Hurricane Maria 2017
+# (PR landfall). 21-waypoint, 6-hour spacing.
+
+_DEMO_TRACK_CARIBBEAN: list[dict[str, float]] = [
+    {"lat": 13.5, "lon": -60.0, "hours_from_now":   0, "peak_wind":  85.0},
+    {"lat": 13.8, "lon": -61.0, "hours_from_now":   6, "peak_wind":  95.0},
+    {"lat": 14.2, "lon": -62.5, "hours_from_now":  12, "peak_wind": 105.0},
+    {"lat": 14.5, "lon": -64.0, "hours_from_now":  18, "peak_wind": 115.0},
+    {"lat": 14.9, "lon": -65.5, "hours_from_now":  24, "peak_wind": 125.0},
+    {"lat": 15.3, "lon": -67.0, "hours_from_now":  30, "peak_wind": 130.0},
+    {"lat": 15.8, "lon": -68.5, "hours_from_now":  36, "peak_wind": 135.0},
+    {"lat": 16.3, "lon": -70.0, "hours_from_now":  42, "peak_wind": 140.0},  # Haiti approach
+    {"lat": 16.8, "lon": -71.5, "hours_from_now":  48, "peak_wind": 140.0},
+    {"lat": 17.4, "lon": -72.8, "hours_from_now":  54, "peak_wind": 135.0},
+    {"lat": 18.0, "lon": -74.0, "hours_from_now":  60, "peak_wind": 130.0},  # Hispaniola south
+    {"lat": 18.7, "lon": -75.2, "hours_from_now":  66, "peak_wind": 125.0},
+    {"lat": 19.5, "lon": -76.4, "hours_from_now":  72, "peak_wind": 120.0},
+    {"lat": 20.2, "lon": -77.5, "hours_from_now":  78, "peak_wind": 115.0},  # eastern Cuba
+    {"lat": 20.9, "lon": -78.5, "hours_from_now":  84, "peak_wind": 105.0},
+    {"lat": 21.6, "lon": -79.3, "hours_from_now":  90, "peak_wind":  95.0},
+    {"lat": 22.3, "lon": -80.0, "hours_from_now":  96, "peak_wind":  85.0},
+    {"lat": 23.0, "lon": -80.5, "hours_from_now": 102, "peak_wind":  75.0},
+    {"lat": 23.7, "lon": -80.8, "hours_from_now": 108, "peak_wind":  65.0},
+    {"lat": 24.4, "lon": -81.0, "hours_from_now": 114, "peak_wind":  55.0},  # FL Keys
+    {"lat": 25.1, "lon": -81.1, "hours_from_now": 120, "peak_wind":  45.0},
+]
+assert len(_DEMO_TRACK_CARIBBEAN) == 21, "Caribbean demo track must be 21 waypoints"
+
+# Atlantic Canada track: post-tropical-transitioning system following
+# the warm Gulf Stream NNE toward Nova Scotia / Newfoundland landfall.
+# Anchored on the historical track of Hurricane Dorian 2019 and
+# Hurricane Fiona 2022 — both major systems that reached Cat-2 strength
+# at Atlantic Canada landfall after transitioning extratropical.
+
+_DEMO_TRACK_ATLANTIC_CANADA: list[dict[str, float]] = [
+    {"lat": 30.0, "lon": -75.0, "hours_from_now":   0, "peak_wind": 130.0},  # Cape Hatteras
+    {"lat": 31.5, "lon": -74.0, "hours_from_now":   6, "peak_wind": 130.0},
+    {"lat": 33.0, "lon": -73.0, "hours_from_now":  12, "peak_wind": 125.0},
+    {"lat": 34.5, "lon": -71.5, "hours_from_now":  18, "peak_wind": 120.0},
+    {"lat": 36.0, "lon": -70.0, "hours_from_now":  24, "peak_wind": 115.0},
+    {"lat": 37.5, "lon": -68.5, "hours_from_now":  30, "peak_wind": 110.0},
+    {"lat": 39.0, "lon": -67.0, "hours_from_now":  36, "peak_wind": 105.0},
+    {"lat": 40.5, "lon": -65.5, "hours_from_now":  42, "peak_wind": 100.0},
+    {"lat": 42.0, "lon": -64.0, "hours_from_now":  48, "peak_wind":  95.0},
+    {"lat": 43.5, "lon": -63.0, "hours_from_now":  54, "peak_wind":  90.0},
+    {"lat": 44.7, "lon": -63.6, "hours_from_now":  60, "peak_wind":  85.0},  # Nova Scotia landfall
+    {"lat": 45.8, "lon": -62.0, "hours_from_now":  66, "peak_wind":  75.0},
+    {"lat": 46.8, "lon": -60.0, "hours_from_now":  72, "peak_wind":  65.0},
+    {"lat": 47.6, "lon": -57.8, "hours_from_now":  78, "peak_wind":  55.0},  # Newfoundland approach
+    {"lat": 48.2, "lon": -55.5, "hours_from_now":  84, "peak_wind":  50.0},
+    {"lat": 48.7, "lon": -53.0, "hours_from_now":  90, "peak_wind":  45.0},
+    {"lat": 49.1, "lon": -50.5, "hours_from_now":  96, "peak_wind":  45.0},
+    {"lat": 49.4, "lon": -48.0, "hours_from_now": 102, "peak_wind":  40.0},
+    {"lat": 49.6, "lon": -45.5, "hours_from_now": 108, "peak_wind":  40.0},
+    {"lat": 49.7, "lon": -43.0, "hours_from_now": 114, "peak_wind":  35.0},
+    {"lat": 49.8, "lon": -40.5, "hours_from_now": 120, "peak_wind":  35.0},
+]
+assert len(_DEMO_TRACK_ATLANTIC_CANADA) == 21, "Atlantic Canada demo track must be 21 waypoints"
+
+# Basin lookup — used by the basin-aware mock fallback in
+# ``fetch_nhc_cone`` and any test that wants a seed track per region.
+BASIN_DEMO_TRACKS: dict[str, list[dict[str, float]]] = {
+    "us_atlantic": _DEMO_TRACK_FL,
+    "caribbean": _DEMO_TRACK_CARIBBEAN,
+    "atlantic_canada": _DEMO_TRACK_ATLANTIC_CANADA,
+}
+
 # ── coastal ZIP3 catalog (Gulf + South-Atlantic exposure) ──────────────────
 #
 # Representative coastal ZIP3 centroids and approximate ground elevations
@@ -438,4 +510,7 @@ def generate_scenarios(
     return scenarios
 
 
-__all__ = ["generate_scenarios"]
+__all__ = [
+    "generate_scenarios",
+    "BASIN_DEMO_TRACKS",
+]

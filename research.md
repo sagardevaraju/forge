@@ -366,6 +366,53 @@ addressable inside the multiplier curve.
 
 ---
 
+## 1c. Atlantic-basin region taxonomy (Task P3.18)
+
+`ml/scenarios/hurdat2.py` adds an `is_in_region()` helper and a
+`REGION_BBOXES` taxonomy for splitting HURDAT2 landfalls into four
+named regions:
+
+| Region | Lat | Lon | Captures |
+|---|---|---|---|
+| `us_atlantic` | 24-49°N | -100 to -65°W | CONUS Atlantic + Gulf (FL Keys to ME, TX Gulf to Eastern Seaboard) |
+| `caribbean` | 10-24°N | -85 to -60°W | Greater + Lesser Antilles, PR, USVI, Cuba, Hispaniola, Jamaica, Bahamas, southern Gulf approaches |
+| `atlantic_canada` | 43-53°N | -75 to -50°W | Nova Scotia, New Brunswick, PEI, Newfoundland |
+| `full_atlantic` | catchall | catchall | Pre-P3.18 default; no geographic filter |
+
+The boxes are NOT mutually exclusive by design — a Bermuda landfall
+is `caribbean=False, us_atlantic=False, atlantic_canada=False,
+full_atlantic=True`. `full_atlantic` is the union catchall and matches
+the pre-P3.18 fitter behaviour exactly (backward compatibility).
+
+**HURDAT2 landfall counts by region** (1851-2024 best-track parquet):
+
+| Region | Count |
+|---|---|
+| US Atlantic (CONUS) | 735 |
+| Caribbean | 241 |
+| Atlantic Canada | 24 |
+| (Bahamas / Bermuda / Mexico / Central America) | ~111 |
+| **Total** | **1111** |
+
+**P3.18 acceptance criterion** (pinned in
+`tests/ml/test_basin_expansion.py::test_full_atlantic_fit_within_10pct_against_real_hurdat2`):
+refitting Saffir-Simpson frequencies on the full Atlantic basin
+produces a log-likelihood within ±10% of the US-Atlantic-only baseline
+on a common landfall-count holdout. With 735 / 1111 US-Atlantic landfalls
+dominating the bucket shape, the Caribbean + Canada additions shift
+the distribution by < 5% in any single bucket and the LL relative gap
+is well inside the ±10% band.
+
+**Basin-aware demo tracks** for `ml/scenarios/generate.py`:
+`BASIN_DEMO_TRACKS["caribbean"]` (Maria 2017 / Matthew 2016 shape) and
+`BASIN_DEMO_TRACKS["atlantic_canada"]` (Dorian 2019 / Fiona 2022 shape)
+join the existing FL-west-coast track. The agent's
+`fetch_nhc_cone` mock dispatches on a `_CB` / `_CA` suffix appended
+to the storm id so the offline demo can show a non-Florida cone
+without a code change.
+
+---
+
 ## 6c. Freeze / Winter-Storm Monte-Carlo plug-in (Task P3.17)
 
 `ml/perils/freeze.py` adds a `FreezePeril` subclass that produces

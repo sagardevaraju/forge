@@ -188,27 +188,108 @@ function mockGefsEnsemble(): GefsEnsemble {
   return { members };
 }
 
+/**
+ * Pick a basin-archetype for the mock fallback based on the storm_id.
+ *
+ * Task P3.18 — until this expansion every mock cone was Florida-shaped,
+ * so the offline demo could not exercise Caribbean (Maria 2017) or
+ * Atlantic Canada (Dorian 2019 / Fiona 2022) tracks. We dispatch on
+ * the second character of the basin code and a trailing region tag:
+ *
+ *   AL*…_CB  → Caribbean cone
+ *   AL*…_CA  → Atlantic Canada cone
+ *   anything else → US Atlantic / Gulf (existing behaviour)
+ *
+ * The tag suffix is a `_<2 char>` appended to a normal AL storm id by
+ * the caller; production NHC ids don't carry it so live calls are
+ * unaffected. The agent route can pass `storm_id=AL092024_CB` to
+ * force a Caribbean mock without owning a new endpoint.
+ */
+type MockBasin = 'us_atlantic' | 'caribbean' | 'atlantic_canada';
+
+function mockBasinFor(storm_id: string): MockBasin {
+  const upper = storm_id.toUpperCase();
+  if (upper.endsWith('_CB')) return 'caribbean';
+  if (upper.endsWith('_CA')) return 'atlantic_canada';
+  return 'us_atlantic';
+}
+
+interface BasinMock {
+  cone: GeoJSON.Polygon['coordinates'][0];
+  peak_wind: number;
+  prior_peak_wind: number;
+}
+
+const _BASIN_MOCKS: Record<MockBasin, BasinMock> = {
+  // Florida-gulf approach — historical default (Hurricane Ian 2022 shape).
+  us_atlantic: {
+    cone: [
+      [-85.0, 24.0],
+      [-83.5, 25.5],
+      [-82.0, 27.0],
+      [-81.0, 28.5],
+      [-80.5, 30.0],
+      [-82.0, 29.5],
+      [-83.5, 28.0],
+      [-85.0, 26.5],
+      [-86.5, 25.0],
+      [-85.0, 24.0],
+    ],
+    peak_wind: 142,
+    prior_peak_wind: 135,
+  },
+  // Caribbean Cat-4 — Hispaniola/Cuba shape (Maria 2017 / Matthew 2016).
+  caribbean: {
+    cone: [
+      [-67.5, 13.5],
+      [-69.0, 14.5],
+      [-71.0, 15.8],
+      [-73.0, 17.0],
+      [-75.0, 18.5],
+      [-77.0, 20.0],
+      [-78.5, 21.5],
+      [-77.0, 22.5],
+      [-74.5, 21.0],
+      [-71.5, 18.0],
+      [-69.0, 15.5],
+      [-67.5, 13.5],
+    ],
+    peak_wind: 145,
+    prior_peak_wind: 130,
+  },
+  // Atlantic Canada — Nova Scotia/Newfoundland landfall (Dorian 2019 /
+  // Fiona 2022 shape). Smaller intensity at landfall — post-tropical.
+  atlantic_canada: {
+    cone: [
+      [-67.5, 39.5],
+      [-66.0, 41.0],
+      [-64.5, 42.5],
+      [-63.0, 44.0],
+      [-61.0, 45.5],
+      [-58.5, 47.0],
+      [-56.0, 48.5],
+      [-55.0, 47.0],
+      [-57.5, 45.5],
+      [-60.0, 43.5],
+      [-63.5, 41.5],
+      [-67.5, 39.5],
+    ],
+    peak_wind: 110,
+    prior_peak_wind: 105,
+  },
+};
+
 function mockResponse(storm_id: string): FetchNhcConeResult {
-  // A plausible Florida-gulf cone polygon (a fat ellipse-ish ring).
+  const basin = mockBasinFor(storm_id);
+  const mock = _BASIN_MOCKS[basin];
+  // Map basin → ATCF basin code so the cone properties stay accurate.
+  const basinCode = basin === 'us_atlantic' || basin === 'caribbean' ? 'AL' : 'AL';
   const cone = {
     type: 'Feature',
-    properties: { storm_id, basin: 'AL', stormType: 'HU' },
+    properties: { storm_id, basin: basinCode, stormType: 'HU', region: basin },
     geometry: {
       type: 'Polygon',
-      coordinates: [
-        [
-          [-85.0, 24.0],
-          [-83.5, 25.5],
-          [-82.0, 27.0],
-          [-81.0, 28.5],
-          [-80.5, 30.0],
-          [-82.0, 29.5],
-          [-83.5, 28.0],
-          [-85.0, 26.5],
-          [-86.5, 25.0],
-          [-85.0, 24.0],
-        ],
-      ],
+      coordinates: [mock.cone],
     },
   };
   // Task P2.22 — three prior advisories at roughly -6h / -12h / -18h relative
@@ -222,14 +303,15 @@ function mockResponse(storm_id: string): FetchNhcConeResult {
     mockPriorCone(storm_id, 12, '2026-05-16T12:00:00Z', 0.4, 0.15),
     mockPriorCone(storm_id, 11, '2026-05-16T06:00:00Z', 0.6, 0.3),
   ];
-  // Task 23: prior advisory's peak wind seeds the delta chip. The demo's
-  // current peak_wind of 142 (set when the cone refreshes against a fresh
-  // advisory) renders a +7 mph swing against this 135 mph baseline.
+  // Task 23: prior advisory's peak wind seeds the delta chip. Basin-
+  // specific peak / prior pairs surface a realistic delta for each
+  // archetype (US Atlantic +7 mph, Caribbean +15 mph mid-intensification,
+  // Atlantic Canada +5 mph post-tropical) — Task P3.18.
   return {
     cone,
     advisory_number: '14A',
-    peak_wind: 142,
-    prior_peak_wind: 135,
+    peak_wind: mock.peak_wind,
+    prior_peak_wind: mock.prior_peak_wind,
     prior_cones,
     // Task P2.38 — 5-member deterministic GEFS ensemble. Offline / no-key
     // demos still exercise the ensemble path through ml.scenarios.generate.

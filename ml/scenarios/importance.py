@@ -108,22 +108,42 @@ def _bucket_for_mph(mph: float) -> str | None:
     return "cat4+"
 
 
-def fit_basin_frequencies_from_hurdat2(parquet_path: Path | str) -> dict[str, float]:
+def fit_basin_frequencies_from_hurdat2(
+    parquet_path: Path | str,
+    region: str = "full_atlantic",
+) -> dict[str, float]:
     """Fit ``ATLANTIC_BASIN_FREQUENCIES`` from a HURDAT2 best-track parquet.
 
     Counts every landfall row (``record_identifier == 'L'``), converts
     ``max_wind_kts`` → mph via the standard 1.150779 factor, bins into
     Saffir-Simpson buckets, and normalises to a unit-sum distribution.
 
+    Parameters
+    ----------
+    parquet_path:
+        Path to the HURDAT2 parquet cache (typically
+        ``artifacts/hurdat2/best_track.parquet``).
+    region:
+        Geographic filter applied to landfall rows BEFORE bucketing.
+        One of ``"us_atlantic"`` / ``"caribbean"`` / ``"atlantic_canada"``
+        / ``"full_atlantic"`` (default). The ``full_atlantic`` value
+        preserves the pre-P3.18 behaviour (no geographic filter — all
+        Atlantic-basin landfalls 1851-present). Filter predicates live
+        in :func:`ml.scenarios.hurdat2.is_in_region`.
+
     Raises
     ------
     FileNotFoundError
         ``parquet_path`` doesn't exist on disk.
     ValueError
-        The parquet has no landfall rows (e.g., the cache was generated
-        from a non-Atlantic basin file).
+        The parquet has no landfall rows after the region filter (e.g.,
+        the cache was generated from a non-Atlantic basin file, or the
+        chosen region matched no events).
     """
     import pandas as pd  # local import keeps fast-path module load light
+
+    # Local import — avoids a circular dependency at module load.
+    from ml.scenarios.hurdat2 import is_in_region  # noqa: PLC0415
 
     path = Path(parquet_path)
     if not path.exists():
@@ -137,6 +157,18 @@ def fit_basin_frequencies_from_hurdat2(parquet_path: Path | str) -> dict[str, fl
             "cache may be from a non-Atlantic basin file."
         )
 
+    if region != "full_atlantic":
+        mask = landfalls.apply(
+            lambda r: is_in_region(float(r["lat"]), float(r["lon"]), region),
+            axis=1,
+        )
+        landfalls = landfalls[mask]
+        if landfalls.empty:
+            raise ValueError(
+                f"HURDAT2 parquet at {path} has zero landfalls in region "
+                f"'{region}' — refusing to emit a zero distribution."
+            )
+
     counts: dict[str, int] = {b: 0 for b in BUCKET_WIND_RANGES}
     for kts in landfalls["max_wind_kts"]:
         bucket = _bucket_for_mph(float(kts) * _KTS_TO_MPH)
@@ -145,10 +177,47 @@ def fit_basin_frequencies_from_hurdat2(parquet_path: Path | str) -> dict[str, fl
     total = sum(counts.values())
     if total == 0:
         raise ValueError(
-            f"HURDAT2 parquet at {path} has landfalls but none above the "
-            "35 mph tropical-storm floor — refusing to emit a zero distribution."
+            f"HURDAT2 parquet at {path} (region={region!r}) has landfalls "
+            "but none above the 35 mph tropical-storm floor — refusing to "
+            "emit a zero distribution."
         )
     return {b: counts[b] / total for b in BUCKET_WIND_RANGES}
+
+
+def log_likelihood_of_distribution(
+    distribution: dict[str, float],
+    observed_counts: dict[str, int],
+) -> float:
+    """Log-likelihood of a categorical distribution against observed counts.
+
+    ``LL = Σ_b observed_counts[b] · log(distribution[b])``
+
+    Conventions:
+
+    - Buckets that exist in ``distribution`` but not in ``observed_counts``
+      contribute 0 (no observation).
+    - A zero count on a zero-probability bucket contributes 0 (the model
+      assigns zero probability to zero observed events — sensible).
+    - A non-zero count on a zero-probability bucket contributes
+      ``-inf`` — the model assigns zero probability to an observed
+      event and is rejected. The whole sum is then ``-inf``.
+
+    This is the standard MLE log-likelihood used to compare nested or
+    cross-fit categorical models (Task P3.18 acceptance criterion:
+    ``|LL(full) - LL(us)| / |LL(us)| ≤ 0.10`` against a common
+    landfall-count holdout).
+    """
+    import math  # local — keeps module load light
+
+    ll = 0.0
+    for bucket, p in distribution.items():
+        n = observed_counts.get(bucket, 0)
+        if n == 0:
+            continue
+        if p <= 0:
+            return float("-inf")
+        ll += n * math.log(p)
+    return ll
 
 
 def _load_atlantic_basin_frequencies() -> dict[str, float]:
@@ -253,5 +322,6 @@ __all__ = [
     "ATLANTIC_BASIN_FREQUENCIES",
     "BUCKET_WIND_RANGES",
     "fit_basin_frequencies_from_hurdat2",
+    "log_likelihood_of_distribution",
     "stratified_sample",
 ]
