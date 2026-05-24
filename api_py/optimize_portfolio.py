@@ -114,9 +114,16 @@ REPRICE_FACTOR: dict[str, float] = {
 #: LOSS_FACTOR — what fraction of the cohort's expected loss the insurer
 #: still bears under each action. Repricing doesn't change the *peril*
 #: the customer is exposed to — only the premium — so all ``reprice_*``
-#: actions carry LOSS_FACTOR=1.0. ``LOSS_FACTOR['cede_xs']=0.3`` is
-#: preserved as documentation but the capital constraint replaces it
-#: with the per-scenario ``retained_xs`` math (P2.7) at solve time.
+#: actions carry LOSS_FACTOR=1.0. ``cede_qs=0.5`` reflects the standard
+#: 50% quota share most common in US homeowner cessions (industry norm
+#: per Aon RMD 2026 and Reinsurance News market summaries). The
+#: ``cede_xs=0.3`` is an upper-bound documentation value — the capital
+#: constraint actually replaces it with per-scenario ``retained_xs``
+#: math at solve time (P2.7), so this scalar only affects the objective
+#: function's expected-loss coefficient (not the tail). The 0.3 reflects
+#: that a typical $20M xs $20M / $60M xs $60M tower covers roughly 70%
+#: of the tail above the working layer attachment for a coastal-southeast
+#: book. See research.md §10a.
 LOSS_FACTOR: dict[str, float] = {
     "retain": 1.0,
     "non_renew": 0.0,
@@ -126,13 +133,29 @@ LOSS_FACTOR: dict[str, float] = {
 }
 
 #: CESSION_COST_RATE — additional cession premium (as a fraction of the
-#: cohort's expected loss at p50) paid out to the reinsurer. Only the
-#: two cede actions cost anything; repricing has no cession spend.
+#: cohort's expected loss at p50) paid out to the reinsurer for each cede
+#: action. Only the two cede actions cost anything; repricing has no
+#: cession spend.
+#:
+#: ``cede_qs=0.65`` derives from QS ceding-commission norms for US
+#: homeowner business: reinsurers receive 50% of the premium and return
+#: 30-35% as ceding commission, so the net cost-to-cede-per-dollar-of-loss
+#: is approximately premium_ceded × (1 - commission) / loss_ceded.
+#: Calibrated against Aon Reinsurance Market Dynamics Jan 2026 +
+#: Reinsurance News market summaries (typical US homeowner ceding
+#: commission 30-35%).
+#:
+#: ``cede_xs=0.12`` derives from working-layer property-cat RoL bench-
+#: marks: typical $20M xs $20M layer RoL ran ~15% in 2024 (hard market
+#: post-Ian), then fell to ~12% at Jan 2026 (Guy Carpenter US Property
+#: Cat Rate-on-Line Index declined 12% at 1/1 2026 per Artemis +
+#: Reinsurance News). Previous hard-coded 0.15 was the 2024 anchor;
+#: 0.12 is the current-cycle midpoint. See research.md §10b.
 CESSION_COST_RATE: dict[str, float] = {
     "retain": 0.0,
     "non_renew": 0.0,
-    "cede_qs": 0.6,
-    "cede_xs": 0.15,
+    "cede_qs": 0.65,
+    "cede_xs": 0.12,
     **{name: 0.0 for name in RATE_GRID},
 }
 

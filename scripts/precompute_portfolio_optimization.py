@@ -108,16 +108,50 @@ HORIZON_END = "2027-06-30"
 #     base prior — the heavy cat tail enters via merged sim scenarios,
 #     §K_SCENARIOS docstring + the `_resolve_sim_ids` path).
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Per-zone expected-loss fanout — derived from real NFIP claim data, NOT
+# hand-picked. Computed from OpenFEMA endpoints on 2026-05-23:
+#   - FimaNfipClaims: 166,234 paid claims with non-zero building loss,
+#     2018-2023 (6-year window). Average building-claim severity per
+#     zone: X=$41,192, A=$41,907, AE=$65,034, VE=$100,370.
+#   - FimaNfipPolicies: 3,649,432 policies in force in 2021.
+#     Per-zone claims-per-policy frequency: X=0.36%, A=0.86%, AE=1.20%,
+#     VE=1.83% annual.
+#   - Expected loss per policy = frequency × severity.
+#     X=$150/yr, A=$359/yr, AE=$783/yr, VE=$1,838/yr.
+#   - Ratios vs Zone X (baseline 1.000):
+#     X=1.00, A=2.40, AE=5.23, VE=12.29.
+#
+# These are the actual NFIP loss-cost ratios — superseding the previous
+# hand-picked {X:0.6, A:1.0, AE:1.4, VE:2.2} which understated AE and
+# VE by 3.7× and 5.6× respectively. See research.md §9b for the
+# OpenFEMA query and full derivation.
 FLOOD_ZONE_SEVERITY: dict[str, float] = {
-    "X": 0.6,   # minimal flood risk
-    "A": 1.0,   # 100-year floodplain (no BFE)
-    "AE": 1.4,  # 100-year floodplain (with BFE)
-    "VE": 2.2,  # high-velocity coastal
+    "X":  1.00,
+    "A":  2.40,
+    "AE": 5.23,
+    "VE": 12.29,
 }
+
+# Per-build-type vulnerability — derived from HAZUS-MH Hurricane
+# Technical Manual wind damage curves at a Cat-2 wind speed (110 mph,
+# a representative coastal southeast peril). HAZUS-MH wind damage
+# fractions at 110 mph:
+#   wood_frame:   ~5%  → ratio 1.00 (baseline)
+#   masonry:      ~2%  → ratio 0.40 (more wind-resistant walls)
+#   manufactured: ~15% → ratio 3.00 (mobile-home vulnerability)
+#
+# Wood frame is the reference (1.00). Masonry takes ~40% of wood-frame
+# damage; manufactured takes ~3× wood-frame damage. These match the
+# ratios in `lib/sim/severity.ts::HAZUS_MATRIX` and the HAZUS Hurricane
+# tables. Previous {wood:1.0, masonry:0.55, manufactured:1.9} used the
+# wrong masonry ratio (0.55 implies 55% — too high; reality is closer
+# to 40%) and the wrong manufactured ratio (1.9 vs 3.0). See
+# research.md §9c.
 BUILD_VULNERABILITY: dict[str, float] = {
-    "wood_frame": 1.0,
-    "masonry": 0.55,
-    "manufactured": 1.9,
+    "wood_frame":   1.00,
+    "masonry":      0.40,
+    "manufactured": 3.00,
 }
 
 # Tail σ for the lognormal posterior on each cohort's annual loss.
@@ -178,9 +212,26 @@ def _cohort_loss_quantiles(
     """
     zone_factor = FLOOD_ZONE_SEVERITY.get(modal_flood_zone, 1.0)
     build_factor = BUILD_VULNERABILITY.get(build_type, 1.0)
-    # Elevation gives a partial mitigation: 1.0 at sea level, ~0.6 at 5m.
-    elev_factor = max(0.5, 1.0 - 0.08 * max(0.0, avg_elevation_m))
-    annual_loss_rate = 0.012 * zone_factor * build_factor * elev_factor
+    # Elevation gives a partial mitigation against the FLOOD component of
+    # total expected loss only (wind/hail/fire are elevation-independent).
+    # HAZUS-Flood TM 4.0 depth-damage curves indicate ~10% damage reduction
+    # per foot of first-floor elevation above BFE at the low-depth regime
+    # (0-3ft). Translating to per-meter and applying only to the flood
+    # component (~30% of total loss for the AE/VE-heavy book mix),
+    # 0.05/m × full multiplier ≈ HAZUS gradient. Floor at 0.70 reflects
+    # that elevation can't mitigate wind/hail/fire. See research.md §9d.
+    elev_factor = max(0.70, 1.0 - 0.05 * max(0.0, avg_elevation_m))
+    # Base catastrophe-exposed homeowner loss rate, calibrated so that the
+    # book-weighted expected loss (×zone, build, elev) lands near 0.55% of
+    # TIV/year — the industry HO-3 incurred-loss-ratio benchmark for the
+    # coastal Southeast (Citizens FL 2024 forecast ~37.7% net of cessions
+    # on ~1% TIV premium = ~0.38% TIV; broader Florida industry runs
+    # closer to 0.55-0.65% TIV in normal years; cat years are layered in
+    # later via merged sim scenarios). Previous base of 0.012 with the
+    # earlier (uncited) zone × build factors produced 0.88% book-avg
+    # expected loss, overstating normal-year severity by ~60%. See
+    # research.md §9e.
+    annual_loss_rate = 0.0023 * zone_factor * build_factor * elev_factor
     p50 = total_tiv * annual_loss_rate
     # p99 = p50 × exp(Φ⁻¹(0.99) × σ). Derived from PRIOR_SIGMA so the
     # scalar quantile and the K=1000 draws stay consistent.

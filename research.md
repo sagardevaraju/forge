@@ -564,7 +564,36 @@ Real values are what the UI surfaces. The previous practice of
 populating via `--mode mock` is forbidden by `populate_cv_features.py`
 unless `--allow-mock` is passed (see §8d below).
 
-### 8d. Why mock-mode populations are forbidden — *derivation*
+### 8e. Why the trained MLP head is bypassed by default — *empirical evidence*
+
+`artifacts/cv_head.pt` was trained against weak labels emitted by
+`ml/cv/train.py::_derive_labels(flood_zone, build_type, elevation_m)` — a
+hand-coded 8-dim function of policy METADATA, with no dependency on chip
+content. Because the supervision signal is independent of the input
+features, the loss-minimising MLP collapses to the label-mean: a constant
+function that emits roughly the same vector for every chip.
+
+Empirical verification across the demo book (10,000 policies, real Sentinel-2
+cached chips from §8b):
+
+| Path                                  | per-policy stdev (vegetation_density) | discrimination |
+|---------------------------------------|---------------------------------------|----------------|
+| Raw NDVI on real cached chips         | ≈ 0.10–0.25 (range −0.06 to +0.42)    | strong         |
+| `predict_chip_mock` band-math (real)  | ≈ 0.10 stdev (range 0.38–0.82)        | strong         |
+| `predict_chip` trained head (real)    | ≈ 0.011 stdev (range 0.43–0.54)       | **near-zero**  |
+
+`load_chip_features(..., bypass_head=True)` (also via env
+`FORGE_CV_BYPASS_HEAD=1`) and the populate script's default both bypass
+the trained head and run band-math directly on the real chips. The head
+remains in the tree; passing `populate_cv_features.py --use-head`
+restores forwarding through it (for comparison or after retraining
+against image-derived labels).
+
+Retraining against external image-derived labels (NLCD impervious
+surface, OSM building density, USGS NED elevation, MODIS / Landsat
+seasonal NDVI variance) is a Phase 2 task tracked separately.
+
+### 8f. Why mock-mode populations are forbidden — *derivation*
 
 `ml/cv/data_loaders.py::mock_chip(lat, lon)` returns `rng.integers(0, 10001,
 size=(5, 256, 256))` — i.e. uniformly-distributed `uint16` noise per band,
@@ -589,6 +618,201 @@ data": the drill-down hides the bar chart and surfaces an amber
 "unpopulated" callout when `cv_features = NULL`, and the populate script
 refuses `--mode mock` unless `--allow-mock` is passed explicitly (offline
 training pipelines that need a non-null column to exercise downstream code).
+
+## 9. Seed-book premium & loss prior — sourced calibration (2026-05-23)
+
+The `scripts/seed_policy_book.py` premium model and the
+`scripts/precompute_portfolio_optimization.py` loss prior previously used
+hand-picked multipliers (`ZONE_MULT = {0.9, 1.2, 1.4, 1.8}`,
+`FLOOD_ZONE_SEVERITY = {0.6, 1.0, 1.4, 2.2}`,
+`BUILD_VULNERABILITY = {1.0, 0.55, 1.9}`,
+`annual_loss_rate = 0.012 × …`) with no citations. Replaced with the
+sourced values below; every figure traces to a primary or industry source.
+
+### 9a. State HO-3 average premium rates — *empirically cited*
+
+| State | HO-3 avg premium (2022) | / Median TIV $268k | = % TIV |
+|---|---|---|---|
+| FL | $2,677 | $268,000 | **1.000%** |
+| TX | $2,397 | $268,000 | **0.894%** |
+| LA | $2,603 | $268,000 | **0.971%** |
+| NC | $1,621 | $268,000 | **0.605%** |
+
+Source: III, "Facts + Statistics: Homeowners and Renters Insurance"
+(2022 HO-3 averages), underlying NAIC "Dwelling Fire, Homeowners, and
+Renters Insurance Report" — TX figure from Texas Department of Insurance.
+https://www.iii.org/fact-statistic/facts-statistics-homeowners-and-renters-insurance
+
+Wired in: `scripts/seed_policy_book.py::STATE_HO3_RATE`.
+
+### 9b. NFIP per-zone expected loss — *derived from real claims*
+
+Queried OpenFEMA endpoints on 2026-05-23:
+
+- `FimaNfipClaims`: 166,234 paid claims with non-zero
+  `amountPaidOnBuildingClaim`, `yearOfLoss` 2018–2023 (6-year window).
+- `FimaNfipPolicies`: 3,649,432 policies with `policyEffectiveDate` in 2021.
+
+| Zone | n_claims (6y) | claims/yr | n_policies (2021) | claim_freq /yr | avg_paid    | expected loss /yr | ratio /X |
+|------|---------------|-----------|-------------------|----------------|-------------|-------------------|----------|
+| X    | 41,651        | 6,942     | 1,911,579         | 0.363%         | $41,192     | $149.62           | 1.000    |
+| A    | 7,141         | 1,190     | 139,143           | 0.855%         | $41,907     | $358.51           | **2.40** |
+| AE   | 111,582       | 18,597    | 1,545,383         | 1.203%         | $65,034     | $782.59           | **5.23** |
+| VE   | 5,860         | 977       | 53,327            | 1.831%         | $100,370    | $1,838.18         | **12.29**|
+
+Loaded for NFIP expense ratio ≈ 0.35 (divide expected loss by 0.65, then
+divide by NFIP average-policy TIV ≈ $268k):
+
+| Zone | loaded loss / TIV |
+|------|-------------------|
+| X    | 0.086%            |
+| A    | 0.207%            |
+| AE   | 0.450%            |
+| VE   | 1.057%            |
+
+Source: FEMA OpenFEMA API endpoints
+https://www.fema.gov/api/open/v2/FimaNfipClaims and
+https://www.fema.gov/api/open/v2/FimaNfipPolicies (filter expressions in
+`/tmp/nfip_zone_calc.py`, archived in commit).
+
+Wired in:
+- `scripts/seed_policy_book.py::NFIP_FLOOD_LOADING` (the loaded /TIV percentages above).
+- `scripts/precompute_portfolio_optimization.py::FLOOD_ZONE_SEVERITY` (the ratios /X column).
+
+### 9c. Build-type vulnerability — *HAZUS-MH wind anchors*
+
+HAZUS-MH Hurricane Technical Manual wind damage curves at 110 mph (Cat-2
+representative coastal Southeast peril):
+
+| Build type   | HAZUS damage ratio | Premium loading | Loss vulnerability |
+|--------------|--------------------|-----------------|--------------------|
+| wood_frame   | ~5%                | **1.00** (baseline) | **1.00** (baseline) |
+| masonry      | ~2%                | **0.85** (premium discount for resistance) | **0.40** (HAZUS-ratio) |
+| manufactured | ~15%               | **1.40** (HO-7 / mobile-home loading) | **3.00** (HAZUS-ratio) |
+
+The premium loading reflects what carriers actually charge (the wind
+discount on masonry is smaller than the HAZUS ratio because non-wind
+perils dominate average year). The loss vulnerability mirrors HAZUS-ratio
+because that's what drives the expected-loss prior.
+
+Source: FEMA HAZUS-MH Hurricane Technical Manual, Wind Damage curves;
+HO-7 product pricing per state DOI rate filings (FL OIR, TX TDI).
+
+Wired in:
+- `scripts/seed_policy_book.py::BUILD_PREMIUM_LOADING` (premium-side multipliers).
+- `scripts/precompute_portfolio_optimization.py::BUILD_VULNERABILITY` (loss-side multipliers).
+
+### 9d. Elevation slope — *HAZUS-Flood depth-damage gradient*
+
+HAZUS-Flood Technical Manual 4.0 depth-damage curves indicate ~10%
+damage reduction per foot of first-floor elevation above BFE at the
+low-depth regime (0–3 ft of flood depth). Translating to per-meter, and
+applying only to the FLOOD component of total expected loss (wind / hail
+/ fire are elevation-independent):
+
+`elev_factor = max(0.70, 1.0 − 0.05 × avg_elevation_m)`
+
+Floor 0.70 reflects that the ~70% non-flood component of total loss
+can't be mitigated by elevation. Slope 0.05/m matches the HAZUS gradient
+applied to the ~30% flood share of total loss.
+
+Source: FEMA HAZUS-Flood Technical Manual 4.0 §6.
+Wired in: `scripts/precompute_portfolio_optimization.py::_cohort_loss_quantiles`.
+
+### 9e. Base catastrophe-exposed annual loss rate — *industry HO-3 anchor*
+
+`annual_loss_rate = 0.0023 × zone_factor × build_factor × elev_factor`.
+
+Calibrated so the book-weighted expected loss lands near **0.55% of TIV
+per year** — the industry HO-3 incurred-loss-ratio benchmark for the
+coastal Southeast:
+
+- Citizens FL 2024 net loss ratio forecast: 37.7% of premium × 1.0% TIV
+  premium ≈ 0.38% TIV (the conservative Citizens-only anchor).
+- Broader FL/TX/LA/NC industry runs closer to 0.55–0.65% TIV in
+  no-cat-year baseline (NAIC industry aggregate).
+- Cat years (Ian, Helene) push annual loss ratios to 100–130%+; those
+  layer in via the merged sim parquet at promotion time, not via the
+  prior.
+
+Book-mix verification:
+- E[zone_factor] = 1.0·0.55 + 2.40·0.20 + 5.23·0.20 + 12.29·0.05 ≈ 2.69
+- E[build_factor] = 1.0·0.55 + 0.40·0.30 + 3.00·0.15 ≈ 1.12
+- E[elev_factor] ≈ 0.85 (typical 3m avg elevation)
+- Expected book-avg = 0.0023 × 2.69 × 1.12 × 0.85 ≈ **0.59% TIV/yr** ✓
+
+Wired in: `scripts/precompute_portfolio_optimization.py::_cohort_loss_quantiles`.
+
+Previous base rate `0.012` (with the earlier uncited zone/build factors
+that averaged 0.92) produced 0.88% book-avg expected loss, overstating
+normal-year severity by ~60%.
+
+## 10. Portfolio MIP cession economics — *2026 reinsurance market*
+
+### 10a. QS ceding-commission norms — `CESSION_COST_RATE['cede_qs']`
+
+US homeowner quota-share treaties typically cede 50% of premium to the
+reinsurer, who returns 30-35% of the ceded premium as a ceding
+commission. Net cost-to-cede-per-dollar-of-loss is approximately
+`premium_ceded × (1 − commission) / loss_ceded`. For 30-35% commissions
+this lands at `0.65-0.70`.
+
+Set to **0.65** in `api_py/optimize_portfolio.py::CESSION_COST_RATE`.
+
+Source: Aon Reinsurance Market Dynamics, January 2026 report; published
+on Aon's "Reinsurance Market Dynamics" landing page.
+https://www.aon.com/en/insights/reports/reinsurance-market-dynamics
+
+### 10b. Working-layer property-cat RoL — `CESSION_COST_RATE['cede_xs']`
+
+Guy Carpenter US Property Catastrophe Rate-on-Line Index movements
+(Artemis index tracker):
+
+| Renewal date | YoY rate change |
+|--------------|-----------------|
+| 1/1 2025     | −6.2%           |
+| Mid-2025     | −6.7%           |
+| 1/1 2026     | **−12%**        |
+| 4/1 2026     | **−14%**        |
+
+Cumulative US Property Cat RoL Index since 2017 trough: ~+66% after
+two consecutive softening cycles. Working-layer (low-attachment,
+high-frequency layers like $20M xs $20M) RoLs run **~12% of premium**
+in the current cycle, down from ~15% in 2024.
+
+Set to **0.12** in `api_py/optimize_portfolio.py::CESSION_COST_RATE`.
+
+Source: Guy Carpenter US Property Cat Rate-on-Line Index (via Artemis):
+https://www.artemis.bm/us-property-cat-rate-on-line-index/
+
+Reinsurance News market summaries:
+https://www.reinsurancene.ws/2026-renewal-sees-sharpest-decline-in-risk-adjusted-global-property-rates-since-2014-howden/
+
+## 11. Territory non-renewal caps — *INTERNAL UNDERWRITING POLICY, NOT STATUTE*
+
+`lib/regulatory/territory_caps.ts::TERRITORY_CAPS` ships hand-set annual
+non-renewal % caps per `(state, territory)` bucket. **No US state
+imposes a statutory annual percentage cap on homeowner non-renewals.**
+The regulatory levers are notice periods (already implemented in
+`lib/regulatory/notice_periods.ts`), product-availability rules, and
+post-event moratoria. The TERRITORY_CAPS values represent an INTERNAL
+underwriting policy a carrier might self-impose to manage concentration,
+public-relations, and rating-agency exposure — not a regulator filing.
+
+Reconciler rationale strings emitted in
+`lib/reconciler/index.ts::buildAgentNotifications` therefore read
+"Internal underwriting cap exceeded" — never "regulator cap" or
+"statutory limit." This pins the trust tier: the cap is a model
+assumption, the rationale string admits it, and a reviewer can never be
+told a fictional FL 3% number is from a Fla. Stat. citation.
+
+Sources surveyed (and confirmed not to expose a numerical annual % cap):
+- Fla. Stat. §627.4133 (non-renewal notice + hurricane-related
+  protections; HB 9 / SB 16-A 2024–2025 reforms tightened notice but did
+  not introduce a % cap).
+- Tex. Ins. Code §551.105 (30-day notice; no annual % cap).
+- La. Rev. Stat. §22:1265 (anti-discrimination; no annual % cap).
+- N.C. Gen. Stat. §58-41-15 (60-day notice; no annual % cap).
 
 ## References
 

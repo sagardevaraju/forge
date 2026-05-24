@@ -70,11 +70,23 @@ XGB_PATHS: dict[float, Path] = {
 def _synthetic_eval_set(rng: np.random.Generator, n: int = 600) -> dict:
     """Draw ``n`` synthetic (forecast, observation) pairs per quantile head.
 
-    Uses the same lognormal posterior as the Portfolio MIP's
-    ``_cohort_loss_quantiles``: ``median = p50``, ``p99 = 4 × p50``, so
-    ``σ = log(4) / Φ⁻¹(0.99) ≈ 0.596``. Each draw samples a cohort-scale
-    ``p50`` (uniform $10k–$10M annual expected loss), reconstructs the
-    underlying normal, then for each quantile head emits:
+    Uses the **same** lognormal posterior σ as the Portfolio MIP's
+    ``_cohort_loss_quantiles`` so the calibration view actually tests
+    the model's posterior — not a thinner reference distribution.
+    PRIOR_SIGMA = 0.85 → p99/p50 = exp(2.326 × 0.85) ≈ 7.21 (matches the
+    Citizens FL FHCF PML/AAL anchor; see ``scripts/precompute_portfolio_
+    optimization.py::PRIOR_SIGMA`` and research.md §7b for the citation).
+
+    A prior version of this function used ``σ = log(4) / Φ⁻¹(0.99) ≈
+    0.596`` (a p99/p50 = 4× tail), which silently calibrated the model
+    against a 30% thinner distribution than the actual MIP posterior.
+    The reliability view therefore showed misleadingly good CRPS scores
+    because it was scoring against a *less-tail-heavy* synthetic
+    benchmark than the system actually emits.
+
+    Each draw samples a cohort-scale ``p50`` (uniform $10k–$10M annual
+    expected loss), reconstructs the underlying normal, then for each
+    quantile head emits:
 
         forecast_q = exp(μ + Φ⁻¹(q) · σ)
         observation = exp(μ + Z · σ),  Z ~ N(0, 1)
@@ -85,7 +97,11 @@ def _synthetic_eval_set(rng: np.random.Generator, n: int = 600) -> dict:
     paired with its three predicted quantiles. This is the right joint
     structure for downstream reliability scoring.
     """
-    sigma = math.log(4.0) / PHI_INV_99
+    # Late import to avoid a top-level dependency between calibration
+    # and portfolio precompute scripts (both consumed by tests in
+    # isolation). The single-source-of-truth is the MIP precompute.
+    from scripts.precompute_portfolio_optimization import PRIOR_SIGMA  # noqa: PLC0415
+    sigma = PRIOR_SIGMA
     p50_scale = rng.uniform(1e4, 1e7, size=n)
     mu = np.log(p50_scale)
     # One realised standard-normal per cohort, shared across heads.

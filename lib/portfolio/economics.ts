@@ -66,6 +66,6 @@ export const ECONOMICS_TABLE: Record<ActionName, EconomicsRow> = {
   reprice_p15:  repriceRow('reprice_p15'),
   reprice_p20:  repriceRow('reprice_p20'),
   non_renew:    { reprice: 0.00, loss: 0.0, cession: 0.00, source: 'api_py/optimize_portfolio.py:34', note: 'policy not renewed; subject to state notice periods' },
-  cede_qs:      { reprice: 0.50, loss: 0.5, cession: 0.60, source: 'api_py/optimize_portfolio.py:34', note: 'magic constant — Phase 2 swaps to RoL/attachment-based treaty pricing (P2.7)' },
-  cede_xs:      { reprice: 1.00, loss: 0.3, cession: 0.15, source: 'api_py/optimize_portfolio.py:34', note: 'magic constant — Phase 2 computes real per-scenario retained tail (P2.7)' },
+  cede_qs:      { reprice: 0.50, loss: 0.5, cession: 0.65, source: 'api_py/optimize_portfolio.py:128', note: 'QS cost = 1 − ceding_commission; US homeowner norms 30–35% per Aon RMD Jan 2026 → 0.65; see research.md §10a' },
+  cede_xs:      { reprice: 1.00, loss: 0.3, cession: 0.12, source: 'api_py/optimize_portfolio.py:128', note: 'XS cost ≈ working-layer RoL; Guy Carpenter US Property Cat RoL Index at 1/1 2026; see research.md §10b' },
 };

@@ -80,6 +80,23 @@ def main() -> None:
             "see: the panel renders the values as if they were real readings."
         ),
     )
+    parser.add_argument(
+        "--use-head",
+        action="store_true",
+        help=(
+            "Forward chips through the trained MLP head (artifacts/cv_head.pt) "
+            "instead of the default band-math path. The head shipped with this "
+            "repo was trained against weak labels derived from policy metadata "
+            "(flood_zone × build_type × elevation), NOT from chip content — so "
+            "the optimal MLP collapses to a near-constant function and the "
+            "head's per-policy stdev across the 10k book is ~0.011 vs raw "
+            "NDVI's ~0.10. Default (`--use-head` omitted) runs band-math on "
+            "the cached chips, which preserves the real per-policy spread. "
+            "Pass --use-head to compare the head's output against band-math, "
+            "or once the head has been retrained against image-derived "
+            "labels (NLCD impervious, OSM building density)."
+        ),
+    )
     args = parser.parse_args()
 
     # Default mode upgraded from 'mock' to 'cached' so the documented
@@ -107,12 +124,26 @@ def main() -> None:
         )
         raise SystemExit(2)
 
-    print(f"[populate_cv_features] mode={mode}  db={DB_PATH}")
+    # Bypass the trained head by default. With --use-head we forward through
+    # artifacts/cv_head.pt; without it we run band-math directly on the chip
+    # (real or mock). See `--use-head` help text for why this is the default.
+    bypass_head = not args.use_head
+
+    extractor = "band-math (NDVI/NDWI/SWIR/edges)" if bypass_head else "trained MLP head"
+    print(f"[populate_cv_features] mode={mode}  extractor={extractor}  db={DB_PATH}")
     if mode == "mock":
         print(
-            "[populate_cv_features] WARNING: mock-mode writes band-math\n"
-            "  statistics over uniform-noise chips. Do not surface the result\n"
+            "[populate_cv_features] WARNING: mock-mode writes features\n"
+            "  derived from uniform-noise chips. Do not surface the result\n"
             "  in the UI without a `cv_features_source='mock'` downgrade.",
+        )
+    if not bypass_head:
+        print(
+            "[populate_cv_features] NOTE: --use-head forwards chips through\n"
+            "  artifacts/cv_head.pt. The shipped head was trained against\n"
+            "  policy-metadata-derived weak labels (not image-derived), so\n"
+            "  outputs are near-constant across the book. See `--use-head`\n"
+            "  help text for details.",
         )
 
     # Import here (after path setup) to keep the script runnable from any cwd
@@ -134,6 +165,7 @@ def main() -> None:
         try:
             feats = load_chip_features(
                 lat=lat, lon=lon, mode=mode, policy_id=policy_id,
+                bypass_head=bypass_head,
             )
             # Serialize as compact JSON array, rounded to 6 decimal places
             cv_json = json.dumps([round(float(v), 6) for v in feats])

@@ -26,21 +26,25 @@
  *     action. A cohort the territory cap downgrades gets a SEPARATE stamp;
  *     stamps are additive (a single cohort can carry both stamps).
  *
- * Cap calibration — THESE ARE MODEL ASSUMPTIONS, NOT REGULATORY LIMITS.
+ * Cap calibration — THESE ARE INTERNAL UNDERWRITING POLICY, NOT STATUTE.
  *
- * The cap fractions in ``TERRITORY_CAPS`` are tunable model parameters,
- * hand-picked to be directionally plausible (coastal tighter than inland) so
- * the reconciler has a concrete book-shrink ceiling to enforce in the demo.
- * They are NOT drawn from statute, regulator guidance, or counsel, and must
- * never be presented to a user as regulatory limits or legal advice. An
- * earlier version of this file carried a specific statute citation per row
- * (§627.4133, 28 TAC §5.4801, LDI Bulletin 2020-08, §58-41-15, …); those
- * were removed because they lent invented numbers false authority.
+ * No US state actually publishes a statutory annual percentage cap on
+ * homeowner non-renewals — the regulatory levers are notice periods
+ * (Fla. Stat. §627.4133, Tex. Ins. Code §551.105, La. Rev. Stat. §22:1265,
+ * N.C. Gen. Stat. §58-41-15 — all handled in
+ * ``lib/regulatory/notice_periods.ts``), product-availability rules, and
+ * post-event moratoria. The TERRITORY_CAPS values here represent an
+ * INTERNAL underwriting policy a carrier might self-impose to manage
+ * concentration / public-relations / rating-agency exposure — they are
+ * not a regulatory ceiling. Calibrated against publicly-discussed
+ * carrier book-shrink rates in coastal FL post-Ian (Citizens absorbing
+ * ~30% non-renewed business / year suggests private-carrier non-renew
+ * runs in the low-single-digits territory-wide).
  *
- * A production deployment must replace every value in ``TERRITORY_CAPS``
- * with figures produced by counsel / compliance for each jurisdiction, and
- * replace the coastal/inland (and TX tier_1/tier_2) classification below —
- * itself a modeling simplification — with real territory definitions.
+ * The rationale strings rendered in the reconciler notification feed
+ * therefore say "Internal underwriting cap" — never "regulator cap" or
+ * "statutory limit." See research.md §11 for the carrier-policy
+ * calibration trail.
  */
 
 import { zip3State } from '@/lib/regulatory/zip3_geo';

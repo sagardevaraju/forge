@@ -212,18 +212,29 @@ def _perturbed_polygon(
 
 
 def _load_correlation(artifacts_root: Path | None = None) -> tuple[float, float]:
-    """Read (β, σ) from artifacts/calibration.json. Returns (0.2, 0.4) as a
-    last-resort default if the calibration artifact is missing — that's the
-    same default `api_py.correlation` ships."""
+    """Read (β, σ) from artifacts/calibration.json.
+
+    Falls back to the canonical defaults in ``api_py.correlation``
+    (DEFAULT_BETA, DEFAULT_SIGMA) when the calibration artifact is
+    missing — a prior version of this fallback returned ``(0.2, 0.4)``
+    inline, which silently diverged from ``api_py.correlation``'s
+    ``(0.5, 0.3)`` and produced materially different tail-heaviness
+    depending on which code path the caller hit. Single source of
+    truth now.
+    """
+    # Local import to avoid a circular dependency between sim_loss and
+    # correlation modules at module-load time.
+    from api_py.correlation import DEFAULT_BETA, DEFAULT_SIGMA  # noqa: PLC0415
+
     root = artifacts_root or Path(__file__).resolve().parent.parent / "artifacts"
     p = root / "calibration.json"
     try:
         data = json.loads(p.read_text())
-        beta = float(data.get("common_factor", {}).get("beta", 0.2))
-        sigma = float(data.get("common_factor", {}).get("sigma", 0.4))
+        beta = float(data.get("common_factor", {}).get("beta", DEFAULT_BETA))
+        sigma = float(data.get("common_factor", {}).get("sigma", DEFAULT_SIGMA))
         return beta, sigma
     except Exception:
-        return 0.2, 0.4
+        return DEFAULT_BETA, DEFAULT_SIGMA
 
 
 def generate_sim_losses(
