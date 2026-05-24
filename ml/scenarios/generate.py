@@ -35,20 +35,43 @@ cover the library contract.
 
 from __future__ import annotations
 
+import functools
+import json
 import math
 from pathlib import Path
 from typing import Iterable
 
 import numpy as np
 
-# ── physical / calibration constants ───────────────────────────────────────
+# ── NHC OFCL forecast-error climatology (AUDIT.3 Phase 2a) ────────────────
+#
+# Track-error and intensity-error σs are no longer hand-coded.  They are
+# loaded on first call from the committed climatology artifacts at
+# ``artifacts/nhc/{track_error,intensity_error}.json`` (produced by
+# ``scripts/fetch_nhc_errors.py``).  See
+# ``docs/scoping/audit-3-nhc-track-error-usgs-ned.md`` §4 Phase 2.
+#
+# Track σ is derived from the empirical cone radius via the 2D-Gaussian
+# 67%-containment inverse-cdf — by construction, scenarios drawn with
+# this σ reconstruct the NHC cone of uncertainty.  Concretely, for a 2D
+# isotropic Gaussian, P(r < σ·c) = 1 - exp(-c²/2) = 0.67 ⇒
+# c = sqrt(-2·ln(0.33)) ≈ 1.4824.  So σ = r67 / 1.4824.
 
-# Approximate 5-day NHC track-error std in degrees (≈175 statute miles).
-# 1° lat ≈ 69 mi, so 2.5° ≈ 173 mi.  We grow σ linearly with hours.
-_TRACK_SIGMA_AT_120H_DEG = 2.5
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_TRACK_ERROR_JSON = _REPO_ROOT / "artifacts" / "nhc" / "track_error.json"
+_INTENSITY_ERROR_JSON = _REPO_ROOT / "artifacts" / "nhc" / "intensity_error.json"
 
-# Peak-wind perturbation grows from 0 mph at t=0 to ~15 mph at t=120h.
-_WIND_SIGMA_AT_120H_MPH = 15.0
+# 67-percentile to Gaussian-σ conversion (see derivation above).
+_R67_TO_SIGMA = 1.0 / math.sqrt(-2.0 * math.log(0.33))  # ≈ 0.6745
+
+# 1 nautical mile = 1.150779 statute miles (NIST).
+_KT_TO_MPH = 1.150779
+# 1 nautical mile = 1/60 degree of latitude (great-circle definition).
+_NM_PER_DEG_LAT = 60.0
+
+# NHC publishes σ at these forecast hours; matches FORECAST_HOURS_PRIMARY
+# in ``scripts/fetch_nhc_errors.py``.
+_NHC_FORECAST_HOURS = (12, 24, 36, 48, 60, 72, 96, 120)
 
 # Forecast horizon in hours.
 _HORIZON_H = 120
@@ -194,6 +217,63 @@ _COASTAL_ZIP3S: dict[str, dict[str, float]] = {
     "395": {"lat": 30.40, "lon": -88.89, "elev_m": 2.0},   # Gulfport
     "704": {"lat": 29.95, "lon": -90.07, "elev_m": 1.0},   # New Orleans
 }
+
+
+# ── NHC climatology loader (AUDIT.3 Phase 2a) ──────────────────────────────
+
+
+@functools.lru_cache(maxsize=1)
+def _load_nhc_climatology() -> tuple[dict[int, float], dict[int, float]]:
+    """Return ``(track_sigma_nm_by_hour, wind_sigma_kt_by_hour)``.
+
+    Both tables include an explicit ``{0: 0.0}`` entry — the verification
+    error at lead zero is zero by definition.
+
+    Track σ at each forecast hour is derived from the *empirical*
+    OFCL total-track cone radius (the 67th percentile of historical
+    total-track errors over the rolling 5-year window).  Scenarios
+    drawn with this σ on lat and lon independently reconstruct the
+    NHC cone-of-uncertainty by construction.
+
+    Wind σ is the sample standard deviation of OFCL signed
+    peak-wind error over the same window.
+
+    Cached after first call — the JSON artifacts are read-only at
+    runtime and don't change between scenario draws.
+    """
+    track_json = json.loads(_TRACK_ERROR_JSON.read_text())
+    intensity_json = json.loads(_INTENSITY_ERROR_JSON.read_text())
+
+    cone_by_hour = track_json["cone_radii_empirical"]["by_hour"]
+    track_sigma: dict[int, float] = {0: 0.0}
+    for hour in _NHC_FORECAST_HOURS:
+        r67 = cone_by_hour[str(hour)]["cone_radius_p67_nm"]
+        track_sigma[hour] = r67 * _R67_TO_SIGMA
+
+    rolling = intensity_json["climatology"]["rolling_window"]["by_hour"]
+    wind_sigma: dict[int, float] = {0: 0.0}
+    for hour in _NHC_FORECAST_HOURS:
+        wind_sigma[hour] = rolling[str(hour)]["peak_wind_sigma_kt"]
+
+    return track_sigma, wind_sigma
+
+
+def _interpolate_at_hour(table: dict[int, float], hour: float) -> float:
+    """Piecewise-linear interpolation; clamps to endpoints outside the
+    fitted hour range (e.g., hour > 120 clamps to the 120h σ)."""
+    keys = sorted(table.keys())
+    if hour <= keys[0]:
+        return table[keys[0]]
+    if hour >= keys[-1]:
+        return table[keys[-1]]
+    for i in range(len(keys) - 1):
+        if keys[i] <= hour <= keys[i + 1]:
+            x0, x1 = keys[i], keys[i + 1]
+            y0, y1 = table[x0], table[x1]
+            frac = (hour - x0) / (x1 - x0)
+            return y0 + frac * (y1 - y0)
+    # Unreachable given the endpoint clamps above, but keep mypy happy.
+    return table[keys[-1]]  # pragma: no cover
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -432,23 +512,40 @@ def generate_scenarios(
 
     rng = np.random.default_rng(_storm_seed(storm_id))
 
-    # Pre-compute per-waypoint perturbation σ.  Track-error σ scales
-    # linearly with hours_from_now, hitting 2.5° at hour 120.
+    # Per-waypoint perturbation σ from the NHC OFCL climatology.
+    # AUDIT.3 Phase 2a — the old hand-coded "2.5° linear ramp" was
+    # within 10% of the right magnitude by luck; this calibrated path
+    # reproduces the published cone of uncertainty by construction at
+    # every forecast hour, not just at the endpoint.
+    track_sigma_table, wind_sigma_table = _load_nhc_climatology()
     horizons = np.array([float(p["hours_from_now"]) for p in track])
-    track_sigmas = _TRACK_SIGMA_AT_120H_DEG * horizons / _HORIZON_H  # deg
-    # Wind-perturbation σ same linear ramp, but capped at 15 mph.
-    wind_sigma = _WIND_SIGMA_AT_120H_MPH  # applied as a single per-scenario draw
+    # Track σ in nm, converted to degrees of latitude (1 nm = 1/60° lat).
+    track_sigma_nm = np.array(
+        [_interpolate_at_hour(track_sigma_table, float(h)) for h in horizons])
+    track_sigma_lat_deg = track_sigma_nm / _NM_PER_DEG_LAT
+    # Longitudinal degrees shrink with latitude, so σ_lon in degrees
+    # grows with cos(lat).  Reference latitude is the seed-track mean —
+    # accurate enough for the scale of an Atlantic basin track.
+    lat_ref_rad = math.radians(float(np.mean([p["lat"] for p in track])))
+    track_sigma_lon_deg = track_sigma_nm / (
+        _NM_PER_DEG_LAT * max(0.1, math.cos(lat_ref_rad)))
+    # Wind σ.  Old code applied a single 15 mph draw per scenario
+    # regardless of when peak intensity occurred; we preserve that
+    # "single per-scenario wind perturbation" semantics but anchor the
+    # σ at the 120h horizon (consistent with treating peak-wind
+    # uncertainty as the 5-day forecast intensity error).
+    wind_sigma_kt = _interpolate_at_hour(wind_sigma_table, float(_HORIZON_H))
+    wind_sigma_mph = wind_sigma_kt * _KT_TO_MPH
 
     scenarios: list[dict] = []
     prob = 1.0 / n
 
     for i in range(n):
         # Track perturbation: independent Gaussian on each waypoint.
-        # A more sophisticated model would correlate consecutive
-        # perturbations along a smooth bias; for FORGE the independent
-        # draw still produces realistic endpoint dispersion.
-        lat_noise = rng.normal(0.0, track_sigmas)
-        lon_noise = rng.normal(0.0, track_sigmas)
+        # σ depends on the waypoint's lead time (NHC error grows from
+        # 0 nm at hour 0 to ~223 nm at hour 120).
+        lat_noise = rng.normal(0.0, track_sigma_lat_deg)
+        lon_noise = rng.normal(0.0, track_sigma_lon_deg)
 
         path = [
             {
@@ -461,7 +558,7 @@ def generate_scenarios(
 
         # Peak-wind perturbation.  Single per-scenario draw so the entire
         # track shifts intensity coherently.
-        peak_wind = float(rng.normal(seed_peak, wind_sigma))
+        peak_wind = float(rng.normal(seed_peak, wind_sigma_mph))
         # Clamp to physically plausible: TS-floor 35 mph, hard cap 215 mph
         peak_wind = max(35.0, min(215.0, peak_wind))
         peak_wind = round(peak_wind, 1)
