@@ -1,0 +1,110 @@
+{
+  "climatology": {
+    "full_period": {
+      "by_hour": {
+        "12": {
+          "n_cases": 10289,
+          "peak_wind_mae_kt": 5.988531441345126,
+          "peak_wind_sigma_kt": 8.607045716748397
+        },
+        "120": {
+          "n_cases": 2434,
+          "peak_wind_mae_kt": 17.53697617091208,
+          "peak_wind_sigma_kt": 23.587361674431047
+        },
+        "24": {
+          "n_cases": 9241,
+          "peak_wind_mae_kt": 9.180824586083757,
+          "peak_wind_sigma_kt": 12.579797722563931
+        },
+        "36": {
+          "n_cases": 8250,
+          "peak_wind_mae_kt": 11.426060606060606,
+          "peak_wind_sigma_kt": 15.428641191899741
+        },
+        "48": {
+          "n_cases": 7321,
+          "peak_wind_mae_kt": 13.414151072257889,
+          "peak_wind_sigma_kt": 17.896749459212234
+        },
+        "60": {
+          "n_cases": 1092,
+          "peak_wind_mae_kt": 10.352564102564102,
+          "peak_wind_sigma_kt": 14.174530846962309
+        },
+        "72": {
+          "n_cases": 5802,
+          "peak_wind_mae_kt": 16.13926232333678,
+          "peak_wind_sigma_kt": 21.545776789671876
+        },
+        "96": {
+          "n_cases": 3099,
+          "peak_wind_mae_kt": 16.085834140045176,
+          "peak_wind_sigma_kt": 21.620304665655073
+        }
+      },
+      "end_year": 2023,
+      "start_year": 1990
+    },
+    "rolling_window": {
+      "by_hour": {
+        "12": {
+          "n_cases": 1792,
+          "peak_wind_mae_kt": 5.041852678571429,
+          "peak_wind_sigma_kt": 7.241289995321471
+        },
+        "120": {
+          "n_cases": 530,
+          "peak_wind_mae_kt": 15.471698113207546,
+          "peak_wind_sigma_kt": 21.546149181840107
+        },
+        "24": {
+          "n_cases": 1588,
+          "peak_wind_mae_kt": 7.2544080604534,
+          "peak_wind_sigma_kt": 10.081588680331732
+        },
+        "36": {
+          "n_cases": 1401,
+          "peak_wind_mae_kt": 8.458244111349037,
+          "peak_wind_sigma_kt": 11.73300054219972
+        },
+        "48": {
+          "n_cases": 1243,
+          "peak_wind_mae_kt": 9.722445695897024,
+          "peak_wind_sigma_kt": 13.274028285387155
+        },
+        "60": {
+          "n_cases": 1092,
+          "peak_wind_mae_kt": 10.352564102564102,
+          "peak_wind_sigma_kt": 14.174530846962309
+        },
+        "72": {
+          "n_cases": 948,
+          "peak_wind_mae_kt": 10.880801687763713,
+          "peak_wind_sigma_kt": 14.76300732267461
+        },
+        "96": {
+          "n_cases": 714,
+          "peak_wind_mae_kt": 12.913165266106443,
+          "peak_wind_sigma_kt": 17.47946571852617
+        }
+      },
+      "end_year": 2023,
+      "start_year": 2019
+    }
+  },
+  "notes": "Per-forecast-hour OFCL signed-intensity-error climatology. `peak_wind_sigma_kt` is the sample standard deviation and feeds Gaussian peak-wind perturbation in scenario generation. `peak_wind_mae_kt` is provided as a cross-check against NHC's annual published MAE numbers.",
+  "source": {
+    "ac_file": "1989-present_OFCL_v_BCD5_ind_ATL_AC_errors.txt",
+    "ac_sha256": "81d431e231248941906d36739172fc53e01452bdfac98618d70cedf1666d35a4",
+    "basin": "atlantic",
+    "cone_methodology_doc": "https://www.nhc.noaa.gov/aboutcone.shtml",
+    "data_format_doc": "https://www.nhc.noaa.gov/verification/pdfs/Error_Tabulation_File_Format.pdf",
+    "fetched_at": "2026-05-24",
+    "model": "OFCL",
+    "series": "intensity (peak_wind_kt)",
+    "ti_file": "1989-present_OFCL_v_BCD5_ind_ATL_TI_errors.txt",
+    "ti_sha256": "c72cdf47471f2e2b2f8baeec8a5a7ea7cff87c80b96c9fb3a9f3cc46d2419096",
+    "url_base": "https://www.nhc.noaa.gov/verification/errors/"
+  }
+}

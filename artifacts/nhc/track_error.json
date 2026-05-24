@@ -1,0 +1,190 @@
+{
+  "climatology": {
+    "full_period": {
+      "by_hour": {
+        "12": {
+          "along_track_mae_nm": 24.18193774245435,
+          "along_track_sigma_nm": 33.10484156970517,
+          "cross_track_mae_nm": 19.963610559182516,
+          "cross_track_sigma_nm": 27.434499944828698,
+          "n_cases": 10569
+        },
+        "120": {
+          "along_track_mae_nm": 157.9311010682005,
+          "along_track_sigma_nm": 209.74239426808805,
+          "cross_track_mae_nm": 130.77452752670501,
+          "cross_track_sigma_nm": 179.56921983028488,
+          "n_cases": 2434
+        },
+        "24": {
+          "along_track_mae_nm": 41.61960660565899,
+          "along_track_sigma_nm": 56.9157212334258,
+          "cross_track_mae_nm": 34.53716209109077,
+          "cross_track_sigma_nm": 46.93897744841146,
+          "n_cases": 9507
+        },
+        "36": {
+          "along_track_mae_nm": 58.53210501530492,
+          "along_track_sigma_nm": 80.24443122231001,
+          "cross_track_mae_nm": 48.560666352719565,
+          "cross_track_sigma_nm": 67.05647157246553,
+          "n_cases": 8494
+        },
+        "48": {
+          "along_track_mae_nm": 76.38904345521992,
+          "along_track_sigma_nm": 105.88650056325106,
+          "cross_track_mae_nm": 62.941322204557494,
+          "cross_track_sigma_nm": 88.0418575653443,
+          "n_cases": 7548
+        },
+        "60": {
+          "along_track_mae_nm": 50.435531135531136,
+          "along_track_sigma_nm": 72.24841467658685,
+          "cross_track_mae_nm": 49.07802197802198,
+          "cross_track_sigma_nm": 66.46965249404369,
+          "n_cases": 1092
+        },
+        "72": {
+          "along_track_mae_nm": 114.07037347178026,
+          "along_track_sigma_nm": 157.32975077512768,
+          "cross_track_mae_nm": 94.06503098308492,
+          "cross_track_sigma_nm": 134.09005961213853,
+          "n_cases": 5971
+        },
+        "96": {
+          "along_track_mae_nm": 119.90083898031624,
+          "along_track_sigma_nm": 162.00604833060814,
+          "cross_track_mae_nm": 96.03833494675702,
+          "cross_track_sigma_nm": 130.41324027858104,
+          "n_cases": 3099
+        }
+      },
+      "end_year": 2023,
+      "start_year": 1989
+    },
+    "rolling_window": {
+      "by_hour": {
+        "12": {
+          "along_track_mae_nm": 16.047488839285712,
+          "along_track_sigma_nm": 21.534732256393287,
+          "cross_track_mae_nm": 14.172042410714287,
+          "cross_track_sigma_nm": 18.87641812829612,
+          "n_cases": 1792
+        },
+        "120": {
+          "along_track_mae_nm": 132.90830188679246,
+          "along_track_sigma_nm": 173.43917362404304,
+          "cross_track_mae_nm": 106.49075471698114,
+          "cross_track_sigma_nm": 145.44970759629373,
+          "n_cases": 530
+        },
+        "24": {
+          "along_track_mae_nm": 24.430541561712843,
+          "along_track_sigma_nm": 32.915685787797415,
+          "cross_track_mae_nm": 21.944836272040302,
+          "cross_track_sigma_nm": 29.402593810146474,
+          "n_cases": 1588
+        },
+        "36": {
+          "along_track_mae_nm": 32.809421841541756,
+          "along_track_sigma_nm": 45.35819195947035,
+          "cross_track_mae_nm": 29.798215560314063,
+          "cross_track_sigma_nm": 40.00667417374217,
+          "n_cases": 1401
+        },
+        "48": {
+          "along_track_mae_nm": 41.71295253419147,
+          "along_track_sigma_nm": 59.564627333696464,
+          "cross_track_mae_nm": 38.61633145615447,
+          "cross_track_sigma_nm": 51.74476832997769,
+          "n_cases": 1243
+        },
+        "60": {
+          "along_track_mae_nm": 50.435531135531136,
+          "along_track_sigma_nm": 72.24841467658685,
+          "cross_track_mae_nm": 49.07802197802198,
+          "cross_track_sigma_nm": 66.46965249404369,
+          "n_cases": 1092
+        },
+        "72": {
+          "along_track_mae_nm": 58.254324894514774,
+          "along_track_sigma_nm": 77.08824072898466,
+          "cross_track_mae_nm": 59.04377637130802,
+          "cross_track_sigma_nm": 79.59526342218662,
+          "n_cases": 948
+        },
+        "96": {
+          "along_track_mae_nm": 86.5,
+          "along_track_sigma_nm": 107.50718171544219,
+          "cross_track_mae_nm": 81.51596638655464,
+          "cross_track_sigma_nm": 111.50430670412669,
+          "n_cases": 714
+        }
+      },
+      "end_year": 2023,
+      "start_year": 2019
+    }
+  },
+  "cone_radii_empirical": {
+    "by_hour": {
+      "12": {
+        "cone_radius_p67_nm": 26.7,
+        "n_cases": 1792
+      },
+      "120": {
+        "cone_radius_p67_nm": 223.05900000000003,
+        "n_cases": 530
+      },
+      "24": {
+        "cone_radius_p67_nm": 40.32899999999999,
+        "n_cases": 1588
+      },
+      "36": {
+        "cone_radius_p67_nm": 54.9,
+        "n_cases": 1401
+      },
+      "48": {
+        "cone_radius_p67_nm": 70.1,
+        "n_cases": 1243
+      },
+      "60": {
+        "cone_radius_p67_nm": 88.497,
+        "n_cases": 1092
+      },
+      "72": {
+        "cone_radius_p67_nm": 102.998,
+        "n_cases": 948
+      },
+      "96": {
+        "cone_radius_p67_nm": 152.613,
+        "n_cases": 714
+      }
+    },
+    "end_year": 2023,
+    "start_year": 2019
+  },
+  "cone_radii_published_2026_nm": {
+    "12": 25,
+    "24": 39,
+    "36": 49,
+    "48": 62,
+    "60": 77,
+    "72": 95,
+    "96": 134,
+    "120": 200
+  },
+  "notes": "Per-forecast-hour OFCL track-error climatology, parsed from the AC + TI tabulations published by NHC. `cross_track_sigma_nm` and `along_track_sigma_nm` are the sample standard deviations of the signed forecast error and feed Gaussian waypoint perturbation in `ml/scenarios/generate.py` (AUDIT.3 Phase 2). `cone_radii_empirical` is the 67th percentile of the OFCL total-track absolute error over the rolling 5-year window, matching the NHC cone-of-uncertainty construction. `cone_radii_published_2026_nm` is the public Atlantic cone table from https://www.nhc.noaa.gov/aboutcone.shtml (fit on 2021-2025); use it to verify the empirical fit on rerun.",
+  "source": {
+    "ac_file": "1989-present_OFCL_v_BCD5_ind_ATL_AC_errors.txt",
+    "ac_sha256": "81d431e231248941906d36739172fc53e01452bdfac98618d70cedf1666d35a4",
+    "basin": "atlantic",
+    "cone_methodology_doc": "https://www.nhc.noaa.gov/aboutcone.shtml",
+    "data_format_doc": "https://www.nhc.noaa.gov/verification/pdfs/Error_Tabulation_File_Format.pdf",
+    "fetched_at": "2026-05-24",
+    "model": "OFCL",
+    "series": "along_track + cross_track",
+    "ti_file": "1989-present_OFCL_v_BCD5_ind_ATL_TI_errors.txt",
+    "ti_sha256": "c72cdf47471f2e2b2f8baeec8a5a7ea7cff87c80b96c9fb3a9f3cc46d2419096",
+    "url_base": "https://www.nhc.noaa.gov/verification/errors/"
+  }
+}
