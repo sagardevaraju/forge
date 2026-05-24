@@ -138,10 +138,69 @@ def fronting_fee(premium: float, fronting_fee_share: float) -> float:
     return max(0.0, premium) * _clamp_share(fronting_fee_share)
 
 
+# ── Task P3.20 — Captive vehicle (trapped vs free capital) ────────────────
+#
+# A captive is an insurance subsidiary the parent owns; the central
+# state variable is what fraction of the captive's capital sits
+# "trapped" against outstanding obligations (loss reserves, fronting
+# collateral, unearned premium reserve) vs what's "free" to dividend
+# back to parent or redeploy. Trapped capital is non-fungible — it
+# cannot be released until the underlying obligation runs off.
+#
+#   trapped_capital = outstanding_reserves
+#                   + collateral_pledged
+#                   + unearned_premium_reserve
+#
+#   free_capital    = total_capital - trapped_capital   (floored at 0)
+#   trapped_share   = trapped_capital / total_capital   (0 if total = 0)
+#
+# Negative input components are clamped at 0 (defensive — the
+# precompute + UI validate at write time).
+
+
+def captive_state(
+    total_capital_usd: float,
+    outstanding_reserves_usd: float,
+    collateral_pledged_usd: float,
+    unearned_premium_reserve_usd: float,
+) -> dict[str, float]:
+    """Derive captive trapped/free capital and the trapped share.
+
+    Returns a dict with keys ``total``, ``trapped``, ``free``,
+    ``trapped_share``. All money fields are USD.
+
+    ``trapped_share`` is in ``[0, 1]``; values of 1.0 indicate the
+    captive is fully reserved (any new underwriting consumes parent
+    capital injection) and warrant an operator-facing risk badge.
+    """
+    total = max(0.0, float(total_capital_usd))
+    reserves = max(0.0, float(outstanding_reserves_usd))
+    collateral = max(0.0, float(collateral_pledged_usd))
+    upr = max(0.0, float(unearned_premium_reserve_usd))
+    trapped = reserves + collateral + upr
+    # Free capital is capped at the larger of (total - trapped, 0) — a
+    # captive that's over-reserved relative to its capital is in a
+    # negative-free state and is reported as 0 free with trapped > total.
+    free = max(0.0, total - trapped)
+    share = (trapped / total) if total > 0 else 0.0
+    if share > 1.0:
+        # Cap visible share at 1.0 — over-trapped is clamped for the UI
+        # bar but the operator can still see trapped > total in the
+        # raw numbers if they look at the data table.
+        share = 1.0
+    return {
+        "total": total,
+        "trapped": trapped,
+        "free": free,
+        "trapped_share": share,
+    }
+
+
 __all__ = [
     "retained_xs",
     "ceded_xs",
     "retained_fronting",
     "ceded_fronting",
     "fronting_fee",
+    "captive_state",
 ]
