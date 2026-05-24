@@ -86,6 +86,7 @@ Tool-call loop caps at 6 iterations. Strict providers (Z.AI) need OpenAI-shape `
 - TS: `npm test` (Vitest). Tests under `tests/lib`, `tests/components`. The components tests use `@testing-library/react` + `jsdom`.
 - Python: `pytest`. Tests under `tests/api`, `tests/ml`, `tests/scripts`, `tests/eval`.
 - Don't introduce a new test runner; the project ships only Vitest + Pytest deliberately.
+- **Heavy integration tests have escape hatches.** `tests/api/portfolio/reoptimize.test.ts` runs the real precompute, which is ~10 min on a fully-loaded dev DB (many promoted sims). Set `FORGE_SKIP_REOPTIMIZE_INTEGRATION=1` to skip it on a loaded dev DB; CI / fresh-DB envs can run it without the flag. Pattern for future long-running integration tests: ship a `FORGE_SKIP_<TEST>=1` opt-out from day one.
 
 ## Tasks plan
 
@@ -139,6 +140,7 @@ python -m scripts.precompute_portfolio_optimization    # Cache the MIP solution
 npm run dev                                            # http://localhost:3000
 
 npm test                                               # Vitest
+FORGE_SKIP_REOPTIMIZE_INTEGRATION=1 npm test           # Vitest — skip the heavy reoptimize integration test on a loaded dev DB
 pytest                                                 # Python tests
 python -m eval.component_metrics                       # Refresh eval JSON
 python -m eval.end_to_end                              # Refresh eval JSON + PNG
