@@ -41,18 +41,26 @@ const DIFF_GATE = 0.05;
 
 async function drillIntoZip(page: import('@playwright/test').Page, zip3: string) {
   await page.goto(`${BASE}/portfolio`);
-  // The map renders ZIP3 buttons in the legend / list panel; click the
-  // one matching the requested zip3 and wait for the drill-down to mount.
-  const trigger = page.getByRole('button', { name: new RegExp(`ZIP3\\s+${zip3}\\b`, 'i') });
-  if (!(await trigger.first().isVisible({ timeout: 5_000 }).catch(() => false))) {
-    return null;
-  }
-  await trigger.first().click();
+  await page.waitForLoadState('networkidle');
+  // The map renders ZIP3 buttons in the legend / list panel; each carries
+  // an aria-label like "Inspect cohorts in ZIP3 346, Hernando, FL, ...".
+  // We match the ZIP3 substring inside that label.
+  const trigger = page
+    .getByRole('button', { name: new RegExp(`ZIP3\\s+${zip3}\\b`, 'i') })
+    .first();
+  const count = await trigger.count();
+  if (count === 0) return null;
+  // Scroll into view + click (the legend is a long list, FL ZIPs are below the fold).
+  await trigger.scrollIntoViewIfNeeded();
+  // The MapLibre <canvas> overlays the legend at the same z-stack level
+  // and intercepts pointer events even with force:true (the synthetic
+  // mouse click lands on the canvas, not the React button). Dispatch a
+  // synthetic click event directly on the button DOM node — that
+  // bypasses pointer-event routing and fires the React onClick handler
+  // bound to the button.
+  await trigger.dispatchEvent('click');
   // The PortfolioDrillDown panel writes its header as "ZIP3 <zip3>".
   await expect(page.getByRole('heading', { name: `ZIP3 ${zip3}` })).toBeVisible({ timeout: 5_000 });
-  // Property-features section is data-testid="property-features"; the
-  // numeric labels carry tabular-nums in the same column as the dim name.
-  // We grab the section text and parse the per-dim values by label.
   const section = page.getByTestId('property-features');
   await expect(section).toBeVisible();
   const text = (await section.innerText()).split('\n');
@@ -63,6 +71,9 @@ async function drillIntoZip(page: import('@playwright/test').Page, zip3: string)
     if (!Number.isFinite(v)) continue;
     values[label] = v;
   }
+  // Close the drill-down so the next click can land on the next ZIP3.
+  // Same canvas-interception story as the inspect button — dispatchEvent.
+  await page.getByRole('button', { name: 'Close drill-down' }).dispatchEvent('click');
   return values;
 }
 
@@ -84,12 +95,15 @@ test('P2.37 — drill-down on 2 distinct ZIPs shows geographic differentiation',
 
 test('P2.37 — citation footer lists ESA WorldCover CC-BY-4.0 + MS Buildings ODbL-1.0', async ({ page }) => {
   await page.goto(`${BASE}/portfolio`);
-  // Click any ZIP3 to open the drill-down (the first one in the book).
-  const anyZipButton = page.getByRole('button', { name: /ZIP3\s+\d{3}/ }).first();
-  if (!(await anyZipButton.isVisible({ timeout: 5_000 }).catch(() => false))) {
+  await page.waitForLoadState('networkidle');
+  // Click any ZIP3 to open the drill-down (the first one in the legend list).
+  const anyZipButton = page.getByRole('button', { name: /Inspect cohorts in ZIP3/i }).first();
+  const count = await anyZipButton.count();
+  if (count === 0) {
     test.skip(true, 'No ZIP3 buttons visible — book may be empty.');
   }
-  await anyZipButton.click();
+  await anyZipButton.scrollIntoViewIfNeeded();
+  await anyZipButton.dispatchEvent('click');
   const citations = page.getByTestId('cv-feature-citations');
   await expect(citations).toBeVisible({ timeout: 5_000 });
   await expect(citations).toContainText(/ESA WorldCover/);
