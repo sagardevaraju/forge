@@ -47,9 +47,13 @@ test('phase 2 — what-if commit on /portfolio re-solves and renders a delta', a
   // adjacent numeric input (the spinbutton next to each slider). Entering a
   // number + pressing Enter commits via WhatIfControl's `handleInputKeyDown`,
   // which is the same code path the route exercises in unit tests.
+  // Phase-2 calibration sweep (commit c5fa234) added a unit suffix to the
+  // What-if cession slider so its aria-label now ends in "($M)" rather than
+  // "($)". The input value is in millions; we feed the new value back in the
+  // same unit (raw / 1e6).
   const cessionInput = page
     .getByTestId('whatif-rail')
-    .getByLabel('Cession budget ($) numeric input');
+    .getByLabel('Cession budget ($M) numeric input');
   const currentVal = await cessionInput.inputValue();
   // Nudge by a large enough fraction that the server can compute a
   // measurable delta (the shell skips re-fetch when budgets are identical).
@@ -82,15 +86,23 @@ test('phase 2 — persona switch through all 5 modes on /portfolio', async ({ pa
   const toggle = page.getByRole('group', { name: 'persona-toggle' });
   await expect(toggle).toBeVisible();
 
-  // 1) Cat-ops — canonical, no query param.
+  // 1) Cat-ops — canonical, no query param. The cat-ops baseline includes
+  // the Cession spend card (renamed from "Cession spend / budget" — the
+  // "/ budget" suffix moved into a caption sub-line on the same card so
+  // we match only the label proper here).
   await toggle.getByRole('button', { name: 'Cat-ops' }).click();
   await expect(page).toHaveURL(/\/portfolio(\?(?!.*persona=).*)?$/);
-  await expect(page.getByText('Cession spend / budget')).toBeVisible();
+  await expect(page.getByText('Cession spend', { exact: true })).toBeVisible();
 
-  // 2) Actuary — VaR-99 (proxy) replaces Expected margin; CRPS card appears.
+  // 2) Actuary — "Retained TVaR-99" replaces Expected margin; CRPS card
+  // appears. Schema v5 (commit c5fa234) replaced the v4 single-quantile
+  // VaR-99 proxy with a true book-level TVaR-99 from the artifact, so
+  // the Actuary card now reads "Retained TVaR-99" — and that's the right
+  // measure (coherent, sub-additive, reflects the optimizer's action
+  // mix rather than the gross book).
   await toggle.getByRole('button', { name: 'Actuary' }).click();
   await expect(page).toHaveURL(/[?&]persona=actuary/);
-  await expect(page.getByText('VaR-99 (proxy)')).toBeVisible();
+  await expect(page.getByText('Retained TVaR-99')).toBeVisible();
   await expect(page.getByText('CRPS')).toBeVisible();
 
   // 3) Reinsurance — RoL by layer replaces Cession spend; Retained tail added.
