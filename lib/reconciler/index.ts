@@ -630,9 +630,12 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
       const capPct = (capStamp.cap_fraction * 100).toFixed(1);
       const obsPct = (capStamp.observed_fraction * 100).toFixed(1);
       rationale =
-        `Modeled territory cap exceeded for bucket ${capStamp.bucket}: ` +
-        `observed ${obsPct}% non-renew TIV share vs ${capPct}% assumed ` +
-        `cap. Cohort ${cohortId} downgraded (smallest-first selection).`;
+        `Internal underwriting cap exceeded for bucket ${capStamp.bucket}: ` +
+        `observed ${obsPct}% non-renew TIV share vs ${capPct}% modeled ` +
+        `concentration limit. No state imposes a statutory annual ` +
+        `non-renewal % cap — this is a self-imposed carrier policy; see ` +
+        `lib/regulatory/territory_caps.ts. Cohort ${cohortId} downgraded ` +
+        `(smallest-first selection).`;
     } else if (noticeStamp) {
       finalAction = 'non_renew_next_renewal';
       rationale =

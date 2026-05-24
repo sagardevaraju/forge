@@ -67,7 +67,60 @@ BUILD_WEIGHTS = [0.55, 0.30, 0.15]
 # Flood zone distribution (weights must sum to 1)
 FLOOD_ZONES = ["X", "A", "AE", "VE"]
 FLOOD_WEIGHTS = [0.55, 0.20, 0.20, 0.05]
-ZONE_MULT = {"X": 0.9, "A": 1.2, "AE": 1.4, "VE": 1.8}
+
+# ---------------------------------------------------------------------------
+# Premium calibration — sourced (no hand-picked multipliers).
+# ---------------------------------------------------------------------------
+# State HO-3 average premium expressed as a percent of TIV. Derived from
+# III "Facts + Statistics: Homeowners and Renters Insurance" (2022 HO-3
+# average, NAIC / TDI sources) divided by the seed's median policy TIV
+# (~$268k from the lognormvariate(12.5, 0.6) distribution).
+#
+#   FL HO-3 avg $2,677 / $268k = 1.000%
+#   TX HO-3 avg $2,397 / $268k = 0.894%
+#   LA HO-3 avg $2,603 / $268k = 0.971%
+#   NC HO-3 avg $1,621 / $268k = 0.605%
+#
+# Source: III, "Facts + Statistics: Homeowners and Renters Insurance",
+# 2022 HO-3 average premiums. Underlying NAIC "Dwelling Fire, Homeowners,
+# and Renters Insurance Report" (TX figure from Texas Department of
+# Insurance). See research.md §9a.
+STATE_HO3_RATE = {
+    "FL": 0.01000,
+    "TX": 0.00894,
+    "LA": 0.00971,
+    "NC": 0.00605,
+}
+
+# NFIP flood-zone expected-annual-loss per policy (loaded for NFIP
+# expense ratio ≈ 0.35, i.e. loss divided by 0.65), expressed as a
+# percent of TIV. Derived directly from OpenFEMA endpoints:
+#   - FimaNfipClaims:    166,234 paid claims (2018-2023, building only)
+#   - FimaNfipPolicies:  3,649,432 policies in force (2021)
+# Per-zone expected loss = (claims_per_year / policies_in_force) ×
+# avg_paid_building_claim, divided by NFIP average-policy TIV ≈ $268k
+# (matches the seed's lognormvariate), loaded ÷ 0.65 for NFIP expense
+# ratio. Ratios vs Zone X come out to X=1.00, A=2.40, AE=5.23, VE=12.29
+# — the actual NFIP loss-cost fanout, not the hand-picked
+# {0.9, 1.2, 1.4, 1.8} the seed previously used. See research.md §9b.
+NFIP_FLOOD_LOADING = {
+    "X":  0.00086,
+    "A":  0.00207,
+    "AE": 0.00450,
+    "VE": 0.01057,
+}
+
+# HAZUS-MH Hurricane Technical Manual wind vulnerability multipliers
+# applied as a premium loading on top of (state_rate + flood_loading).
+# Masonry walls reduce both wind and fire premium ~15% vs wood frame;
+# manufactured (mobile) homes carry a ~40% loading per HAZUS-MH wind
+# damage curves and matches industry HO-7 / mobile-home product
+# pricing. See research.md §9c.
+BUILD_PREMIUM_LOADING = {
+    "wood_frame":   1.00,
+    "masonry":      0.85,
+    "manufactured": 1.40,
+}
 
 N_POLICIES = 10_000
 
@@ -115,8 +168,14 @@ def generate_policy():
     else:
         elevation_m = random.uniform(1.5, 6.0)
 
-    zone_mult = ZONE_MULT[flood_zone]
-    premium_annual = tiv * 0.015 * zone_mult
+    # Premium = TIV × (state HO-3 base + NFIP flood loading) × build_type loading.
+    # Every multiplier traces to a citation in research.md §9 — no hand-picked
+    # heuristics. The state HO-3 base reflects what III/NAIC report for HO-3
+    # average premium; the NFIP loading reflects what FimaNfipClaims says
+    # claims actually pay per policy by zone; the build-type loading reflects
+    # HAZUS-MH wind vulnerability ratios.
+    base_rate = STATE_HO3_RATE[state] + NFIP_FLOOD_LOADING[flood_zone]
+    premium_annual = tiv * base_rate * BUILD_PREMIUM_LOADING[build_type]
 
     return (
         state, zip3, county, lat, lon,

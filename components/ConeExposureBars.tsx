@@ -162,7 +162,16 @@ export function ConeExposureBars({
     >
       <div className="flex items-center justify-between gap-2">
         <div className="font-semibold">Book exposure under cone</div>
-        <TrustTierBadge tier="MODEL_OUTPUT" />
+        {/*
+          Trust-tier badge MUST honor the cone source. A MODEL_OUTPUT
+          badge over a mock cone is the same CLAUDE.md "LIVE_FEED-over-
+          mock-data" violation already fixed in LiveEventStrip — the
+          number under cone is a real per-policy aggregation, but the
+          *cone polygon* defining "under" is synthetic when source=mock.
+        */}
+        <TrustTierBadge
+          tier={coneSource === 'mock' ? 'SYNTHETIC_SCAFFOLD' : 'MODEL_OUTPUT'}
+        />
       </div>
 
       {/* Inside-cone bar (red, attention-grabbing). */}

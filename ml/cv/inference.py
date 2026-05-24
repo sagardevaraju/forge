@@ -270,6 +270,8 @@ def load_chip_features(
     lon: float | None = None,
     mode: str | None = None,
     policy_id: int | None = None,
+    *,
+    bypass_head: bool = False,
 ) -> np.ndarray:
     """Load a Sentinel-2 chip and extract 8-dim property-risk features.
 
@@ -282,10 +284,30 @@ def load_chip_features(
     mode:
         ``"mock"``, ``"real"``, or ``"cached"``. If *None*, reads the
         ``FORGE_CV_MODE`` environment variable (default: ``"mock"``).
-        ``"cached"`` reads the pre-fetched chip from disk and runs it
-        through the trained backbone + head.
+        ``"cached"`` reads the pre-fetched chip from disk; whether it then
+        forwards through the trained backbone + head or runs band-math
+        directly on the chip is controlled by ``bypass_head``.
     policy_id:
         Required for ``cached`` mode; ignored otherwise.
+    bypass_head:
+        When ``True`` (or when ``$FORGE_CV_BYPASS_HEAD=1``), feature
+        extraction uses :func:`predict_chip_mock` (NDVI / NDWI / SWIR /
+        edge-density band math) directly on whatever chip ``load_chip``
+        returned — instead of forwarding through the trained MLP head in
+        :func:`predict_chip`. This is the right path for the demo book
+        because the head shipped in ``artifacts/cv_head.pt`` was trained
+        against weak labels derived from ``(flood_zone, build_type,
+        elevation_m)`` policy *metadata*, not from chip content
+        (``ml/cv/train.py::_derive_labels``). With the supervision signal
+        independent of input, the optimal MLP collapses to a near-constant
+        function that emits the label-mean for every chip — empirically
+        the head's per-policy stdev across the 10k book is ~0.011 while
+        the raw NDVI swings from −0.06 to +0.42. Band-math on the real
+        chips preserves an 8–10× richer per-policy spread because it
+        actually depends on the imagery. Retraining the head against
+        image-derived labels (NLCD impervious, OSM building density) is
+        a Phase 2 task; until then ``bypass_head=True`` is the honest
+        default.
 
     Returns
     -------
@@ -297,6 +319,9 @@ def load_chip_features(
     if mode is None:
         env = os.environ.get("FORGE_CV_MODE", "mock").strip().lower()
         mode = env if env in {"real", "mock", "cached"} else "mock"
+
+    if not bypass_head:
+        bypass_head = os.environ.get("FORGE_CV_BYPASS_HEAD", "").strip() in {"1", "true", "yes"}
 
     # Missing-cache mitigation: if mode=cached and the chip file isn't on
     # disk (PC fetch never succeeded for this policy_id), fall back to the
@@ -321,6 +346,12 @@ def load_chip_features(
             # XGBoost can handle the constant row but the user is warned.
             return np.zeros(OUTPUT_DIM, dtype=np.float32)
         chip = mock_chip(lat=lat, lon=lon)
+        return predict_chip_mock(chip)
+
+    # When the trained head is bypassed, run band-math on whatever chip we
+    # have — real (cached/real modes) or synthetic (mock mode). This is the
+    # right path for the demo book today; see the bypass_head docstring.
+    if bypass_head:
         return predict_chip_mock(chip)
 
     # Cached + real both go through the trained head; mock uses the
