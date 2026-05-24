@@ -369,4 +369,48 @@ describe('PortfolioDrillDown', () => {
     expect(screen.getByText('330_wood_frame_q0')).toBeInTheDocument();
     expect(screen.getByText('330_masonry_q2')).toBeInTheDocument();
   });
+
+  // ── CLAUDE.md "no fictional data" — Property features panel.
+  // The cohort factory defaults every CV dim to 0; under the old render
+  // that surfaced a misleading 5-bar chart at 0% as if it were a real
+  // reading. The new render surfaces an honest "CV head not run" callout
+  // when every modeled dim is zero, and falls back to the bar chart when
+  // any dim carries a real value.
+  test('all-zero cv_features surfaces the unpopulated-CV callout', () => {
+    const cohorts: Cohort[] = [
+      cohort({ id: '330_wood_frame_q0', zip3: '330' }),
+    ];
+    render(<PortfolioDrillDown zip3="330" cohorts={cohorts} enablePins={false} onClose={() => {}} />);
+
+    const placeholder = screen.getByTestId('property-features-unpopulated');
+    expect(placeholder.textContent).toMatch(/cv head not run/i);
+    expect(placeholder.textContent).toMatch(/populate_cv_features/);
+    // The misleading per-dim "0.00" bars are NOT rendered when the panel
+    // is in the unpopulated state.
+    expect(screen.queryByRole('img', { name: /vegetation density/i })).toBeNull();
+  });
+
+  test('populated cv_features render per-dim bars and values', () => {
+    const cohorts: Cohort[] = [
+      cohort({
+        id: '330_wood_frame_q0',
+        zip3: '330',
+        avg_cv_features: {
+          vegetation_density: { value: 0.42, modeled: true },
+          fuel_proximity: { value: 0.18, modeled: true },
+          water_proximity: { value: 0.55, modeled: true },
+          elevation_bucket: { value: 0.7, modeled: true },
+          structure_density: { value: 0.33, modeled: true },
+        },
+      }),
+    ];
+    render(<PortfolioDrillDown zip3="330" cohorts={cohorts} enablePins={false} onClose={() => {}} />);
+
+    // No unpopulated callout when real values are present.
+    expect(screen.queryByTestId('property-features-unpopulated')).toBeNull();
+    // The numeric readouts for each dim are present.
+    expect(screen.getByText('0.42')).toBeInTheDocument();
+    expect(screen.getByText('0.18')).toBeInTheDocument();
+    expect(screen.getByText('0.55')).toBeInTheDocument();
+  });
 });

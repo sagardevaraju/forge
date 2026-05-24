@@ -86,6 +86,12 @@ interface Props {
    */
   alertCounts?: NwsAlertCounts;
   /**
+   * Source tier for the NWS alert chips. Forwarded to the LiveEventStrip
+   * so a mock-source chip count never renders as a live warning count.
+   * Defaults to ``'live'`` at the strip if omitted.
+   */
+  alertsSource?: 'live' | 'mock';
+  /**
    * Per-ZIP3 `[lon, lat]` map centroids derived from the live policy book
    * (`lib/db/zip3_centroids.ts`). Both panes plot bubbles here and the
    * cone-classification math tests these positions. Defaults to `{}` so
@@ -102,6 +108,7 @@ export function PortfolioMap({
   coneRefreshedAt,
   alerts,
   alertCounts,
+  alertsSource,
   zip3Centroids = {},
 }: Props) {
   const [selectedZip3, setSelectedZip3] = useState<string | null>(null);
@@ -222,6 +229,7 @@ export function PortfolioMap({
           refreshedAt={coneRefreshedAt ?? new Date(0)}
           source={cone?.source}
           alertCounts={alertCounts}
+          alertsSource={alertsSource}
         />
       </div>
       <div className="relative flex-1 min-h-0">
