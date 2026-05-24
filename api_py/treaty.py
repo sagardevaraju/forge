@@ -196,6 +196,53 @@ def captive_state(
     }
 
 
+# ── Task P3.21 — ILS / cat-bond layer math (indemnity trigger v1) ─────────
+#
+# An indemnity-triggered cat-bond behaves like an XS treaty from the
+# sponsor's loss-side perspective: the bond covers losses inside
+# ``[attachment, exhaustion]`` and the sponsor retains losses outside
+# that band. The difference is the counterparty (capital-markets
+# investors via an SPV instead of a traditional reinsurer) and the
+# capital-markets economics (coupon paid to investors instead of RoL
+# paid to a reinsurer). Annual coupon load on the sponsor =
+# ``coupon_rate * principal`` where principal ≡ layer width.
+#
+# v2 trigger variants (industry_loss, parametric, modeled_loss) carry
+# basis risk that decouples the sponsor's recovery from their incurred
+# loss; out of P3.21 scope per plan.
+
+
+def retained_ils(loss: float, attachment: float, exhaustion: float) -> float:
+    """Sponsor's retained loss under an indemnity-triggered cat-bond.
+
+    Mathematically identical to :func:`retained_xs` — the indemnity
+    trigger means the bond pays the sponsor's actual loss inside the
+    layer, with no basis risk. Aliased separately so the call site
+    documents the counterparty (capital-markets investors via an SPV).
+    """
+    return retained_xs(loss, attachment, exhaustion)
+
+
+def ceded_ils(loss: float, attachment: float, exhaustion: float) -> float:
+    """Amount paid out of cat-bond principal under an indemnity trigger.
+
+    The complement of :func:`retained_ils`. Equal to
+    ``max(0, min(loss, exhaustion) - attachment)``.
+    """
+    return ceded_xs(loss, attachment, exhaustion)
+
+
+def ils_annual_coupon(principal: float, coupon_rate: float) -> float:
+    """Annual coupon paid by the sponsor to cat-bond investors.
+
+    ``coupon_rate`` is the fraction of principal per annum (e.g.
+    0.07 = 700 bps). Clamped at non-negative on both inputs.
+    """
+    p = max(0.0, principal)
+    r = max(0.0, coupon_rate)
+    return p * r
+
+
 __all__ = [
     "retained_xs",
     "ceded_xs",
@@ -203,4 +250,7 @@ __all__ = [
     "ceded_fronting",
     "fronting_fee",
     "captive_state",
+    "retained_ils",
+    "ceded_ils",
+    "ils_annual_coupon",
 ]
