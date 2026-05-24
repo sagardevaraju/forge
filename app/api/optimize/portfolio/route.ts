@@ -44,6 +44,9 @@ import {
   type OptimizedCohort,
   type PortfolioOptimization,
 } from '@/lib/portfolio-actions';
+// Task P3.4 — every solve writes one row to the decision ledger. The write
+// is best-effort: a ledger failure must not block the user-facing solve.
+import { operatorFromHeaders, writeDecision } from '@/lib/audit/decisions';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -293,6 +296,45 @@ function buildResponse(
 }
 
 // ────────────────────────────────────────────────────────────────────────
+// Ledger write — best-effort. P3.4.
+// ────────────────────────────────────────────────────────────────────────
+
+/**
+ * Persist one decision row per solve. Wraps `writeDecision` so any error
+ * (DB down, migration not run, etc.) logs and continues — the user-facing
+ * solve must never break because the audit trail couldn't be written.
+ *
+ * `outputs` is the same `PortfolioOptimization` body the caller is about
+ * to return (already stripped of `loss_scenarios` — the route never lets
+ * the scenario array onto the wire, so the ledger never sees it either).
+ */
+async function recordDecision(
+  req: Request,
+  budgets: Budgets,
+  cohortHash: string,
+  horizon_start: string | undefined,
+  horizon_end: string | undefined,
+  outputs: PortfolioOptimization & Record<string, unknown>,
+): Promise<void> {
+  try {
+    await writeDecision({
+      operator: operatorFromHeaders(req.headers),
+      inputs: {
+        budgets,
+        cohorts_hash: cohortHash,
+        horizon_start: horizon_start ?? null,
+        horizon_end: horizon_end ?? null,
+      },
+      outputs,
+    });
+  } catch (e) {
+    // Log but never propagate — see docstring.
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn('[P3.4 decisions ledger] write failed:', msg);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────
 // Route handler.
 // ────────────────────────────────────────────────────────────────────────
 export async function POST(req: Request): Promise<Response> {
@@ -321,7 +363,13 @@ export async function POST(req: Request): Promise<Response> {
   const cohortHash = hashCohorts(artifact.cohorts);
   const key = cacheKey(budgets, cohortHash);
   const cached = CACHE.get(key);
-  if (cached) return Response.json(cached);
+  if (cached) {
+    // P3.4: cache hit serves the same logical decision that was already
+    // written on the original solve (the id is content-addressed, so the
+    // write is idempotent anyway — but skipping here avoids redundant DB
+    // round-trips on every what-if drag).
+    return Response.json(cached);
+  }
 
   // Pass cohorts straight through to the solver — the precomputed artifact
   // already carries every field `solve()` needs (id, total_tiv, total_premium,
@@ -394,6 +442,17 @@ export async function POST(req: Request): Promise<Response> {
         relaxation_factor: RELAX,
         error: 'no feasible solution under given + relaxed budgets',
       };
+      // P3.4: even the infeasible stub gets a ledger row — the operator
+      // still made a decision (proposed an infeasible budget triple) and
+      // that's worth auditing.
+      await recordDecision(
+        req,
+        budgets,
+        cohortHash,
+        artifact.horizon_start,
+        artifact.horizon_end,
+        stub,
+      );
       return Response.json(stub);
     }
     const response = buildResponse(artifact, relaxed, relaxedBudgets);
@@ -403,10 +462,26 @@ export async function POST(req: Request): Promise<Response> {
       relaxation_factor: RELAX,
     };
     CACHE.set(key, withFlag);
+    await recordDecision(
+      req,
+      budgets,
+      cohortHash,
+      artifact.horizon_start,
+      artifact.horizon_end,
+      withFlag,
+    );
     return Response.json(withFlag);
   }
 
   const response = buildResponse(artifact, solver, budgets);
   CACHE.set(key, response);
+  await recordDecision(
+    req,
+    budgets,
+    cohortHash,
+    artifact.horizon_start,
+    artifact.horizon_end,
+    response,
+  );
   return Response.json(response);
 }
