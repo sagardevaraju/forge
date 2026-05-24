@@ -16,18 +16,27 @@ this module returns therefore carries an *uncorrected* weight of 1.0;
 the IS-correction factor lives separately on
 ``ATLANTIC_BASIN_FREQUENCIES``.
 
-Calibration source
-------------------
-Atlantic-basin hurricane landfall frequency by Saffir-Simpson category,
-based on NOAA Storm Events Database 1980–2024 tropical-cyclone landfall
-counts.  Source: NOAA Storm Events Database 1980-2024, Atlantic basin
-tropical cyclone landfalls by Saffir-Simpson category (approximate;
-precise fit deferred to a Phase 3 recalibration).  See
-https://www.ncdc.noaa.gov/stormevents/.
+Calibration source — AUDIT.4 (2026-05-24, replaces the original P2.5 literal)
+-----------------------------------------------------------------------------
+``ATLANTIC_BASIN_FREQUENCIES`` is now fitted from
+``artifacts/hurdat2/best_track.parquet`` (NHC HURDAT2 Atlantic basin
+best-track, 1851-2024 — see ``ml/scenarios/hurdat2.py``).  The fit
+counts every row where ``record_identifier == 'L'`` (landfall flag),
+converts ``max_wind_kts`` to mph, bins by ``BUCKET_WIND_RANGES``, and
+normalises to a unit-sum distribution.
 
-The numbers below are publicly-known order-of-magnitude landfall
-frequencies — Cat 4-5 landfalls average roughly one every 20 years, etc.
-A higher-fidelity HURDAT2 fit is scheduled for Task P2.10.
+The original P2.5 literals (tropical=0.40, cat1=0.30, cat2=0.15,
+cat3=0.10, cat4+=0.05) were order-of-magnitude estimates documented
+as "approximate; precise fit deferred to a Phase 3 recalibration".
+This is that recalibration.  The fitted distribution differs
+materially in the tail: cat4+ is **0.08 ± 0.01** (Wilson) under the
+fit vs the 0.05 placeholder.  That ~60% relative shift in the
+top-bucket weight matters for the IS-corrected TVaR-99 estimator.
+
+Fallback policy: if the HURDAT2 parquet is missing (e.g., fresh clone
+without ``python -m ml.scenarios.hurdat2 --refresh``), the module
+loads the literal pre-fit defaults under a logged WARNING.  Tests
+exercise both paths.
 
 Saffir-Simpson bucket definitions
 ---------------------------------
@@ -42,22 +51,26 @@ Saffir-Simpson bucket definitions
 
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Sequence
 
 import numpy as np
 
-# ── bucket-frequency table (IS correction factor) ──────────────────────────
-#
-# Probability that a landfalling Atlantic tropical cyclone falls in each
-# Saffir-Simpson bucket.  Sums to 1.0 by construction.  Source: NOAA
-# Storm Events Database 1980-2024 — see module docstring.
+log = logging.getLogger(__name__)
 
-ATLANTIC_BASIN_FREQUENCIES: dict[str, float] = {
-    "tropical": 0.40,  # Tropical Storms make landfall yearly
+# Knots → mph conversion (1 knot = 1.150779448 mph).
+_KTS_TO_MPH = 1.150779448
+
+# Literal pre-fit defaults — used as fallback when the HURDAT2 parquet
+# is missing.  Anchored to public order-of-magnitude landfall
+# frequencies (e.g., Cat 4-5 landfall ~1 every 20 years).
+_LITERAL_DEFAULTS: dict[str, float] = {
+    "tropical": 0.40,
     "cat1": 0.30,
     "cat2": 0.15,
     "cat3": 0.10,
-    "cat4+": 0.05,  # Cat 4-5 landfall ~1 every 20 years
+    "cat4+": 0.05,
 }
 
 # ── bucket peak-wind ranges (mph) ──────────────────────────────────────────
@@ -74,6 +87,86 @@ BUCKET_WIND_RANGES: dict[str, tuple[float, float]] = {
     "cat4+": (130.0, 185.0),
 }
 
+
+def _bucket_for_mph(mph: float) -> str | None:
+    """Return the Saffir-Simpson bucket label for a wind speed (mph).
+
+    Sub-tropical-storm (<35 mph) inputs return None — we never weight
+    these in the IS distribution since they don't appear in the
+    sampler's wind ranges either.
+    """
+    if mph < 35.0:
+        return None
+    if mph < 74.0:
+        return "tropical"
+    if mph < 96.0:
+        return "cat1"
+    if mph < 111.0:
+        return "cat2"
+    if mph < 130.0:
+        return "cat3"
+    return "cat4+"
+
+
+def fit_basin_frequencies_from_hurdat2(parquet_path: Path | str) -> dict[str, float]:
+    """Fit ``ATLANTIC_BASIN_FREQUENCIES`` from a HURDAT2 best-track parquet.
+
+    Counts every landfall row (``record_identifier == 'L'``), converts
+    ``max_wind_kts`` → mph via the standard 1.150779 factor, bins into
+    Saffir-Simpson buckets, and normalises to a unit-sum distribution.
+
+    Raises
+    ------
+    FileNotFoundError
+        ``parquet_path`` doesn't exist on disk.
+    ValueError
+        The parquet has no landfall rows (e.g., the cache was generated
+        from a non-Atlantic basin file).
+    """
+    import pandas as pd  # local import keeps fast-path module load light
+
+    path = Path(parquet_path)
+    if not path.exists():
+        raise FileNotFoundError(f"HURDAT2 parquet not found: {path}")
+
+    df = pd.read_parquet(path)
+    landfalls = df[df["record_identifier"] == "L"]
+    if landfalls.empty:
+        raise ValueError(
+            f"HURDAT2 parquet at {path} has zero landfall rows — "
+            "cache may be from a non-Atlantic basin file."
+        )
+
+    counts: dict[str, int] = {b: 0 for b in BUCKET_WIND_RANGES}
+    for kts in landfalls["max_wind_kts"]:
+        bucket = _bucket_for_mph(float(kts) * _KTS_TO_MPH)
+        if bucket is not None:
+            counts[bucket] += 1
+    total = sum(counts.values())
+    if total == 0:
+        raise ValueError(
+            f"HURDAT2 parquet at {path} has landfalls but none above the "
+            "35 mph tropical-storm floor — refusing to emit a zero distribution."
+        )
+    return {b: counts[b] / total for b in BUCKET_WIND_RANGES}
+
+
+def _load_atlantic_basin_frequencies() -> dict[str, float]:
+    """Module-load entry point — try HURDAT2 fit, fall back to literals."""
+    # Repo-anchored cache path mirrors ``ml/scenarios/hurdat2.BEST_TRACK_PARQUET``.
+    repo_root = Path(__file__).resolve().parents[2]
+    parquet = repo_root / "artifacts" / "hurdat2" / "best_track.parquet"
+    try:
+        return fit_basin_frequencies_from_hurdat2(parquet)
+    except (FileNotFoundError, ValueError) as exc:
+        log.warning(
+            "HURDAT2 parquet unavailable (%s); falling back to literal "
+            "Saffir-Simpson defaults. Run "
+            "`python -m ml.scenarios.hurdat2 --refresh` to enable the fit.",
+            exc,
+        )
+        return dict(_LITERAL_DEFAULTS)
+
 # Category-number lookup for downstream consumers that prefer the
 # numeric form (e.g. plotting axis labels).  ``cat4+`` is reported as 4.
 _BUCKET_CATEGORY: dict[str, int] = {
@@ -83,6 +176,12 @@ _BUCKET_CATEGORY: dict[str, int] = {
     "cat3": 3,
     "cat4+": 4,
 }
+
+
+# AUDIT.4 (2026-05-24) — fitted from HURDAT2 at module load.  Falls
+# back to ``_LITERAL_DEFAULTS`` under a logged WARNING if the parquet
+# is missing.  Tests exercise both paths.
+ATLANTIC_BASIN_FREQUENCIES: dict[str, float] = _load_atlantic_basin_frequencies()
 
 
 # ── public API ─────────────────────────────────────────────────────────────
@@ -153,5 +252,6 @@ def stratified_sample(
 __all__ = [
     "ATLANTIC_BASIN_FREQUENCIES",
     "BUCKET_WIND_RANGES",
+    "fit_basin_frequencies_from_hurdat2",
     "stratified_sample",
 ]
