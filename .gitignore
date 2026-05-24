@@ -60,6 +60,11 @@ artifacts/chips_fetch.log
 # postmortem workflow; not committed back to the repo.
 artifacts/postmortem/
 
+# AUDIT.3 Phase 1 NHC error-tabulation downloads (~7 MB each, regenerate
+# with `python -m scripts.fetch_nhc_errors --refresh`). The aggregated
+# climatology JSON in artifacts/nhc/*.json IS committed.
+artifacts/nhc/.cache/
+
 # Python
 __pycache__/
 *.pyc
