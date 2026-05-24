@@ -231,8 +231,8 @@ and the FORGE GitHub repository.
   forecast-error climatology drives perturbation σ; HURDAT2-sampled
   seed tracks replace the hand-tabulated `_DEMO_TRACK_*` literals;
   USGS NED + EPQS drive the coastal-ZIP3 elevation catalog. See
-  [`docs/releases/v0.2.0.md`](releases/v0.2.0.md). DOI: minted on
-  tag push.
+  [`docs/releases/v0.2.0.md`](releases/v0.2.0.md) · DOI
+  [10.5281/zenodo.20370031](https://doi.org/10.5281/zenodo.20370031)
 - **v0.1.0** — 2026-05-24 — Initial release · DOI [10.5281/zenodo.20368096](https://doi.org/10.5281/zenodo.20368096)
 
 Future versions auto-mint new version DOIs on each `git tag` release via
