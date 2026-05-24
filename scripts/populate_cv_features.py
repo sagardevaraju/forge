@@ -3,11 +3,15 @@ Batch-populate cv_features for all 10k policies in forge-local.db.
 
 Usage
 -----
-    # Default — fast deterministic mock features (no trained model needed)
+    # Default: cached chips + band-math for 5 dims + ESA WC / MS Buildings
+    # weak labels for idx 1, 3, 6 (Phase 2 / Task P2.37).
     python scripts/populate_cv_features.py
 
-    # Run the trained MLP head over pre-fetched real S2 chips
-    python scripts/populate_cv_features.py --mode cached
+    # Forward chips through the trained MLP head instead of band-math
+    # (only useful for head-vs-baseline regression — current head does
+    # not preserve the per-ZIP geographic contrast embedded in the weak
+    # labels, so this is opt-in).
+    python scripts/populate_cv_features.py --use-head
 
     # Hit Planetary Computer live (slow; not recommended for the full 10k)
     python scripts/populate_cv_features.py --mode real
@@ -15,9 +19,13 @@ Usage
 The script:
   1. Reads all (id, lat, lon) rows from policies.
   2. For each policy, calls load_chip_features(...) to get an 8-dim vector.
-  3. Writes the feature as a JSON-stringified array to the cv_features
-     column via: UPDATE policies SET cv_features = ? WHERE id = ?
-  4. Prints progress every 1000 policies.
+  3. If artifacts/cv_weak_labels.parquet exists AND --no-weak-labels is
+     NOT passed, OVERLAYS the parquet values at idx 1 (imperviousness),
+     idx 3 (roof_complexity), and idx 6 (tree_overhang). Other dims keep
+     their band-math values.
+  4. Writes the merged 8-dim vector as a JSON-stringified array to the
+     cv_features column via: UPDATE policies SET cv_features = ? WHERE id = ?.
+  5. Prints progress every 1000 policies.
 
 The script is idempotent — running it again overwrites existing values.
 Offshore-seed policies (cached chip = all-zero) auto-fall-back to the
@@ -85,16 +93,28 @@ def main() -> None:
         action="store_true",
         help=(
             "Forward chips through the trained MLP head (artifacts/cv_head.pt) "
-            "instead of the default band-math path. The head shipped with this "
-            "repo was trained against weak labels derived from policy metadata "
-            "(flood_zone × build_type × elevation), NOT from chip content — so "
-            "the optimal MLP collapses to a near-constant function and the "
-            "head's per-policy stdev across the 10k book is ~0.011 vs raw "
-            "NDVI's ~0.10. Default (`--use-head` omitted) runs band-math on "
-            "the cached chips, which preserves the real per-policy spread. "
-            "Pass --use-head to compare the head's output against band-math, "
-            "or once the head has been retrained against image-derived "
-            "labels (NLCD impervious, OSM building density)."
+            "instead of the default band-math path. Phase 2 / Task P2.37 "
+            "retrained the head against image-derived weak labels (ESA "
+            "WorldCover + MS Building Footprints) for idx 1, 3, 6, but the "
+            "frozen ViT-B backbone compresses the per-ZIP geographic contrast "
+            "from the labels (per-ZIP head Δ ~ 0.02 vs label Δ ~ 0.4 on "
+            "imperviousness across TX 770 / FL 346 — see "
+            "scripts/verify_cv_head.py output). So the current default is to "
+            "use band-math for the 5 already-modeled dims AND overlay the "
+            "label parquet directly for idx 1, 3, 6 — strictly better than "
+            "the head's compressed outputs until the head learns to preserve "
+            "the contrast (more epochs / unfrozen backbone / land-cover-aware "
+            "backbone like Prithvi-100M). Pass --use-head for head-vs-baseline "
+            "regression only."
+        ),
+    )
+    parser.add_argument(
+        "--no-weak-labels",
+        action="store_true",
+        help=(
+            "Skip the ESA WorldCover + MS Buildings overlay at idx 1, 3, 6 "
+            "and keep band-math placeholders for those dims. Use for "
+            "regression comparison against the Phase-1 cv_features."
         ),
     )
     args = parser.parse_args()
@@ -149,6 +169,33 @@ def main() -> None:
     # Import here (after path setup) to keep the script runnable from any cwd
     from ml.cv.inference import load_chip_features  # noqa: PLC0415
 
+    # Load the P2.37 weak-label parquet once. Keyed by policy_id; overlay
+    # at idx 1 / 3 / 6 — same indices as ml/cv/train.py::WEAK_LABEL_INDICES.
+    weak_labels: dict[int, tuple[float, float, float]] = {}
+    if not args.no_weak_labels:
+        parquet_path = _REPO_ROOT / "artifacts" / "cv_weak_labels.parquet"
+        if parquet_path.exists():
+            import pyarrow.parquet as pq  # noqa: PLC0415
+
+            t = pq.read_table(parquet_path).to_pandas()
+            for _, r in t.iterrows():
+                weak_labels[int(r["policy_id"])] = (
+                    float(r["imperviousness"]),
+                    float(r["roof_complexity"]),
+                    float(r["tree_overhang"]),
+                )
+            print(
+                f"[populate_cv_features] Loaded {len(weak_labels):,} ESA WC + MS "
+                f"Buildings weak-label rows from {parquet_path.name} (overlay "
+                f"at idx 1, 3, 6)."
+            )
+        else:
+            print(
+                f"[populate_cv_features] WARNING: {parquet_path.name} not found — "
+                "Phase-1 band-math placeholders will be written at idx 1, 3, 6. "
+                "Run scripts/precompute_cv_weak_labels.py to populate the parquet."
+            )
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
@@ -167,6 +214,13 @@ def main() -> None:
                 lat=lat, lon=lon, mode=mode, policy_id=policy_id,
                 bypass_head=bypass_head,
             )
+            # Overlay weak labels at idx 1, 3, 6 if present.
+            wl = weak_labels.get(policy_id)
+            if wl is not None:
+                feats = feats.copy()
+                feats[1] = wl[0]  # imperviousness
+                feats[3] = wl[1]  # roof_complexity
+                feats[6] = wl[2]  # tree_overhang
             # Serialize as compact JSON array, rounded to 6 decimal places
             cv_json = json.dumps([round(float(v), 6) for v in feats])
             updates.append((cv_json, policy_id))

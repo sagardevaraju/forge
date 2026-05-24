@@ -122,11 +122,20 @@ except ImportError:  # pragma: no cover
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "forge-local.db"
 ARTIFACT_DIR = Path(__file__).resolve().parent.parent.parent / "artifacts"
 HEAD_ARTIFACT = ARTIFACT_DIR / "cv_head.pt"
+WEAK_LABELS_ARTIFACT = ARTIFACT_DIR / "cv_weak_labels.parquet"
 
 S2_MAX = 10_000.0
 BACKBONE_DIM = 768        # ViT-B/16 and Prithvi-100M output dim
 OUTPUT_DIM = 8
 DROPOUT = 0.1
+
+# Indices of the three previously-unmodeled dims, sourced from
+# artifacts/cv_weak_labels.parquet (Task P2.37). Single source of truth —
+# keep aligned with lib/portfolio/cv-features.ts and ml/cv/inference.py.
+IDX_IMPERVIOUSNESS = 1
+IDX_ROOF_COMPLEXITY = 3
+IDX_TREE_OVERHANG = 6
+WEAK_LABEL_INDICES = (IDX_IMPERVIOUSNESS, IDX_ROOF_COMPLEXITY, IDX_TREE_OVERHANG)
 
 
 # ---------------------------------------------------------------------------
@@ -268,8 +277,28 @@ class PolicyChipDataset:
     Weak labels are derived from policy-book columns via ``_derive_labels``.
     """
 
-    def __init__(self, rows: list, mode: str = "cached"):
+    def __init__(
+        self,
+        rows: list,
+        mode: str = "cached",
+        weak_labels: dict[int, dict[str, float]] | None = None,
+    ):
+        """
+        Parameters
+        ----------
+        rows:
+            Policy tuples ``(id, lat, lon, flood_zone, build_type, elevation_m)``.
+        mode:
+            See class docstring.
+        weak_labels:
+            Per-policy lookup keyed by ``policy_id`` returning
+            ``{"imperviousness", "roof_complexity", "tree_overhang"}`` —
+            consumed by ``_derive_labels`` to populate dim indices
+            ``WEAK_LABEL_INDICES``. When ``None`` the training loop falls
+            back to ``_derive_labels_legacy`` (regression-comparison path).
+        """
         self.mode = mode
+        self.weak_labels = weak_labels
         if mode == "cached":
             self.rows, dropped = _filter_empty_cached(rows)
             if dropped:
@@ -279,6 +308,21 @@ class PolicyChipDataset:
                 )
         else:
             self.rows = rows
+
+        # When weak_labels is provided, additionally drop any row whose
+        # policy_id has no precomputed weak-label entry — otherwise the
+        # supervision target for idx 1/3/6 would be zero (which the head
+        # would then learn to emit, biasing the demo book toward 0).
+        if self.weak_labels is not None and self.rows:
+            present = {pid for pid in self.weak_labels.keys()}
+            before = len(self.rows)
+            self.rows = [r for r in self.rows if r[0] in present]
+            after = len(self.rows)
+            if before != after:
+                print(
+                    f"[PolicyChipDataset] dropped {before - after} rows with "
+                    f"no entry in cv_weak_labels.parquet"
+                )
 
     def __len__(self) -> int:
         return len(self.rows)
@@ -295,10 +339,16 @@ class PolicyChipDataset:
             chip = load_chip(mode="cached", policy_id=policy_id)
         else:
             chip = load_chip(lat=lat, lon=lon, mode=self.mode)
-        chip_f = torch.from_numpy(chip.astype(np.float32) / S2_MAX)
+        chip_arr = chip.astype(np.float32) / S2_MAX
+        chip_f = torch.from_numpy(chip_arr)
 
-        # Weak labels from policy metadata
-        labels = _derive_labels(flood_zone, build_type, elevation_m)
+        # Weak-label supervision — band-math for the 5 modeled dims +
+        # external sources (ESA WC, MS Buildings) for the 3 previously
+        # unmodeled dims (idx 1, 3, 6). Cf. _derive_labels for the split.
+        if self.weak_labels is not None:
+            labels = _derive_labels(chip_arr, self.weak_labels.get(policy_id))
+        else:
+            labels = _derive_labels_legacy(flood_zone, build_type, elevation_m)
         return chip_f, labels, policy_id
 
 
@@ -333,23 +383,72 @@ def _filter_empty_cached(rows: list) -> tuple[list, list[int]]:
 
 
 def _derive_labels(
+    chip_normalized: np.ndarray,
+    weak_label_row: dict[str, float] | None,
+) -> "torch.Tensor":  # noqa: F821
+    """Derive 8-dim supervision labels — band-math + Phase 2 weak labels.
+
+    Phase 2 / Task P2.37 split:
+      - **Band-math** on the chip (`ml.cv.inference.predict_chip_mock`) supplies
+        labels for the 5 dims that already had a real image-derived signal
+        (indices 0, 2, 4, 5, 7). The head learns to reproduce the band-math
+        statistics, so once trained it can replace the bypass on any chip
+        — including chips the band-math pipeline never saw.
+      - **External weak labels** from ``artifacts/cv_weak_labels.parquet``
+        (ESA WorldCover for `imperviousness` idx 1 and `tree_overhang` idx 6;
+        Microsoft Building Footprints Polsby-Popper for `roof_complexity`
+        idx 3) supply the three previously-unmodeled dims.
+
+    Parameters
+    ----------
+    chip_normalized:
+        ``(5, 256, 256)`` float32 array with bands B04/B03/B02/B08/B11
+        normalized to ``[0, 1]``. Note: ``predict_chip_mock`` expects
+        the *unnormalized* uint16 range, so we multiply by ``S2_MAX``
+        before calling it.
+    weak_label_row:
+        ``{"imperviousness", "roof_complexity", "tree_overhang"}`` from
+        the parquet. If ``None`` (policy missing from the precompute),
+        the three external dims are filled with the chip-wide band-math
+        means (a graceful degradation; in practice the PolicyChipDataset
+        filters these out before training).
+
+    Returns
+    -------
+    torch.Tensor
+        Shape ``(8,)`` float32, values in ``[0, 1]``.
+    """
+    import torch  # noqa: PLC0415
+    from ml.cv.inference import predict_chip_mock  # noqa: PLC0415
+
+    # predict_chip_mock expects uint16-scale values
+    bandmath = predict_chip_mock(chip_normalized * S2_MAX)
+
+    v = list(bandmath.astype(np.float32))   # 8 dims of band-math
+    # Overwrite the three weak-label dims with the precomputed values.
+    if weak_label_row is not None:
+        v[IDX_IMPERVIOUSNESS] = float(weak_label_row["imperviousness"])
+        v[IDX_ROOF_COMPLEXITY] = float(weak_label_row["roof_complexity"])
+        v[IDX_TREE_OVERHANG] = float(weak_label_row["tree_overhang"])
+    return torch.tensor(v, dtype=torch.float32)
+
+
+def _derive_labels_legacy(
     flood_zone: str,
     build_type: str,
     elevation_m: float,
 ) -> "torch.Tensor":  # noqa: F821
-    """Derive 8-dim weak supervision labels from policy columns.
+    """Phase-1 metadata-only heuristic — KEPT FOR REGRESSION COMPARISON ONLY.
 
-    Returns a float32 tensor of shape (8,) with values in [0, 1].
+    This is the supervision signal that produced the metadata-trained head
+    backed up at ``artifacts/cv_head.metadata-trained.pt``. With no chip
+    dependency the optimal MLP under this loss is a constant function and
+    the head's per-policy stdev collapses to ~0.011 (vs raw NDVI 0.10);
+    that's why Phase 2 / Task P2.37 replaced it with ``_derive_labels``.
 
-    Mapping (heuristic, not physically calibrated):
-      0  vegetation_density   ← inverse of impervious proxy
-      1  impervious_surface   ← build_type: masonry=0.7, wood=0.5, mfr=0.3
-      2  fuel_proximity       ← inverse of flood_zone severity
-      3  roof_condition_proxy ← random-ish from build_type
-      4  water_proximity      ← flood_zone: VE=1, AE=0.8, A=0.5, X=0.1
-      5  elevation_bucket     ← clamp(elevation_m / 6, 0, 1)
-      6  ndvi_seasonal_var    ← 0.5 (unknown at training time)
-      7  structure_density    ← impervious proxy
+    Do NOT call this from production training. Tests use it to confirm
+    the legacy path still parses old policy rows for backwards
+    compatibility with the original head artifact.
     """
     import torch  # noqa: PLC0415
 
@@ -358,16 +457,42 @@ def _derive_labels(
     elev = min(1.0, max(0.0, float(elevation_m) / 6.0))
 
     v = [
-        1.0 - impervious,   # vegetation_density
-        impervious,          # impervious_surface
-        1.0 - zone_water,   # fuel_proximity (drier → more fuel)
-        impervious * 0.8,   # roof_condition_proxy
-        zone_water,          # water_proximity
-        elev,                # elevation_bucket
-        0.5,                 # ndvi_seasonal_var (unknown)
-        impervious,          # structure_density
+        1.0 - impervious,
+        impervious,
+        1.0 - zone_water,
+        impervious * 0.8,
+        zone_water,
+        elev,
+        0.5,
+        impervious,
     ]
     return torch.tensor(v, dtype=torch.float32)
+
+
+def _load_weak_labels(path: Path = WEAK_LABELS_ARTIFACT) -> dict[int, dict[str, float]]:
+    """Load the precompute parquet into an in-memory ``{policy_id: {dim: float}}`` map.
+
+    Returns an empty dict if the parquet is missing — the training loop
+    falls back to the legacy heuristic with a warning in that case so the
+    repo still builds in a fresh checkout where the precompute hasn't run.
+    """
+    if not path.exists():
+        return {}
+    import pyarrow.parquet as pq  # noqa: PLC0415
+
+    table = pq.read_table(path)
+    pids = table.column("policy_id").to_pylist()
+    imp = table.column("imperviousness").to_pylist()
+    roof = table.column("roof_complexity").to_pylist()
+    tree = table.column("tree_overhang").to_pylist()
+    return {
+        int(pid): {
+            "imperviousness": float(imp[i]),
+            "roof_complexity": float(roof[i]),
+            "tree_overhang": float(tree[i]),
+        }
+        for i, pid in enumerate(pids)
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -418,8 +543,24 @@ def train(
     conn.close()
     print(f"[train] Loaded {len(rows):,} policy rows")
 
+    # Load Phase 2 weak-label cache (ESA WC + MS Buildings). If the
+    # parquet is missing we degrade gracefully — the dataset will use
+    # _derive_labels_legacy, which is the metadata-trained behavior.
+    weak_labels = _load_weak_labels()
+    if weak_labels:
+        print(
+            f"[train] Loaded {len(weak_labels):,} weak-label rows from "
+            f"{WEAK_LABELS_ARTIFACT.relative_to(_REPO_ROOT)}",
+        )
+    else:
+        print(
+            "[train] WARNING: artifacts/cv_weak_labels.parquet not found — "
+            "falling back to _derive_labels_legacy (Phase-1 metadata heuristic). "
+            "Run scripts/precompute_cv_weak_labels.py to enable Phase 2 supervision.",
+        )
+
     # Build dataset
-    dataset = PolicyChipDataset(rows, mode=mode)
+    dataset = PolicyChipDataset(rows, mode=mode, weak_labels=weak_labels or None)
     n_val = int(len(dataset) * val_split)
     n_train = len(dataset) - n_val
     train_ds, val_ds = random_split(dataset, [n_train, n_val])

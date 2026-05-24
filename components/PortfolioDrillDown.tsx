@@ -6,21 +6,29 @@
  * reviewers can see the economic coefficients and the Python source line
  * that owns them. Task P2.33 adds the operator pin affordance — a per-cohort
  * dropdown + rationale text box + Pin button that POSTs to ``/api/pins`` and
- * surfaces existing pins inline with a Remove button.)
+ * surfaces existing pins inline with a Remove button. Task P2.37 promotes
+ * the three previously-unmodeled CV dims (imperviousness, roof_complexity,
+ * tree_overhang) to first-class members backed by real image-derived weak
+ * labels — the panel now renders all 8 dims with per-dim source citations.)
  *
  * Shows the cohorts inside the clicked ZIP3 along with the MIP-recommended
  * action mix per cohort. Dominant action is the row badge; minor fractions
  * appear as inline split-bars so the user can see when the optimizer is
  * recommending a blended action (e.g. 70% reprice-up + 30% cede_xs).
  *
- * Property features (Task 13) renders only the 5 modeled CV-head dims; the
- * 3 unmodeled dims (imperviousness, roof_complexity, tree_overhang) are
- * dropped and called out in a footnote so reviewers don't mistake the
- * absence for a bug.
+ * Property features (Task P2.37) renders all 8 CV head dims with hover
+ * tooltips citing the upstream source (band math, ESA WorldCover, or MS
+ * Building Footprints). The bottom of the section carries an attribution
+ * footer covering the ODbL + CC-BY licenses required by the external
+ * sources.
  */
 import { useEffect, useState } from 'react';
 import type { Cohort } from '@/lib/db/cohorts';
-import { type CvFeatures, UNMODELED_CV_DIMS } from '@/lib/portfolio/cv-features';
+import {
+  type CvFeatures,
+  type CvFeatureSource,
+  CV_FEATURE_SOURCES,
+} from '@/lib/portfolio/cv-features';
 import {
   type OptimizedAction,
   type ActionName,
@@ -65,13 +73,33 @@ const ACTIONS: ActionName[] = [
   'cede_xs',
 ];
 
-/** Human-friendly labels for the 5 modeled CV dims rendered in the panel. */
+/**
+ * Human-friendly labels + short descriptions for all 8 CV dims. The
+ * description appears in the hover tooltip alongside the source label so
+ * reviewers can see what the dimension means and where the value came
+ * from in one place.
+ */
 const CV_DIM_LABELS: Record<keyof CvFeatures, string> = {
   vegetation_density: 'Vegetation density',
+  imperviousness: 'Imperviousness',
   fuel_proximity: 'Fuel proximity',
+  roof_complexity: 'Roof complexity',
   water_proximity: 'Water proximity',
   elevation_bucket: 'Elevation bucket',
+  tree_overhang: 'Tree overhang',
   structure_density: 'Structure density',
+};
+
+/** Per-dim plain-English meaning, rendered in the hover tooltip. */
+const CV_DIM_DESCRIPTIONS: Record<keyof CvFeatures, string> = {
+  vegetation_density: 'NDVI mean — chlorophyll density on the chip',
+  imperviousness: 'Fraction of chip classified as built-up land cover',
+  fuel_proximity: 'SWIR mean — dry-vegetation fuel load proxy',
+  roof_complexity: '1 − mean Polsby-Popper over chip rooftops (jaggedness)',
+  water_proximity: 'NDWI mean — open-water surface fraction',
+  elevation_bucket: 'Chip-hash bucket (0..4, scaled to 0..1)',
+  tree_overhang: 'Fraction of chip classified as tree-cover land cover',
+  structure_density: 'Sobel edge density on NIR — building edge fraction',
 };
 
 /**
@@ -89,9 +117,26 @@ function averageCvFeatures(cohorts: Cohort[]): CvFeatures | null {
     for (const c of cohorts) {
       weighted += c.avg_cv_features[d].value * c.policy_count;
     }
-    acc[d] = { value: weighted / totalPolicies, modeled: true };
+    // Carry the source attribution from the first cohort — it's stable
+    // across cohorts (each dim has exactly one upstream source) so any
+    // representative carries the right pointer.
+    const source = cohorts[0]?.avg_cv_features[d]?.source ?? 'bandmath';
+    acc[d] = { value: weighted / totalPolicies, modeled: true, source };
   }
   return acc;
+}
+
+/**
+ * Per-dim hover tooltip: "<Label> · <description>. Source: <attribution>".
+ */
+function dimTooltip(dim: keyof CvFeatures, value: number, source: CvFeatureSource): string {
+  const src = CV_FEATURE_SOURCES[source];
+  return [
+    `${CV_DIM_LABELS[dim]} · ${value.toFixed(3)}`,
+    CV_DIM_DESCRIPTIONS[dim],
+    `Source: ${src.label} (${src.license})`,
+    src.attribution,
+  ].join('\n');
 }
 
 /**
@@ -664,7 +709,8 @@ export function PortfolioDrillDown({
                   return (
                     <div
                       key={d}
-                      style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+                      style={{ display: 'flex', flexDirection: 'column', gap: 4, cursor: 'help' }}
+                      title={dimTooltip(d, f.value, f.source)}
                     >
                       <div
                         style={{
@@ -712,10 +758,43 @@ export function PortfolioDrillDown({
               </div>
             );
           })()}
-          <p style={{ marginTop: 12, fontSize: 11, color: '#6b7280', lineHeight: 1.45 }}>
-            Three CV dims ({UNMODELED_CV_DIMS.join(', ')}) are unmodeled in
-            this build; Phase 2 swaps in NLCD + OSM weak labels.
-          </p>
+          {/* Phase 2 / Task P2.37 attribution. The three external sources
+              that supply the CV dims each ship under a permissive license
+              (CC-BY-4.0 for ESA WorldCover, ODbL for MS Buildings). Render
+              one citation line per source actually used by the visible
+              cohorts so reviewers can verify the chain back to the data.
+          */}
+          {(() => {
+            const usedSources = Array.from(
+              new Set((Object.keys(CV_DIM_LABELS) as Array<keyof CvFeatures>).map(
+                (d) => propertyFeatures[d].source,
+              )),
+            ) as CvFeatureSource[];
+            return (
+              <div
+                data-testid="cv-feature-citations"
+                style={{ marginTop: 12, fontSize: 10.5, color: '#6b7280', lineHeight: 1.45 }}
+              >
+                <div style={{ marginBottom: 4, fontWeight: 600, color: '#52525b' }}>Sources</div>
+                {usedSources.map((s) => {
+                  const meta = CV_FEATURE_SOURCES[s];
+                  return (
+                    <div key={s}>
+                      <a
+                        href={meta.href}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        style={{ color: '#4b5563' }}
+                      >
+                        {meta.label}
+                      </a>{' '}
+                      ({meta.license}) — {meta.attribution}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </section>
       )}
       {!hasOptimization && (

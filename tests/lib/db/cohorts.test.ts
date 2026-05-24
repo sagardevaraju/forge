@@ -16,13 +16,19 @@ describe('aggregateCohorts', () => {
     expect(Math.round(totalTiv)).toBeGreaterThan(2_000_000_000); // ~$3B book
   });
 
-  test('every cohort has the 5 modeled CV dims in [0, 1]', async () => {
+  test('every cohort has all 8 modeled CV dims in [0, 1]', async () => {
+    // Phase 2 / Task P2.37: the 3 dims dropped in Phase 1 (imperviousness,
+    // roof_complexity, tree_overhang) are now modeled via external weak
+    // labels and must appear with values in [0, 1].
     const cohorts = await aggregateCohorts();
     const modeledDims = [
       'vegetation_density',
+      'imperviousness',
       'fuel_proximity',
+      'roof_complexity',
       'water_proximity',
       'elevation_bucket',
+      'tree_overhang',
       'structure_density',
     ] as const;
     for (const c of cohorts) {
@@ -31,6 +37,7 @@ describe('aggregateCohorts', () => {
         expect(f.value).toBeGreaterThanOrEqual(0);
         expect(f.value).toBeLessThanOrEqual(1);
         expect(f.modeled).toBe(true);
+        expect(f.source).toBeTypeOf('string');
       }
     }
   });
@@ -48,15 +55,26 @@ describe('aggregateCohorts', () => {
     }
   });
 
-  test('cv_features carries named dims with unmodeled flags', async () => {
+  test('cv_features carries all 8 dims with per-dim source citation', async () => {
+    // After Phase 2 / Task P2.37 every dim is modeled and carries a
+    // `source` pointer (one of 'bandmath' | 'esa_worldcover' |
+    // 'ms_buildings'). The drill-down panel reads `source` to render
+    // the right citation footer.
     const cohorts = await aggregateCohorts();
     const c = cohorts[0];
-    expect(c.avg_cv_features.vegetation_density.value).toBeTypeOf('number');
-    expect(c.avg_cv_features.vegetation_density.modeled).toBe(true);
-    // Three dims are unmodeled in Phase 1:
-    for (const dim of ['imperviousness', 'roof_complexity', 'tree_overhang']) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      expect((c.avg_cv_features as any)[dim]).toBeUndefined(); // or modeled === false
+    expect(c.avg_cv_features.vegetation_density.source).toBe('bandmath');
+    expect(c.avg_cv_features.imperviousness.source).toBe('esa_worldcover');
+    expect(c.avg_cv_features.roof_complexity.source).toBe('ms_buildings');
+    expect(c.avg_cv_features.tree_overhang.source).toBe('esa_worldcover');
+    // The 5 band-math dims should all cite bandmath.
+    for (const dim of [
+      'vegetation_density',
+      'fuel_proximity',
+      'water_proximity',
+      'elevation_bucket',
+      'structure_density',
+    ] as const) {
+      expect(c.avg_cv_features[dim].source).toBe('bandmath');
     }
   });
 });
