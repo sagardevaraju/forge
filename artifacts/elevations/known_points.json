@@ -1,0 +1,50 @@
+{
+  "source": "Bundled anchor elevations for AUDIT.3 Phase 3 verification. Each (lat, lon) is the centroid of a well-known US city; `expected_m` is the city's elevation from public sources (USGS GNIS, NOAA, municipal references), cross-checked against the USGS EPQS endpoint at https://epqs.nationalmap.gov/v1/json on 2026-05-24.",
+  "wkid": 4326,
+  "units": "Meters",
+  "notes": "Cities chosen to span the FL/TX/LA/NC book footprint plus a high-elevation outlier (Denver) so the test catches both no-data and out-of-range failures. Tolerance is per-point because EPQS returns the nearest-pixel value at 1/3-arcsec which can differ from a city centroid by a few meters for a hilly city. Use `python -m scripts.extract_elevations --verify` to recheck.",
+  "points": [
+    {
+      "label": "Tampa, FL (335)",
+      "lat": 27.95,
+      "lon": -82.46,
+      "expected_m": 5.0,
+      "tolerance_m": 3.0
+    },
+    {
+      "label": "St. Petersburg, FL (337)",
+      "lat": 27.77,
+      "lon": -82.64,
+      "expected_m": 10.6,
+      "tolerance_m": 3.0
+    },
+    {
+      "label": "Brooksville, FL (346)",
+      "lat": 28.78,
+      "lon": -82.04,
+      "expected_m": 21.2,
+      "tolerance_m": 5.0
+    },
+    {
+      "label": "Tallahassee, FL (325)",
+      "lat": 30.44,
+      "lon": -84.28,
+      "expected_m": 62.2,
+      "tolerance_m": 8.0
+    },
+    {
+      "label": "New Orleans, LA (704)",
+      "lat": 29.95,
+      "lon": -90.07,
+      "expected_m": 1.2,
+      "tolerance_m": 3.0
+    },
+    {
+      "label": "Denver, CO (high-elevation control)",
+      "lat": 39.7392,
+      "lon": -104.9903,
+      "expected_m": 1609.0,
+      "tolerance_m": 20.0
+    }
+  ]
+}
