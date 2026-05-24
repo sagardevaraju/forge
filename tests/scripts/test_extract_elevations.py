@@ -301,3 +301,85 @@ def test_known_points_resolve_against_real_epqs() -> None:
         assert abs(actual - entry["expected_m"]) <= tol, (
             f"{entry['label']}: expected {entry['expected_m']:.1f} m, "
             f"got {actual:.1f} m, delta {actual - entry['expected_m']:+.1f} m")
+
+
+@pytest.mark.skipif(
+    os.getenv("FORGE_RUN_NETWORK_TESTS") != "1",
+    reason="Live USGS EPQS test — opt in with FORGE_RUN_NETWORK_TESTS=1")
+def test_populate_end_to_end_against_real_epqs(tmp_path: Path) -> None:
+    """End-to-end live integration test for ``populate()``.
+
+    The bundled ``test_known_points_resolve_against_real_epqs`` only
+    exercises ``fetch_elevation`` (the EPQS transport + parser).  This
+    test also covers the DB write path: it builds a tiny SQLite policies
+    table seeded at the five FL/LA anchor coordinates, runs the full
+    ``populate(...)`` orchestration against the *live* EPQS endpoint,
+    and asserts every row gets the expected elevation within the
+    per-point tolerance recorded in ``known_points.json``.
+
+    Together with the unit-test ``test_populate_end_to_end_with_mock_session``
+    above (which covers the same orchestration with a mocked transport)
+    this pins both ends of the contract — the DB-write side stays
+    deterministic, the EPQS side stays honest.
+
+    Opt-in via ``FORGE_RUN_NETWORK_TESTS=1`` for the same reason as the
+    fetch-only live test: the suite must not gate CI on EPQS uptime.
+    """
+    # Pull the five non-Denver anchors so the network footprint stays
+    # small (5 EPQS calls at ~1 s + 0.2 s polite pacing ≈ 6 s wall-clock).
+    spec = json.loads(KNOWN_POINTS_JSON.read_text())
+    anchors = [
+        e for e in spec["points"] if "high-elevation" not in e["label"]
+    ][:5]
+    assert len(anchors) == 5, (
+        "known_points.json must carry at least five non-outlier anchors "
+        "for this test; got " + str(len(anchors))
+    )
+
+    db_path = tmp_path / "test_book.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "CREATE TABLE policies (id INTEGER PRIMARY KEY, "
+            "lat REAL, lon REAL, elevation_m REAL)"
+        )
+        conn.executemany(
+            "INSERT INTO policies (id, lat, lon, elevation_m) "
+            "VALUES (?, ?, ?, NULL)",
+            [(i + 1, e["lat"], e["lon"]) for i, e in enumerate(anchors)],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    summary = populate(db_path=db_path, limit=5)
+    assert summary["policies_processed"] == 5
+    assert summary["errors"] == 0, (
+        f"live populate() reported errors: {summary}"
+    )
+    # Every anchor must come back with a non-NULL elevation; nodata
+    # at a city centroid would mean EPQS shape has drifted.
+    assert summary["nodata"] == 0, (
+        f"live populate() reported nodata at city centroids: {summary}"
+    )
+
+    # Read each row back and verify it's within tolerance of the anchor.
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT id, elevation_m FROM policies ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+    elevs = {r[0]: r[1] for r in rows}
+
+    for idx, entry in enumerate(anchors, start=1):
+        actual = elevs[idx]
+        assert actual is not None, (
+            f"policy {idx} ({entry['label']}): expected non-NULL elevation"
+        )
+        tol = entry.get("tolerance_m", 5.0)
+        assert abs(actual - entry["expected_m"]) <= tol, (
+            f"policy {idx} ({entry['label']}): expected "
+            f"{entry['expected_m']:.1f} ± {tol:.1f} m, got {actual:.1f} m"
+        )
