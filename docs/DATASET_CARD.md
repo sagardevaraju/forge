@@ -6,17 +6,17 @@ template](https://github.com/huggingface/datasets/blob/main/templates/README.md)
 and the [Datasheets for Datasets](https://arxiv.org/abs/1803.09010)
 framework (Gebru et al. 2018).
 
-> **DOI placeholder.** Sagar reserves the Zenodo DOI manually (the
-> autonomous-execution charter explicitly defers any external service
-> wiring — see `memory/auth-vercel-deferred.md`). Once reserved, paste
-> the DOI into the front-matter below and re-commit.
+> **DOI:** [10.5281/zenodo.20368096](https://doi.org/10.5281/zenodo.20368096)
+> — minted by Zenodo on the v0.1.0 release (2026-05-24). Future releases
+> auto-mint version DOIs via the GitHub↔Zenodo integration (configured
+> via `.zenodo.json`).
 
 ```yaml
 ---
 title: "FORGE — Synthetic Policy Book + Multi-Peril Scenario Set"
 version: "0.1.0"
 license: "CC-BY-4.0"
-doi: "TBD — Sagar reserves manually via Zenodo"
+doi: "10.5281/zenodo.20368096"
 authors:
   - name: "Sagar Devaraju"
     affiliation: "FORGE"
@@ -28,7 +28,7 @@ keywords:
   - HAZUS
   - HURDAT2
   - Monte Carlo
-publication_date: "TBD"
+publication_date: "2026-05-24"
 ---
 ```
 
@@ -148,8 +148,9 @@ Operational LP, the claims pre-flagger, every notebook in
 ## 8. License
 
 Released under [Creative Commons Attribution 4.0](
-https://creativecommons.org/licenses/by/4.0/). Attribution: cite
-the Zenodo DOI (once reserved) and the FORGE GitHub repository.
+https://creativecommons.org/licenses/by/4.0/). Attribution: cite the
+Zenodo DOI ([10.5281/zenodo.20368096](https://doi.org/10.5281/zenodo.20368096))
+and the FORGE GitHub repository.
 
 ## 9. Citation
 
@@ -160,8 +161,9 @@ the Zenodo DOI (once reserved) and the FORGE GitHub repository.
   year         = {2026},
   month        = {may},
   publisher    = {Zenodo},
-  doi          = {TBD},
-  url          = {https://github.com/sagardevaraju/forge}
+  version      = {0.1.0},
+  doi          = {10.5281/zenodo.20368096},
+  url          = {https://doi.org/10.5281/zenodo.20368096}
 }
 ```
 
@@ -210,8 +212,9 @@ the Zenodo DOI (once reserved) and the FORGE GitHub repository.
   benchmarking, MIP decomposition research.
 
 ### Distribution
-- **How will the dataset be distributed?** GitHub repository +
-  Zenodo DOI (once reserved).
+- **How will the dataset be distributed?** GitHub repository
+  ([sagardevaraju/forge](https://github.com/sagardevaraju/forge)) +
+  Zenodo DOI ([10.5281/zenodo.20368096](https://doi.org/10.5281/zenodo.20368096)).
 
 ### Maintenance
 - **Who is supporting / hosting / maintaining the dataset?**
@@ -221,12 +224,11 @@ the Zenodo DOI (once reserved) and the FORGE GitHub repository.
 
 ---
 
-## Manual follow-up for Sagar
+## Release history
 
-1. Reserve a Zenodo DOI for the v0.1.0 artifact set:
-   - Go to https://zenodo.org/account/login (use GitHub OAuth)
-   - "New upload" → "Reserve DOI" before uploading
-   - Or: use the GitHub-Zenodo integration to auto-mint DOIs on tag
-2. Paste the reserved DOI into the front-matter `doi:` field
-   above (line 19) AND the BibTeX citation block (§9)
-3. Re-commit as `docs(FORGE): P3.25 DOI reservation - <DOI>`
+- **v0.1.0** — 2026-05-24 — Initial release · DOI [10.5281/zenodo.20368096](https://doi.org/10.5281/zenodo.20368096)
+
+Future versions auto-mint new version DOIs on each `git tag` release via
+the GitHub↔Zenodo integration. The concept DOI (latest-version redirect)
+is maintained by Zenodo automatically — see https://help.zenodo.org/docs/deposit/describe-records/versioning/
+for the versioning model.

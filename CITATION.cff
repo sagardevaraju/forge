@@ -21,6 +21,11 @@ authors:
 license: CC-BY-4.0
 repository-code: "https://github.com/sagardevaraju/forge"
 url: "https://github.com/sagardevaraju/forge"
+date-released: 2026-05-24
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.20368096
+    description: "Zenodo DOI for FORGE v0.1.0 (minted 2026-05-24)"
 keywords:
   - reinsurance
   - catastrophe modeling
@@ -32,7 +37,3 @@ keywords:
   - stochastic optimization
   - insurance
   - natural hazards
-# date-released will be populated when v0.1.0 is tagged on GitHub.
-# The Zenodo↔GitHub integration mints the DOI on release; paste it into
-# docs/DATASET_CARD.md front-matter (line 19) and the front-matter of this
-# file (add `identifiers:` block per https://citation-file-format.github.io).
