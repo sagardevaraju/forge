@@ -599,66 +599,111 @@ export function PortfolioDrillDown({
         >
           <h4 style={{ marginBottom: 8, fontWeight: 600 }}>Property features</h4>
           {/*
-            Earlier render used a 3-col fixed-layout table where the label
-            column got squeezed to ~0px and the nowrap label overflowed *into*
-            the bar's column — labels rendered on top of the dark fill,
-            illegible. Now each row is a vertical stack: label + value on a
-            single justified line, full-width track underneath. Reads cleanly
-            at any width and matches the rest of the redesign's tile rhythm.
+            Honest guard against the never-populated state. When every modeled
+            dim averages to 0.00 it means the cohort had zero valid
+            `cv_features` rows (cv_n = 0 in lib/db/cohorts.ts) — the CV head
+            was never run against the book and the previously-rendered
+            five-dim bar chart of all-zeroes was a fabricated reading. Per
+            CLAUDE.md "no fictional data," surface the absence instead and
+            point the operator at the populate script.
+
+            When real values are present (cv_n > 0) the per-dim stack reads:
+            label + value on a single justified line, full-width track
+            underneath. Reads cleanly at any width and matches the rest of
+            the redesign's tile rhythm. The previous 3-col fixed-layout
+            table squeezed the label column to ~0px and the nowrap label
+            overflowed into the dark fill, illegible.
           */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {(Object.keys(CV_DIM_LABELS) as Array<keyof CvFeatures>).map((d) => {
-              const f = propertyFeatures[d];
-              const pct = Math.round(f.value * 100);
+          {(() => {
+            const dims = Object.keys(CV_DIM_LABELS) as Array<keyof CvFeatures>;
+            const allZero = dims.every(
+              (d) => Math.abs(propertyFeatures[d].value) < 1e-9,
+            );
+            if (allZero) {
               return (
                 <div
-                  key={d}
-                  style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+                  data-testid="property-features-unpopulated"
+                  role="status"
+                  style={{
+                    padding: 10,
+                    fontSize: 11.5,
+                    lineHeight: 1.45,
+                    color: '#92400e',
+                    background: '#fef3c7',
+                    border: '1px solid #fde68a',
+                    borderRadius: 4,
+                  }}
                 >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'baseline',
-                      justifyContent: 'space-between',
-                      gap: 12,
-                      fontSize: 12,
-                    }}
-                  >
-                    <span style={{ color: '#3f3f46' }}>{CV_DIM_LABELS[d]}</span>
-                    <span
-                      style={{
-                        color: '#18181b',
-                        fontVariantNumeric: 'tabular-nums',
-                        fontWeight: 500,
-                      }}
-                    >
-                      {f.value.toFixed(2)}
-                    </span>
-                  </div>
-                  <div
-                    role="img"
-                    aria-label={`${CV_DIM_LABELS[d]} ${pct} percent`}
-                    style={{
-                      height: 6,
-                      background: '#f3f4f6',
-                      borderRadius: 999,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: `${pct}%`,
-                        height: '100%',
-                        background: '#3f3f46',
-                        borderRadius: 999,
-                        transition: 'width 240ms ease-out',
-                      }}
-                    />
-                  </div>
+                  <strong style={{ fontWeight: 600 }}>
+                    CV head not run on this book.
+                  </strong>{' '}
+                  Every policy in the cohort has{' '}
+                  <code style={{ fontFamily: 'monospace' }}>cv_features = NULL</code>{' '}
+                  so the modeled 5-dim vector defaults to zero. Populate with{' '}
+                  <code style={{ fontFamily: 'monospace' }}>
+                    python scripts/populate_cv_features.py
+                  </code>
+                  ; values returned here are then real averages over the cohort,
+                  not placeholders.
                 </div>
               );
-            })}
-          </div>
+            }
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {dims.map((d) => {
+                  const f = propertyFeatures[d];
+                  const pct = Math.round(f.value * 100);
+                  return (
+                    <div
+                      key={d}
+                      style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'baseline',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          fontSize: 12,
+                        }}
+                      >
+                        <span style={{ color: '#3f3f46' }}>{CV_DIM_LABELS[d]}</span>
+                        <span
+                          style={{
+                            color: '#18181b',
+                            fontVariantNumeric: 'tabular-nums',
+                            fontWeight: 500,
+                          }}
+                        >
+                          {f.value.toFixed(2)}
+                        </span>
+                      </div>
+                      <div
+                        role="img"
+                        aria-label={`${CV_DIM_LABELS[d]} ${pct} percent`}
+                        style={{
+                          height: 6,
+                          background: '#f3f4f6',
+                          borderRadius: 999,
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: `${pct}%`,
+                            height: '100%',
+                            background: '#3f3f46',
+                            borderRadius: 999,
+                            transition: 'width 240ms ease-out',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
           <p style={{ marginTop: 12, fontSize: 11, color: '#6b7280', lineHeight: 1.45 }}>
             Three CV dims ({UNMODELED_CV_DIMS.join(', ')}) are unmodeled in
             this build; Phase 2 swaps in NLCD + OSM weak labels.

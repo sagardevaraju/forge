@@ -285,6 +285,7 @@ export default async function PortfolioPage() {
             coneRefreshedAt={coneRefreshedAt}
             alerts={alertsRes?.alerts ?? []}
             alertCounts={alertsRes?.counts}
+            alertsSource={alertsRes?.source}
             zip3Centroids={zip3CentroidMap}
           />
         </div>
