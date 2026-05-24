@@ -23,7 +23,9 @@
 import Link from 'next/link';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
 import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
+import { CoastalZip3Catalog } from '@/components/methodology/CoastalZip3Catalog';
 import type { TrustTier } from '@/lib/grammar/trust-tiers';
+import { loadCoastalZip3Catalog } from '@/lib/methodology/coastal_zip3s';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,8 +41,9 @@ const TOC: TocItem[] = [
   { id: 'risk-measure', label: '4 · Risk measure (TVaR-99)' },
   { id: 'vrp-lp', label: '5 · Adjuster LP — integrality' },
   { id: 'magic-constants', label: '6 · Magic constants' },
-  { id: 'reproducibility', label: '7 · Reproducibility' },
-  { id: 'deferrals', label: '8 · Deferrals' },
+  { id: 'coastal-zip3s', label: '7 · Coastal ZIP3 catalog' },
+  { id: 'reproducibility', label: '8 · Reproducibility' },
+  { id: 'deferrals', label: '9 · Deferrals' },
   { id: 'references', label: 'References' },
 ];
 
@@ -110,7 +113,8 @@ function SectionHeading({ id, eyebrow, title }: { id: string; eyebrow: string; t
   );
 }
 
-export default function MethodologyPage() {
+export default async function MethodologyPage() {
+  const coastalCatalog = await loadCoastalZip3Catalog();
   return (
     <div className="mx-auto max-w-[1400px] px-6 py-8">
       {/* Hero */}
@@ -437,11 +441,72 @@ export default function MethodologyPage() {
             </ul>
           </section>
 
-          {/* §7 Reproducibility */}
+          {/* §7 Coastal ZIP3 catalog (AUDIT.3 Phase 4 closeout) */}
+          <section>
+            <SectionHeading
+              id="coastal-zip3s"
+              eyebrow="§7 · Real-data anchor"
+              title="Coastal ZIP3 catalog"
+            />
+            <div className="flex items-center gap-2 mb-3">
+              <TrustTierBadge tier="LIVE_FEED" />
+              <span className="text-[12px] text-zinc-500">
+                USGS National Elevation Dataset · refreshed by{' '}
+                <code className="font-mono text-zinc-700">
+                  scripts.precompute_coastal_zip3s
+                </code>
+              </span>
+            </div>
+            <p className="text-[13px] text-zinc-700 leading-relaxed mb-4">
+              AUDIT.3 Phase 4 retired the hand-coded{' '}
+              <code className="font-mono text-[12px]">_COASTAL_ZIP3S</code>{' '}
+              literal in{' '}
+              <code className="font-mono text-[12px]">ml/scenarios/generate.py</code>.
+              The replacement is a 38-ZIP3 catalog computed from real data:
+              centroids are the policy-table mean lat/lon per ZIP3, and
+              elevations are point reads from the USGS{' '}
+              <a
+                href="https://epqs.nationalmap.gov/v1/json"
+                className="underline decoration-zinc-300 hover:decoration-zinc-500"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Elevation Point Query Service
+              </a>{' '}
+              backed by the National Elevation Dataset at 1/3-arcsec
+              resolution. The catalog covers every coastal-state ZIP3
+              with at least 50 seeded policies — wide enough to drive
+              the storm-surge per-cohort uplift across the eight Gulf /
+              Atlantic states, narrow enough to keep regeneration to
+              ~80 s.
+            </p>
+            {coastalCatalog ? (
+              <CoastalZip3Catalog payload={coastalCatalog} />
+            ) : (
+              <div className="rounded-md ring-1 ring-amber-200/70 bg-amber-50 px-4 py-3 text-[12.5px] text-amber-900">
+                <div className="font-semibold mb-1">
+                  Catalog unavailable.
+                </div>
+                <div>
+                  Run{' '}
+                  <code className="font-mono">
+                    python -m scripts.precompute_coastal_zip3s
+                  </code>{' '}
+                  to regenerate{' '}
+                  <code className="font-mono">
+                    artifacts/coastal_zip3s.json
+                  </code>
+                  .
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* §8 Reproducibility */}
           <section>
             <SectionHeading
               id="reproducibility"
-              eyebrow="§7 · Determinism"
+              eyebrow="§8 · Determinism"
               title="Reproducibility"
             />
             <p className="text-[13px] text-zinc-700 leading-relaxed mb-3">
@@ -472,11 +537,11 @@ export default function MethodologyPage() {
             </p>
           </section>
 
-          {/* §8 Deferrals */}
+          {/* §9 Deferrals */}
           <section>
             <SectionHeading
               id="deferrals"
-              eyebrow="§8 · Roadmap"
+              eyebrow="§9 · Roadmap"
               title="Deferred work"
             />
             <p className="text-[13px] text-zinc-700 leading-relaxed mb-3">
