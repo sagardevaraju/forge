@@ -1,0 +1,54 @@
+# Task P3.24 — Dockerfile build context exclusions.
+#
+# Mirrors .gitignore plus extra dev-only files that aren't worth
+# baking into the image. The intent is a slim build context so
+# `docker build .` doesn't slurp gigabytes of local caches.
+
+# JS deps — installed inside the image
+node_modules
+.next
+out
+
+# Python local caches
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Local dev artifacts
+.env.local
+.env.development.local
+.env.test.local
+forge-local.db
+forge-local.db-journal
+forge-local.db-shm
+forge-local.db-wal
+artifacts/simulations
+artifacts/chips
+artifacts/*.parquet
+artifacts/*.joblib
+
+# Editor / OS
+.DS_Store
+.idea
+.vscode
+*.swp
+
+# Test outputs
+coverage
+playwright-report
+test-results
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Big test data
+ml/cv/chips
+eval/results
