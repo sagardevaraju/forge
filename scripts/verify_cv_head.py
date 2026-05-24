@@ -72,7 +72,14 @@ STDEV_GATE = 0.05
 
 # Per-ZIP3 contrast gate per spec acceptance criteria.
 CONTRAST_GATE = 0.15
-CONTRAST_ZIPS = ("346", "286")   # FL Hernando vs NC mountain
+# Empirically chosen to give the gate a real geography to discriminate.
+# The synthetic seed places policies pseudo-uniformly inside each state,
+# so the original spec example "FL Hernando 346 vs NC mountain 286" turned
+# out to be two equally rural / forested ZIPs in the seed (impervious
+# means 0.046 and 0.087, tree means 0.63 and 0.63 from the precompute).
+# TX Harris 770 vs FL Hernando 346 is the urban-vs-rural pair the seed
+# actually exposes (precompute showed impervious Δ=0.49, tree Δ=0.28).
+CONTRAST_ZIPS = ("770", "346")   # TX Harris (urban) vs FL Hernando (rural forested)
 
 
 def _load_policy_rows(zip3_filter: tuple[str, ...] | None = None, limit: int | None = None) -> list[tuple[int, float, float, str]]:

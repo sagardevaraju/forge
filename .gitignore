@@ -42,6 +42,12 @@ forge-local.db*
 # ML artifacts — heavyweight binaries, regenerate via synthesize_book.py + train.py
 artifacts/*.parquet
 artifacts/*.joblib
+# P2.37 CV weak-label cache is small (~150 KB for 10k rows) and tracked
+# because the UI and training pipeline both read it at run/render time.
+!artifacts/cv_weak_labels.parquet
+# Phase 2 calibration parquets (P2.10 HURDAT2, P2.3 regime) are also tracked.
+!artifacts/hurdat2/*.parquet
+!artifacts/regime/*.parquet
 
 # Pre-cached Sentinel-2 chips (~6.5 GB for 10k policies). Rebuild with
 # scripts/cache_s2_chips.py. Failure log + raw stdout log also regenerate.

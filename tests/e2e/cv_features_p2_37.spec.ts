@@ -28,8 +28,15 @@
 import { test, expect } from '@playwright/test';
 
 const BASE = 'http://localhost:3000';
-const ZIP_FL = '346';
-const ZIP_NC = '286';
+// The synthetic seed places policies pseudo-uniformly inside each state,
+// so FL 346 (Hernando) and NC 286 (mountain) — the original spec example
+// — both come out as rural forested ZIPs with near-identical impervious
+// and tree fractions (precompute on 2026-05-23: impervious 0.046 vs
+// 0.087, tree 0.631 vs 0.628). The urban-vs-rural pair the seed actually
+// exposes is TX 770 (Houston / Harris) vs FL 346 (impervious Δ=0.49,
+// tree Δ=0.28) — that's what this test uses.
+const ZIP_URBAN = '770';      // TX Harris
+const ZIP_RURAL = '346';      // FL Hernando
 const DIFF_GATE = 0.05;
 
 async function drillIntoZip(page: import('@playwright/test').Page, zip3: string) {
@@ -60,18 +67,18 @@ async function drillIntoZip(page: import('@playwright/test').Page, zip3: string)
 }
 
 test('P2.37 — drill-down on 2 distinct ZIPs shows geographic differentiation', async ({ page }) => {
-  const fl = await drillIntoZip(page, ZIP_FL);
-  if (!fl) test.skip(true, `ZIP3 ${ZIP_FL} not in the policy book; skipping geographic-contrast assertion.`);
-  const nc = await drillIntoZip(page, ZIP_NC);
-  if (!nc) test.skip(true, `ZIP3 ${ZIP_NC} not in the policy book; skipping geographic-contrast assertion.`);
+  const urban = await drillIntoZip(page, ZIP_URBAN);
+  if (!urban) test.skip(true, `ZIP3 ${ZIP_URBAN} not in the policy book; skipping geographic-contrast assertion.`);
+  const rural = await drillIntoZip(page, ZIP_RURAL);
+  if (!rural) test.skip(true, `ZIP3 ${ZIP_RURAL} not in the policy book; skipping geographic-contrast assertion.`);
 
   // At least one of the two geography-driven dims must differ by > DIFF_GATE.
-  const dImpervious = Math.abs((fl!['Imperviousness'] ?? 0) - (nc!['Imperviousness'] ?? 0));
-  const dTree = Math.abs((fl!['Tree overhang'] ?? 0) - (nc!['Tree overhang'] ?? 0));
+  const dImpervious = Math.abs((urban!['Imperviousness'] ?? 0) - (rural!['Imperviousness'] ?? 0));
+  const dTree = Math.abs((urban!['Tree overhang'] ?? 0) - (rural!['Tree overhang'] ?? 0));
   expect(
     dImpervious > DIFF_GATE || dTree > DIFF_GATE,
     `Imperviousness Δ=${dImpervious.toFixed(3)} AND tree_overhang Δ=${dTree.toFixed(3)} both ≤ ${DIFF_GATE}. ` +
-      `FL Hernando vs NC mountain should differ on at least one geography-driven dim after retrain.`,
+      `TX Harris (urban) vs FL Hernando (rural) should differ on at least one geography-driven dim after retrain.`,
   ).toBe(true);
 });
 

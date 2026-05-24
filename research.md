@@ -586,12 +586,37 @@ cached chips from §8b):
 `FORGE_CV_BYPASS_HEAD=1`) and the populate script's default both bypass
 the trained head and run band-math directly on the real chips. The head
 remains in the tree; passing `populate_cv_features.py --use-head`
-restores forwarding through it (for comparison or after retraining
-against image-derived labels).
+restores forwarding through it (for comparison only — see Phase 2
+retrain results below).
 
-Retraining against external image-derived labels (NLCD impervious
-surface, OSM building density, USGS NED elevation, MODIS / Landsat
-seasonal NDVI variance) is a Phase 2 task tracked separately.
+**Phase 2 / P2.37 retrain — partial success.** Re-running `ml/cv/train.py`
+against the new ESA WorldCover + MS Buildings weak labels (§12) on the same
+frozen ViT-B/16 backbone for 20 epochs (best val MAE 0.1105 at epoch 3)
+improved per-policy stdev 6-10× over the metadata-trained head but did
+NOT preserve the per-ZIP geographic contrast embedded in the labels:
+
+| Path                                | impervious stdev | impervious Δ (TX 770 vs FL 346) |
+|-------------------------------------|------------------|---------------------------------|
+| Phase-1 metadata-trained head       | ≈ 0.011          | ~ 0.00                          |
+| Phase-2 weak-label-retrained head   | **≈ 0.066** (PASS gate >0.05) | **0.02** (FAIL gate >0.15) |
+| ESA WC labels themselves            | ≈ 0.22           | **0.49**                        |
+
+The head's outputs compress every chip toward the book-wide mean —
+likely because the frozen ViT-B backbone wasn't pretrained on land-cover
+imagery and the small MLP head can't reconstruct the strong geographic
+signal that ESA WorldCover encodes directly. Honest follow-up paths:
+unfreezing the backbone, swapping to Prithvi-100M (land-cover-pretrained),
+or training a longer schedule with a label-magnitude-aware loss.
+
+**Decision (2026-05-23):** keep `bypass_head=True` as the populate
+default. The retrained head is saved at `artifacts/cv_head.pt`; the
+Phase-1 metadata-trained head is preserved at
+`artifacts/cv_head.metadata-trained.pt` for regression diffing.
+**Populate now OVERLAYS the parquet values directly at idx 1, 3, 6**
+(`scripts/populate_cv_features.py` — band-math for the 5 already-modeled
+dims plus literal ESA WorldCover / MS Buildings labels for the new three).
+That ships the real geographic signal to the UI today without waiting on
+a more expressive head.
 
 ### 8f. Why mock-mode populations are forbidden — *derivation*
 
@@ -893,7 +918,27 @@ on typical residential blocks. Catastrophic events (Helene 2024, hail
 2023) can spot-invalidate; carrier post-event refresh is out of scope
 for the demo book.
 
-### 12e. Output cache + train-time consumption
+### 12e. Retrain outcome — head trained but not used by default
+
+The Phase 2 retrain (20 epochs, frozen ViT-B/16 + 4-layer MLP head, MPS,
+~10 min wall time) was scored against the acceptance gate in §8e:
+
+- ✅ Per-policy stdev > 0.05 on `imperviousness` (head 0.066) and
+  `tree_overhang` (head 0.103). `roof_complexity` stdev = 0.027 (FAIL —
+  building shape varies less than land-cover across the US book).
+- ❌ Per-ZIP3 |Δ| > 0.15 on `imperviousness` + `tree_overhang`. The
+  labels themselves have |Δ| 0.49 / 0.28 between TX Harris (770) and FL
+  Hernando (346); the head's outputs collapse those to |Δ| 0.02 / 0.005.
+
+The discrepancy is a head-quality problem, not a label problem. We
+ship the labels straight through to the UI via
+`populate_cv_features.py`'s overlay path — every policy's
+`cv_features` JSON is band-math for idx 0/2/4/5/7 plus the literal ESA
+WorldCover + MS Buildings value at idx 1/3/6. The UI sees real
+geographic signal today; the head sits on the shelf as a future
+improvement target (see §8e for follow-up paths).
+
+### 12f. Output cache + train-time consumption
 
 `scripts/precompute_cv_weak_labels.py` writes `artifacts/cv_weak_labels.parquet`
 (tracked, ~250 KB for 10 k rows × 3 float32 columns). The training step
@@ -912,7 +957,7 @@ all 10 k policies must be > 0.05 on each retrained dim (the band-math
 NDVI baseline reaches 0.10; we need to be in that ballpark, not collapsed
 to a constant like §8e).
 
-### 12f. References (new in §12)
+### 12g. References (new in §12)
 
 27. Zanaga, D., et al. (2022). *ESA WorldCover 10 m 2021 v200.* Zenodo.
     doi:10.5281/zenodo.7254221. https://esa-worldcover.org/en
