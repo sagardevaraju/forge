@@ -114,6 +114,35 @@ CREATE INDEX IF NOT EXISTS idx_decisions_solve_ts ON decisions(solve_ts DESC);
 CREATE INDEX IF NOT EXISTS idx_decisions_operator ON decisions(operator);
 CREATE INDEX IF NOT EXISTS idx_decisions_inputs_hash ON decisions(inputs_hash);
 
+-- Task P3.12 — Concurrent decision queue + locking.
+-- Separate table from `decisions` so the WORM ledger stays append-only
+-- (immutable content) while the queue carries a freely-mutable
+-- lifecycle state. Each decision can have at most one queue row
+-- (UNIQUE constraint on decision_id).
+--
+-- State machine:
+--   pending → in_progress → completed
+--                       ↘ failed
+--                       ↘ cancelled
+--
+-- Locking is row-level via SQLite's atomic UPDATE — claimNext() uses
+-- "UPDATE … WHERE state = 'pending' AND id = (SELECT id WHERE state =
+-- 'pending' ORDER BY enqueued_at LIMIT 1) RETURNING …" so two concurrent
+-- claimers cannot grab the same row. See lib/audit/decisions_queue.ts.
+CREATE TABLE IF NOT EXISTS decisions_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  decision_id TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL CHECK(state IN ('pending', 'in_progress', 'completed', 'failed', 'cancelled')),
+  enqueued_at TEXT NOT NULL,
+  claimed_by TEXT,
+  claimed_at TEXT,
+  completed_at TEXT,
+  failed_reason TEXT,
+  FOREIGN KEY (decision_id) REFERENCES decisions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_decisions_queue_state ON decisions_queue(state);
+CREATE INDEX IF NOT EXISTS idx_decisions_queue_enqueued ON decisions_queue(state, enqueued_at);
+
 -- Task SIM.1 — Operator-drawn catastrophe simulations.
 -- Lifecycle: draft (drawn, preview only) → promoted (K=1000 cohort
 -- losses cached at artifacts/simulations/<id>.parquet) → retired
