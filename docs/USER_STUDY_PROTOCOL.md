@@ -10,13 +10,22 @@
 
 ## Manual follow-up for Sagar
 
+A paste-ready version of this protocol — mapped 1:1 to the OSF form's
+required fields — lives at **`docs/USER_STUDY_PROTOCOL_OSF_FORM.md`**.
+The flow shrinks to:
+
 1. Visit https://osf.io/registries/ and select the **OSF Preregistration**
-   template (or **Preregistration Challenge** for the AsPredicted
-   short form).
-2. Paste each numbered §below into the matching field. The headings
-   here are aligned with the OSF template's required fields.
+   template (or **Preregistration Challenge** for the AsPredicted short
+   form).
+2. Open `docs/USER_STUDY_PROTOCOL_OSF_FORM.md` — each `## OSF Field N`
+   heading maps to one field on the OSF UI. Copy the body of each section
+   into the matching field.
 3. Submit and copy the resulting DOI back into the `OSF pre-registration:`
    line above. Re-commit as `docs(FORGE): P3.26 OSF DOI - <DOI>`.
+
+Keep this protocol document and `USER_STUDY_PROTOCOL_OSF_FORM.md` in sync
+if you edit before submission (this document is source-of-truth; the
+form-extract is a paste-buffer view of it).
 
 ---
 
