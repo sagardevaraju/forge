@@ -720,12 +720,34 @@ discount on masonry is smaller than the HAZUS ratio because non-wind
 perils dominate average year). The loss vulnerability mirrors HAZUS-ratio
 because that's what drives the expected-loss prior.
 
-Source: FEMA HAZUS-MH Hurricane Technical Manual, Wind Damage curves;
-HO-7 product pricing per state DOI rate filings (FL OIR, TX TDI).
+Sources:
+- FEMA HAZUS-MH 5.1 Hurricane Technical Manual (April 2022), §6.4 "Wind Damage
+  Functions", Tables 6.4-1 (Wood Frame), 6.4-2 (Masonry), 6.4-7 (Manufactured
+  Housing). The 110 mph anchor sits at the Cat-2 ceiling on the Saffir-Simpson
+  scale; values at 130 / 155 / 180 mph (Cat-3 / Cat-4 / Cat-5 ceilings) are
+  also wired through `ml/xgb/hazus_curves.py::wind_damage_ratio` as the ML
+  training-data signal. AUDIT.2 (2026-05-24) pinned these via
+  `tests/ml/xgb/test_hazus.py::TestHazusWindAnchors`.
+- FEMA P-1019 (2019) hurricane vulnerability functions calibrated against
+  post-Andrew (1992), post-Charley (2004), post-Ian (2022) claim datasets —
+  the source the HAZUS-MH 5.1 tables derive from.
+- HO-7 product pricing per state DOI rate filings (FL OIR, TX TDI).
 
 Wired in:
+- `ml/xgb/hazus_curves.py::wind_damage_ratio` (continuous interpolation —
+  ML training-data path).
+- `api_py/sim_loss.py::_HAZUS_MATRIX` + `lib/sim/severity.ts::HAZUS_MATRIX`
+  (per-peril discrete severe-anchor matrix — simulation-side; see §1c).
 - `scripts/seed_policy_book.py::BUILD_PREMIUM_LOADING` (premium-side multipliers).
 - `scripts/precompute_portfolio_optimization.py::BUILD_VULNERABILITY` (loss-side multipliers).
+
+The two HAZUS surfaces in the repo (continuous curves in
+`ml/xgb/hazus_curves.py` vs the discrete `_HAZUS_MATRIX` per-build × peril
+table) are *different abstractions over the same source data*. They
+intentionally do not share numeric values — the curves give fine-grained
+intensity → damage interpolation for XGB training, while the matrix gives
+a per-peril severe-anchor scalar that the sim multiplies by a severity
+level. Both trace back to HAZUS-MH 5.1; AUDIT.2 cross-cited both.
 
 ### 9d. Elevation slope — *HAZUS-Flood depth-damage gradient*
 
@@ -736,6 +758,15 @@ applying only to the FLOOD component of total expected loss (wind / hail
 / fire are elevation-independent):
 
 `elev_factor = max(0.70, 1.0 − 0.05 × avg_elevation_m)`
+
+The surge depth-damage curve breakpoints in `ml/xgb/hazus_curves.py::
+surge_damage_ratio` (0.3 m → 10%, 1.0 m → 35%, 2.0 m → 65%, 4.0 m → 95%)
+sample the FEMA HAZUS-MH 5.1 Flood Technical Manual §9 Table 9.5
+("One-Story No Basement Residential Depth-Damage Function") at the
+canonical 1/3/6/13 ft depth anchors. Pinned via
+`tests/ml/xgb/test_hazus.py::TestHazusSurgeAnchors`. The HAZUS-Flood
+curves derive in turn from USACE EGM 04-01 (2004) updated against
+post-Katrina (2005), post-Sandy (2012), post-Harvey (2017) claim records.
 
 Floor 0.70 reflects that the ~70% non-flood component of total loss
 can't be mitigated by elevation. Slope 0.05/m matches the HAZUS gradient
