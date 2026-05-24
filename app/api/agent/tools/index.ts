@@ -12,3 +12,4 @@ export { fetchStormEvents } from './fetch_storm_events';
 export { generateScenarios } from './generate_scenarios';
 export { queryBookExposure } from './query_book_exposure';
 export { draftSitrep } from './draft_sitrep';
+export { resolveConeToZip3sTool } from './resolve_cone_to_zip3s';

@@ -91,11 +91,22 @@ export interface Runbook {
 const DEFAULT_CONE_STATES = ['FL', 'GA', 'AL'];
 
 /**
- * Map the default cone states into ZIP3 prefixes for ``query_book_exposure``.
- * Florida-gulf coverage: 320s-339s span Tampa/Orlando/Miami/Fort Myers; 300s
- * cover Atlanta-region Georgia; 350-369 cover Alabama. This list is the
- * Phase-2 stand-in for a real cone-to-ZIP3 resolver (which is on the Phase-3
- * roadmap).
+ * Default cone-footprint ZIP3 prefixes (FL panhandle + GA + AL) — used by
+ * pre-landfall + post-landfall runbook steps as a fixed-footprint stand-in.
+ *
+ * **AUDIT.5 (2026-05-24): the real resolver now ships at
+ * ``lib/runbooks/cone_resolver.ts::resolveConeToZip3s`` plus an
+ * ``resolve_cone_to_zip3s`` agent tool that composes it with
+ * ``fetch_nhc_cone`` + ``zip3Centroids``.** It is callable in *free*
+ * mode by the LLM immediately. Wiring it into procedure-mode runbooks
+ * requires the executor to thread one step's result into the next
+ * step's args — today the executor only resolves args from
+ * ``RunbookContext`` (storm_id, states, user_message), not from prior
+ * tool results. That executor upgrade is a separate product PR; this
+ * list stays in use until then.
+ *
+ * Footprint coverage: 320s-339s span Tampa/Orlando/Miami/Fort Myers;
+ * 300s cover Atlanta-region Georgia; 350-369 cover Alabama.
  */
 const DEFAULT_CONE_ZIP3S = [
   '320', '321', '322', '323', '324', '325', '326', '327', '328', '329',

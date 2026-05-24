@@ -15,6 +15,7 @@ import {
   generateScenarios,
   queryBookExposure,
   draftSitrep,
+  resolveConeToZip3sTool,
 } from '@/app/api/agent/tools';
 
 export interface Tool<TArgs = unknown, TResult = unknown> {
@@ -34,6 +35,7 @@ export const TOOLS: Tool[] = [
   generateScenarios,
   queryBookExposure,
   draftSitrep,
+  resolveConeToZip3sTool,
 ] as unknown as Tool[];
 
 export const TOOL_MAP: Record<string, Tool> = Object.fromEntries(
