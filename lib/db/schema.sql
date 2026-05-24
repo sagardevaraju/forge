@@ -89,6 +89,31 @@ CREATE TABLE IF NOT EXISTS chat_audit (
 CREATE INDEX IF NOT EXISTS idx_chat_audit_ts ON chat_audit(ts);
 CREATE INDEX IF NOT EXISTS idx_chat_audit_user_id ON chat_audit(user_id);
 
+-- Task P3.4 — Versioned decision ledger. Every /api/optimize/portfolio
+-- solve writes one row. Primary key is SHA-256(inputs_hash + outputs_hash)
+-- and duplicate writes collapse via INSERT ON CONFLICT DO NOTHING. The
+-- `operator` column reads from `X-Forge-Operator` header (default
+-- `'demo_operator'`) until P3.1 auth lands. Lifecycle columns
+-- (executed_at / reversed_at / reversed_by / notices_sent_at) default
+-- NULL on insert. Setters land in P3.4 (markNoticesSent) and P3.6
+-- (rollback). See lib/audit/decisions.ts.
+CREATE TABLE IF NOT EXISTS decisions (
+  id TEXT PRIMARY KEY,
+  solve_ts TEXT NOT NULL,
+  operator TEXT NOT NULL,
+  inputs_hash TEXT NOT NULL,
+  inputs_json TEXT NOT NULL,
+  outputs_hash TEXT NOT NULL,
+  outputs_json TEXT NOT NULL,
+  executed_at TEXT,
+  reversed_at TEXT,
+  reversed_by TEXT,
+  notices_sent_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_decisions_solve_ts ON decisions(solve_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_decisions_operator ON decisions(operator);
+CREATE INDEX IF NOT EXISTS idx_decisions_inputs_hash ON decisions(inputs_hash);
+
 -- Task SIM.1 — Operator-drawn catastrophe simulations.
 -- Lifecycle: draft (drawn, preview only) → promoted (K=1000 cohort
 -- losses cached at artifacts/simulations/<id>.parquet) → retired
