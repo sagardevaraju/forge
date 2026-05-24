@@ -285,7 +285,14 @@ Datasheets-for-Datasets (Gebru et al. 2018) documentation.
 
 ## License
 
-- **Dataset + documentation:** CC-BY-4.0 (as declared in
-  [`docs/DATASET_CARD.md`](docs/DATASET_CARD.md) and `.zenodo.json`)
-- **Code:** no formal license declared yet — treat as
-  "all rights reserved" pending an explicit decision
+This repository dual-licenses its software and its data + documentation —
+see [`LICENSE`](LICENSE) for the full text.
+
+- **Software / source code** (TypeScript, Python, configuration, scripts):
+  [MIT License](https://opensource.org/licenses/MIT)
+- **Dataset and documentation** (synthetic policy book, scenario set,
+  `docs/`, `research.md`, `README.md`, Zenodo deposit at
+  [10.5281/zenodo.20368096](https://doi.org/10.5281/zenodo.20368096)):
+  [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)
+
+`SPDX-License-Identifier: MIT AND CC-BY-4.0`
