@@ -26,10 +26,16 @@
  * grammar so the page advertises its `data_source` consistently.
  */
 
+import { useState } from 'react';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
 import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
 import type { TrustTier } from '@/lib/grammar/trust-tiers';
-import type { TreatyStack, XSLayer, QSLayer } from '@/lib/treaty/types';
+import type {
+  TreatyStack,
+  XSLayer,
+  QSLayer,
+  FrontingLayer,
+} from '@/lib/treaty/types';
 
 // ---------------------------------------------------------------------------
 // Chart geometry — inline SVG, no chart-library dependency.
@@ -65,6 +71,10 @@ function roundToMillion(n: number): string {
 
 const QS_FILL = '#cbd5e1'; // slate-300
 const XS_FILLS = ['#34d399', '#10b981', '#047857', '#064e3b']; // emerald 400→900
+// Task P3.19 — fronting band: violet to distinguish from QS slate and
+// XS emerald. One color regardless of capital_provider; the data table
+// surfaces the provider tag explicitly.
+const FRONTING_FILL = '#a78bfa'; // violet-400
 
 function xsFill(idx: number): string {
   return XS_FILLS[Math.min(idx, XS_FILLS.length - 1)];
@@ -90,13 +100,24 @@ function dollarsToY(d: number, yMax: number): number {
 function LadderSvg({ stack, yMax }: LadderSvgProps) {
   const xsLayers = stack.layers.filter((l): l is XSLayer => l.type === 'xs');
   const qsLayer = stack.layers.find((l): l is QSLayer => l.type === 'qs') ?? null;
+  // Task P3.19 — fronting layer (at most one in the synthetic-demo
+  // ladder; the renderer would support multiple but the typed
+  // precompute emits at most one).
+  const frontingLayer =
+    stack.layers.find((l): l is FrontingLayer => l.type === 'fronting') ?? null;
 
-  // QS visual band — drawn as a fixed slice at the bottom of the column so
+  // Fronting visual band — bottom of the column when present, beneath
+  // the QS. Same fixed-band convention as QS: no dollar range, just a
+  // visible slice so the operator can see it.
+  const frontingBandHeight = frontingLayer ? Math.max(10, PLOT_H * 0.06) : 0;
+  const frontingY = PAD_T + PLOT_H - frontingBandHeight;
+
+  // QS visual band — drawn as a fixed slice ABOVE the fronting band so
   // the share is legible. It has no dollar range; the height is the share
   // times a visual budget of 12% of plot height to keep it from dominating
   // the column when there are few XS layers.
   const qsBandHeight = qsLayer ? Math.max(12, PLOT_H * 0.08) : 0;
-  const qsY = PAD_T + PLOT_H - qsBandHeight;
+  const qsY = frontingY - qsBandHeight;
 
   // Sort the XS layers from highest to lowest attachment so darker shades
   // (higher index in XS_FILLS) end up at the top of the column, matching
@@ -156,6 +177,64 @@ function LadderSvg({ stack, yMax }: LadderSvgProps) {
           </text>
         </g>
       ))}
+
+      {/* Fronting band — violet slice at the very bottom, beneath QS. */}
+      {frontingLayer && (
+        <g>
+          <rect
+            data-testid="treaty-band"
+            data-band-type="fronting"
+            data-residual-retention={String(frontingLayer.residual_retention_share)}
+            data-fronting-fee={String(frontingLayer.fronting_fee_share)}
+            data-capital-provider={String(frontingLayer.capital_provider)}
+            x={PAD_L + 4}
+            y={frontingY}
+            width={PLOT_W - 8}
+            height={frontingBandHeight}
+            fill={FRONTING_FILL}
+            fillOpacity={0.7}
+            stroke="#7c3aed"
+            strokeWidth={1}
+          >
+            <title>{`Fronting — ${Math.round(
+              (1 - frontingLayer.residual_retention_share) * 100,
+            )}% ceded to ${frontingLayer.capital_provider}, ${Math.round(
+              frontingLayer.residual_retention_share * 100,
+            )}% retained · ${Math.round(
+              frontingLayer.fronting_fee_share * 100,
+            )}% fronting fee`}</title>
+          </rect>
+          {/* Distinct testid overlay so tests can grab the fronting band
+              without filtering on attrs. */}
+          <rect
+            data-testid="treaty-band-fronting"
+            data-residual-retention={String(frontingLayer.residual_retention_share)}
+            data-fronting-fee={String(frontingLayer.fronting_fee_share)}
+            data-capital-provider={String(frontingLayer.capital_provider)}
+            x={PAD_L + 4}
+            y={frontingY}
+            width={PLOT_W - 8}
+            height={frontingBandHeight}
+            fill="transparent"
+            pointerEvents="none"
+          />
+          <text
+            x={PAD_L + PLOT_W / 2}
+            y={frontingY + frontingBandHeight / 2}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize={11}
+            fill="#1e1b4b"
+            fontWeight={500}
+          >
+            {`Fronting · ${Math.round(
+              (1 - frontingLayer.residual_retention_share) * 100,
+            )}% to ${frontingLayer.capital_provider} · fee ${Math.round(
+              frontingLayer.fronting_fee_share * 100,
+            )}%`}
+          </text>
+        </g>
+      )}
 
       {/* QS band — neutral slate slice at the bottom. Position only depends
           on the chart's geometry, not on the stack's dollar values. */}
@@ -352,6 +431,32 @@ function LayerTable({ layers }: LayerTableProps) {
               </tr>
             );
           }
+          if (layer.type === 'fronting') {
+            // Task P3.19 — fronting row. "Range / share" surfaces the
+            // cession share (1 - residual); "RoL" surfaces the
+            // fronting fee (the analogous premium-side rate);
+            // "Reinstatements" stays empty (fronting layers are
+            // continuous, not per-event-reinstating).
+            return (
+              <tr
+                key={`fronting-${idx}`}
+                data-testid="treaty-table-row-fronting"
+                className="border-b border-zinc-100"
+              >
+                <td className="py-1 pr-3 font-medium">Fronting</td>
+                <td className="py-1 pr-3">
+                  {`${Math.round(
+                    (1 - layer.residual_retention_share) * 100,
+                  )}% ceded to ${layer.capital_provider}`}
+                </td>
+                <td className="py-1 pr-3">{`${Math.round(
+                  layer.fronting_fee_share * 100,
+                )}% fee`}</td>
+                <td className="py-1 pr-3">—</td>
+                <td className="py-1 text-zinc-600">{layer.description ?? ''}</td>
+              </tr>
+            );
+          }
           return (
             <tr key={`xs-${idx}`} className="border-b border-zinc-100">
               <td className="py-1 pr-3 font-medium">XS</td>
@@ -381,17 +486,27 @@ export function TreatyLadder({ stack }: TreatyLadderProps) {
     stack.data_source === 'live' ? 'MODEL_OUTPUT' : 'SYNTHETIC_SCAFFOLD';
   const dataSourceLabel = stack.data_source === 'live' ? 'live' : 'synthetic_demo';
 
+  // Task P3.19 — fronting toggle. Operators sometimes want to see the
+  // ladder *as if* the fronting layer didn't exist (e.g. to compare
+  // gross-of-fronting versus net-of-fronting capital position). The
+  // toggle is client-side only — the underlying artifact is unchanged.
+  const hasFronting = stack.layers.some((l) => l.type === 'fronting');
+  const [showFronting, setShowFronting] = useState(true);
+  const visibleStack: TreatyStack = showFronting
+    ? stack
+    : { ...stack, layers: stack.layers.filter((l) => l.type !== 'fronting') };
+
   // Compute the dollar axis ceiling: round the max of (top exhaustion,
   // book_p99) up by 10% so neither hugs the top tick. `Math.round` collapses
   // the float artifact (e.g. 132_000_000.00000001 → 132_000_000) so server
   // and client agree on the SVG `<rect y=...>` attribute strings — without
   // it, React reports a hydration mismatch on the LadderSvg subtree.
-  const xsLayers = stack.layers.filter((l): l is XSLayer => l.type === 'xs');
+  const xsLayers = visibleStack.layers.filter((l): l is XSLayer => l.type === 'xs');
   const topExhaustion = xsLayers.length ? Math.max(...xsLayers.map((l) => l.exhaustion)) : 0;
-  const yMaxRaw = Math.max(topExhaustion, stack.book_p99, 1);
+  const yMaxRaw = Math.max(topExhaustion, visibleStack.book_p99, 1);
   const yMax = Math.round(yMaxRaw * 1.1);
 
-  if (stack.layers.length === 0) {
+  if (visibleStack.layers.length === 0) {
     // Honest empty-state — render the trust-tier badge so we don't drop the
     // grammar primitive even on empty data, but show a defensible message
     // instead of an empty SVG.
@@ -419,21 +534,36 @@ export function TreatyLadder({ stack }: TreatyLadderProps) {
       <div className="flex items-center gap-2">
         <h2 className="text-lg font-semibold">Treaty stack</h2>
         <TrustTierBadge tier={trustTier} />
+        {hasFronting && (
+          <label
+            data-testid="fronting-toggle"
+            className="ml-auto inline-flex items-center gap-1 text-xs text-zinc-700 cursor-pointer select-none"
+          >
+            <input
+              type="checkbox"
+              checked={showFronting}
+              onChange={(e) => setShowFronting(e.target.checked)}
+              data-testid="fronting-toggle-input"
+              className="accent-violet-500"
+            />
+            Show fronting
+          </label>
+        )}
       </div>
       <p className="text-xs text-zinc-600">
         Layer ladder, QS at the bottom plus each XS layer drawn from
         attachment to exhaustion. The dashed red line marks the carrier&rsquo;s
-        book p99 ({formatMoneyM(stack.book_p99)}); layers above it cover the
+        book p99 ({formatMoneyM(visibleStack.book_p99)}); layers above it cover the
         tail, layers below it provide working-loss relief.
       </p>
       <div className="border rounded bg-white p-3">
-        <LadderSvg stack={stack} yMax={yMax} />
+        <LadderSvg stack={visibleStack} yMax={yMax} />
       </div>
-      <LayerTable layers={stack.layers} />
+      <LayerTable layers={visibleStack.layers} />
       <ProvenanceFootnote
         source="artifacts/treaty.json"
         method="python -m scripts.precompute_treaty"
-        confidence={`data_source: ${dataSourceLabel} · generated ${stack.generated_at}`}
+        confidence={`data_source: ${dataSourceLabel} · generated ${visibleStack.generated_at}`}
       />
     </section>
   );

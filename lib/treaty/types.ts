@@ -39,10 +39,67 @@ export type XSLayer = {
   description?: string;
 };
 
-export type TreatyLayer = QSLayer | XSLayer;
+/**
+ * Task P3.19 — Fronting vehicle.
+ *
+ * A fronting layer represents an arrangement where a licensed-paper
+ * carrier (the "fronter") issues policies in jurisdictions where the
+ * actual risk-bearer can't write (admitted-only states, non-US
+ * domiciles, regulated lines). The fronter cedes the risk back to the
+ * underlying capital provider (typically a captive, sidecar, or ILS
+ * investor) for a fronting fee, and may retain a small residual slice
+ * for regulatory and tail-of-the-tail purposes.
+ *
+ * Math (per-dollar of inbound premium / loss):
+ *
+ *   ceded_to_capital   = (1 - residual_retention_share) · L
+ *   retained_by_fronter = residual_retention_share · L
+ *   fronting_fee_paid   = fronting_fee_share · P
+ *
+ * The fronting fee is a *premium* slice (not a loss slice) — it
+ * compensates the fronter for rented paper, separate from the residual
+ * loss retention. Total fronter compensation = fronting_fee_share · P.
+ *
+ * `capital_provider` tags the kind of vehicle absorbing the cession so
+ * downstream views can color / group fronting layers by provider type
+ * (captive vs sidecar vs ILS).
+ */
+export type FrontingLayer = {
+  type: 'fronting';
+  /**
+   * Fraction of inbound loss the fronter retains for its own account.
+   * Typical values: 0.05-0.10 (95-90% pure passthrough). 0 = pure
+   * conduit (regulator-allowed in some jurisdictions); 1 = no
+   * fronting at all (degenerate).
+   */
+  residual_retention_share: number;
+  /**
+   * Fraction of inbound *premium* paid to the fronter as a fronting
+   * fee. Typical values: 0.03-0.08. Distinct from the loss
+   * retention — even at 0% loss retention the fronter charges this
+   * fee for rented paper.
+   */
+  fronting_fee_share: number;
+  /**
+   * Tag for the underlying capital provider absorbing the cession.
+   * Used by the TreatyLadder to color the band and group rows in the
+   * data table.
+   */
+  capital_provider: 'captive' | 'sidecar' | 'ils' | 'other';
+  /** Human-readable description shown in the data table beneath the ladder. */
+  description?: string;
+};
+
+export type TreatyLayer = QSLayer | XSLayer | FrontingLayer;
 
 export interface TreatyStack {
-  schema_version: 1;
+  /**
+   * Schema version. Bumped to 2 in P3.19 to mark the addition of the
+   * `FrontingLayer` variant. Pre-P3.19 readers (`schema_version === 1`)
+   * are forward-compatible — they'll simply ignore any `type: 'fronting'`
+   * layer entries because their union doesn't include the variant.
+   */
+  schema_version: 1 | 2;
   /** ISO-8601 timestamp written by the precompute script. */
   generated_at: string;
   /**
