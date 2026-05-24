@@ -366,6 +366,51 @@ addressable inside the multiplier curve.
 
 ---
 
+## 6c. SCS (Severe Convective Storm) Monte-Carlo plug-in (Task P3.14)
+
+`ml/perils/scs.py` adds an `SCSPeril` subclass of `ml.perils.Peril` that
+produces Monte-Carlo hail-swath scenarios. Every scenario carries
+`peril = "hail"` so the canonical hail damage curves
+(`PERIL_SCALES.hail` + `_HAZUS_MATRIX[..]["hail"]`) drive loss compute
+without modification — the SCS peril id (`"scs"`) is family-level
+metadata and decouples the scenario distribution from any change to the
+damage curve. **Mirror invariant**: a 45 mm SCS scenario produces the
+same damage ratio as a hand-built hail footprint at 45 mm.
+
+**Stone-diameter distribution** — TORRO frequencies among severe-hail
+(≥ 25 mm) events, anchored at the NWS severe threshold (25.4 mm):
+
+| Bin (mm) | Landmark      | Fraction |
+|----------|---------------|----------|
+| 25-35    | quarter       | 0.55     |
+| 35-50    | nickel-golf   | 0.25     |
+| 50-70    | tennis ball   | 0.13     |
+| 70-100   | baseball      | 0.06     |
+| 100-120  | softball      | 0.01     |
+
+Source: TORRO H-scale frequencies (Webb 1986); reproduced in Brooks,
+Doswell & Kay (2003) Table 2 ("Climatological estimates of local daily
+tornado probability for the United States", *Weather and Forecasting*
+18, 626-640). The right tail (≥ 100 mm) is bounded by SPC report
+fractions per Allen, Tippett & Sobel (2017) *J. Clim* 30.
+
+**Geographic distribution** — Hail Alley bounding box from Brooks et al.
+(2003) Fig. 5 (peak SCS hail frequency over TX / OK / KS / NE / SD).
+Uniform-in-box draw — per-state Poisson intensities are out of scope for
+the v1 plug-in.
+
+**Annual climatology citation** — Smith, A.B. & Katz, R.W. (2013), "U.S.
+billion-dollar weather and climate disasters: data sources, trends,
+accuracy and biases", *Nat Hazards* 67, 387-410. Table 3 + Figure 3 put
+SCS at the plurality of US billion-dollar disasters by event count
+(≈ 20%, 26 of 133 events 1980-2011). The plug-in does **not** set the
+total event count — the precompute pipeline picks `n`; this module only
+shapes the per-event distribution.
+
+DOI: https://doi.org/10.1007/s11069-013-0566-5
+
+---
+
 ## 7. Portfolio MIP — loss prior calibration
 
 The Portfolio MIP solver (`api_py/optimize_portfolio.py::solve`) consumes a
@@ -1091,6 +1136,19 @@ the caller can switch from `(year, state, event_type)` to
 13. Insurance Information Institute — *Facts + Statistics: Winter Storms*
     (annual industry losses, per-claim severity, frozen-pipe frequency).
     https://www.iii.org/fact-statistic/facts-statistics-winter-storms
+14. Smith, A. B. & Katz, R. W. (2013). U.S. billion-dollar weather and
+    climate disasters: data sources, trends, accuracy and biases.
+    *Natural Hazards* 67, 387–410. (SCS share + climatology — Task P3.14.)
+    https://doi.org/10.1007/s11069-013-0566-5
+15. Brooks, H. E., Doswell, C. A., & Kay, M. P. (2003). Climatological
+    estimates of local daily tornado probability for the United States.
+    *Weather and Forecasting* 18, 626–640. (Hail Alley geography +
+    TORRO stone-diameter table reproduction — Task P3.14.)
+    https://journals.ametsoc.org/view/journals/wefo/18/4/1520-0434_2003_018_0626_ceoldt_2_0_co_2.xml
+16. Allen, J. T., Tippett, M. K., & Sobel, A. H. (2017). Influence of the
+    El Niño/Southern Oscillation on tornado and hail frequency in the
+    United States. *Journal of Climate* 30, 9-30. (SPC severe-hail
+    report distribution bounds — Task P3.14.)
 22. Rouse, J. W., Haas, R. H., Schell, J. A., & Deering, D. W. (1973).
     *Monitoring Vegetation Systems in the Great Plains with ERTS*.
     NASA Goddard Space Flight Center, Third ERTS-1 Symposium.
