@@ -14,7 +14,7 @@
  * ``beforeAll`` and DELETE'd between cases.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
-import { db } from '@/lib/db/client';
+import { unsafeExecute } from '@/lib/db/client';
 import {
   type AuditInput,
   appendAuditRow,
@@ -26,17 +26,19 @@ import {
 beforeAll(async () => {
   // Mirror the migration in ``lib/db/schema.sql`` so the test runs without a
   // separate ``npm run migrate``.
-  await db.execute(
+  await unsafeExecute(
     'CREATE TABLE IF NOT EXISTS chat_audit (id TEXT PRIMARY KEY, ts TEXT NOT NULL, user_id TEXT NOT NULL, prompt_hash TEXT NOT NULL, tool_calls_json TEXT NOT NULL, final_hash TEXT NOT NULL)',
   );
 });
 
 beforeEach(async () => {
-  await db.execute('DELETE FROM chat_audit');
+  // P3.7 WORM blocks DELETE on chat_audit via the wrapped `db.execute`.
+  // Test teardown is the privileged escape hatch.
+  await unsafeExecute('DELETE FROM chat_audit');
 });
 
 afterEach(async () => {
-  await db.execute('DELETE FROM chat_audit');
+  await unsafeExecute('DELETE FROM chat_audit');
 });
 
 function input(over: Partial<AuditInput> = {}): AuditInput {
