@@ -366,6 +366,65 @@ addressable inside the multiplier curve.
 
 ---
 
+## 6c. Freeze / Winter-Storm Monte-Carlo plug-in (Task P3.17)
+
+`ml/perils/freeze.py` adds a `FreezePeril` subclass that produces
+Monte-Carlo regional freeze-event scenarios. The plug-in id is
+``"freeze"`` (the meteorological cause — sustained hard-freeze events
+driving pipe burst, ice loading, HVAC failure); the *damage curve* it
+dispatches to is the canonical ``winter`` peril, which renders as
+**"Winter Storm"** in the operator UI per the convention in §6 +
+`PERIL_LABELS.winter`. Mirror invariant pinned in
+`test_freeze_loss_compute_uses_winter_curves`.
+
+**Per-event distributions:**
+
+- **WSSI severity** — distribution among industry-loss-bearing freeze
+  events (NWS WSSI archive 2018-2023, weighted by ≥ 1
+  commercial-loss-bearing event share). Non-damaging Limited/Minor
+  events dominate raw WSSI counts but contribute < 1% of industry
+  loss; the plug-in still emits them with their empirical frequency
+  so the lognormal tail of cohort loss can run end-to-end:
+
+  | Limited | Minor | Moderate | Major | Extreme |
+  |---------|-------|----------|-------|---------|
+  | 0.50    | 0.30  | 0.12     | 0.06  | 0.02    |
+
+- **Regional archetype** — discrete draw across three damaging-freeze
+  archetypes (NOAA ERA5 reanalysis 2014-2023 weighted by WSSI tier
+  counts):
+
+  | Archetype     | Share | Bbox / coverage              |
+  |---------------|-------|------------------------------|
+  | polar_vortex  | 0.35  | Plains/Midwest/Texas; multi-state |
+  | lake_effect   | 0.25  | Great Lakes belt              |
+  | ice_storm     | 0.40  | Southeast/Mid-Atlantic/lower Midwest |
+
+- **Footprint extent** — half-axis (degrees) scales with severity:
+
+  | Limited | Minor | Moderate | Major | Extreme |
+  |---------|-------|----------|-------|---------|
+  | 0.6     | 1.2   | 2.0      | 3.0   | 4.0     |
+
+  At lat 35° N the Extreme half-axis = ~ 800 km × 800 km, matching
+  Uri's reported affected area (TX + OK + LA + most of MS / AR / TN).
+
+**Calibration sources:**
+
+- NOAA / ECMWF ERA5 reanalysis — freeze-event frequency archive
+  https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5
+- NWS WSSI — operator-facing winter-storm severity scale
+  https://www.weather.gov/wssi/
+- Texas Department of Insurance (2022) — *Insured Losses Resulting
+  from the February 2021 Winter Weather Event*. The Uri Extreme-tier
+  anchor: $11.2 B insured loss, 510,772 claims, ≈ 0.45% statewide
+  mean DR, 5-15% in worst-hit ZIP3s — already cited in §6b for the
+  multiplier-tier rationale.
+- Karen Clark & Co. catastrophe estimate for Buffalo Dec 2022
+  ($5.4 B across 42 states) — also referenced in §6b.
+
+---
+
 ## 2d. Earthquake Monte-Carlo plug-in (Task P3.16)
 
 `ml/perils/eq.py` adds an `EQPeril` subclass that produces Monte-Carlo
