@@ -198,6 +198,49 @@ def _handle_cv_inference(payload: dict) -> int:
     return 0
 
 
+def _handle_pii_classify(payload: dict) -> int:
+    """Dispatch for the optional Presidio-backed PII classifier (Task P3.28a).
+
+    Request shape::
+
+        {"name": str, "values": [str, ...]}
+
+    Response shape (mirrors api_py.pii_classifier.classify return)::
+
+        {
+            "name_is_pii": bool,
+            "value_pii_detected": bool,
+            "value_entities": [str, ...],
+            "backend": "presidio" | "name_only",
+            "sample_size": int
+        }
+
+    Falls back to name-only mode when ``presidio-analyzer`` /
+    ``en_core_web_lg`` isn't installed — no install needed for the
+    route to respond. The ~100 MB Presidio install is opt-in for
+    ingestion teams that want value-level detection.
+    """
+    try:
+        from api_py.pii_classifier import classify
+    except Exception as e:  # noqa: BLE001
+        print(json.dumps({"error": f"import failed: {e}"}), flush=True)
+        sys.stderr.write(traceback.format_exc())
+        return 1
+    try:
+        name = str(payload.get("name", ""))
+        values = payload.get("values")
+        if values is not None and not isinstance(values, list):
+            print(json.dumps({"error": "values must be a list of strings"}))
+            return 1
+        result = classify(name=name, values=values)
+    except Exception as e:  # noqa: BLE001
+        print(json.dumps({"error": f"pii classify failed: {e}"}), flush=True)
+        sys.stderr.write(traceback.format_exc())
+        return 1
+    print(json.dumps(result))
+    return 0
+
+
 def main(target: str | None = None) -> int:
     # When called as `python -m api_py._solve_stdin <target>` the target
     # arrives as argv[1].  When called programmatically (tests), it can be
@@ -223,6 +266,8 @@ def main(target: str | None = None) -> int:
         return _handle_sim_loss(args)
     if resolved_target == "cv_inference":
         return _handle_cv_inference(args)
+    if resolved_target == "pii_classify":
+        return _handle_pii_classify(args)
 
     print(json.dumps({"error": f"unknown target: {resolved_target}"}))
     return 1
