@@ -126,10 +126,17 @@ def parse_epqs_response(payload: dict) -> float | None:
 def fetch_elevation(
     lat: float, lon: float, *, refresh: bool = False,
     session: requests.Session | None = None,
+    max_retries: int = 3,
 ) -> float | None:
     """Return the elevation in meters at ``(lat, lon)``, caching the
     JSON response under ``artifacts/elevations/.cache/`` for re-runs.
     Returns ``None`` for points outside the NED no-data footprint.
+
+    Retries up to ``max_retries`` times on transient transport errors
+    (``ReadTimeout``, ``ConnectionError``) with exponential backoff
+    (1 s, 2 s, 4 s, …).  Other ``requests`` exceptions and
+    ``ValueError`` from the parser propagate immediately — they
+    signal a code-level problem, not flaky network.
     """
     cache_p = _cache_path(lat, lon)
     if cache_p.exists() and not refresh:
@@ -139,11 +146,28 @@ def fetch_elevation(
     sess = session or requests
     params = {"x": lon, "y": lat, "units": "Meters",
               "wkid": 4326, "includeDate": "false"}
-    resp = sess.get(EPQS_URL, params=params, timeout=EPQS_TIMEOUT_S)
-    resp.raise_for_status()
-    payload = resp.json()
-    cache_p.write_text(json.dumps(payload))
-    return parse_epqs_response(payload)
+    last_err: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            resp = sess.get(EPQS_URL, params=params, timeout=EPQS_TIMEOUT_S)
+            resp.raise_for_status()
+            payload = resp.json()
+            cache_p.write_text(json.dumps(payload))
+            return parse_epqs_response(payload)
+        except (requests.ReadTimeout, requests.ConnectionError) as e:
+            last_err = e
+            if attempt < max_retries - 1:
+                backoff = 2 ** attempt
+                log.warning("EPQS transient error at (%.4f, %.4f) "
+                            "(attempt %d/%d): %s — retrying in %ds",
+                            lat, lon, attempt + 1, max_retries, e, backoff)
+                time.sleep(backoff)
+            else:
+                log.error("EPQS gave up at (%.4f, %.4f) after %d attempts: %s",
+                          lat, lon, max_retries, e)
+    # All retries exhausted.
+    raise last_err if last_err is not None else RuntimeError(
+        "fetch_elevation exhausted retries without an exception")
 
 
 # ── DB I/O ────────────────────────────────────────────────────────────────
