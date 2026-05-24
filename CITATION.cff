@@ -4,7 +4,7 @@ cff-version: 1.2.0
 message: "If you use FORGE in academic or industry research, please cite it as below."
 type: dataset
 title: "FORGE — Synthetic Policy Book + Multi-Peril Scenario Set"
-version: "0.1.0"
+version: "0.2.0"
 abstract: >
   FORGE is a scenario-coupled catastrophe-operations console for primary
   insurers and reinsurers. One Monte-Carlo scenario set drives three
