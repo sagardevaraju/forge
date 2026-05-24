@@ -78,20 +78,43 @@ def _load_book_p99() -> float:
     return DEFAULT_BOOK_P99
 
 
-def _build_layers(book_p99: float) -> list[dict[str, Any]]:
+def _build_layers(
+    book_p99: float,
+    include_fronting: bool = True,
+) -> list[dict[str, Any]]:
     """Construct the synthetic-demo layer ladder.
 
     Layout (bottom to top):
-      1. QS — 50% share. No reinstatements (the demo QS is a flat slice).
-      2. XS_1 — attaches at $20M, exhausts at $60M. RoL 10%. 1 reinstatement.
-      3. XS_2 — attaches at $60M, exhausts at $120M. RoL 6%. 2 reinstatements.
+      1. Fronting — 5% residual retention, 6% fronting fee, ceded to a
+         synthetic captive. Surfaces only when ``include_fronting`` is
+         True (Task P3.19 default).
+      2. QS — 50% share. No reinstatements (the demo QS is a flat slice).
+      3. XS_1 — attaches at $20M, exhausts at $60M. RoL 10%. 1 reinstatement.
+      4. XS_2 — attaches at $60M, exhausts at $120M. RoL 6%. 2 reinstatements.
 
     The attachment ladder is set in absolute dollars rather than relative
     to ``book_p99`` so a regenerated portfolio artifact doesn't quietly
     shift the layer geometry behind the view. We expose ``book_p99`` as a
     separate field so the view can draw a reference line.
     """
-    return [
+    layers: list[dict[str, Any]] = []
+    if include_fronting:
+        # Task P3.19 — synthetic fronting layer below the QS. Anchored on
+        # Aon Reinsurance Market Outlook 2024 §4.3 + Guy Carpenter
+        # "Fronting on the Rise" 2024: fronting-fee range 3-8% of
+        # premium; residual loss retention typically 5-10% (regulators
+        # generally disallow pure 0% conduits outside specific captives).
+        layers.append({
+            "type": "fronting",
+            "residual_retention_share": 0.05,
+            "fronting_fee_share": 0.06,
+            "capital_provider": "captive",
+            "description": (
+                "Fronting — 95% ceded to captive, 5% retained by fronter; "
+                "6% fronting fee on premium."
+            ),
+        })
+    layers.extend([
         {
             "type": "qs",
             "share": 0.50,
@@ -114,14 +137,19 @@ def _build_layers(book_p99: float) -> list[dict[str, Any]]:
             "reinstatements_remaining": 2,
             "description": "Cat XS layer — $60M xs $60M.",
         },
-    ]
+    ])
+    return layers
 
 
 def main() -> None:
+    # Task P3.19 — CLI flag for opting out of the fronting layer. Default
+    # is to include it (matches the synthetic-demo convention used by
+    # every other treaty surface).
+    include_fronting = "--no-fronting" not in sys.argv
     book_p99 = _load_book_p99()
-    layers = _build_layers(book_p99)
+    layers = _build_layers(book_p99, include_fronting=include_fronting)
     payload: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,  # P3.19 bumped to 2 with FrontingLayer added
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "data_source": "synthetic_demo",
         "book_p99": book_p99,
@@ -131,10 +159,13 @@ def main() -> None:
     ARTIFACTS_DIR.mkdir(exist_ok=True)
     OUT_PATH.write_text(json.dumps(payload, separators=(",", ":")))
     size = os.path.getsize(OUT_PATH)
+    n_qs = sum(1 for l in layers if l["type"] == "qs")
+    n_xs = sum(1 for l in layers if l["type"] == "xs")
+    n_fr = sum(1 for l in layers if l["type"] == "fronting")
     print(f"Wrote {OUT_PATH.relative_to(ROOT)}  ({size:,} bytes)")
     print(f"  data_source: synthetic_demo")
     print(f"  book_p99:    ${book_p99:,.0f}")
-    print(f"  layers:      {len(layers)} (1 QS + {sum(1 for l in layers if l['type'] == 'xs')} XS)")
+    print(f"  layers:      {len(layers)} ({n_fr} fronting + {n_qs} QS + {n_xs} XS)")
 
 
 if __name__ == "__main__":

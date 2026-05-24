@@ -76,3 +76,72 @@ def ceded_xs(loss: float, attachment: float, exhaustion: float) -> float:
     treaty configurator). Not required by the P2.7 MIP path.
     """
     return max(0.0, min(loss, exhaustion) - attachment)
+
+
+# ── Task P3.19 — Fronting vehicle ─────────────────────────────────────────
+#
+# A fronting layer represents an arrangement where a licensed-paper
+# carrier (the "fronter") issues policies in jurisdictions where the
+# actual risk-bearer can't write, and cedes the risk back to a capital
+# provider (typically a captive, sidecar, or ILS investor) for a
+# fronting fee. The fronter may retain a small residual slice
+# (``residual_retention_share``) for regulatory + tail-of-the-tail
+# purposes; the cession ``(1 − residual_retention_share)`` flows to
+# the capital provider. The fronting fee is a *premium* slice —
+# separate from the loss retention — and compensates the fronter for
+# rented paper. Typical industry: 3-8% fronting fee, 5-10% residual
+# retention.
+
+
+def _clamp_share(s: float) -> float:
+    if s < 0.0:
+        return 0.0
+    if s > 1.0:
+        return 1.0
+    return s
+
+
+def retained_fronting(loss: float, residual_retention_share: float) -> float:
+    """Return the fronter's retained loss under a fronting arrangement.
+
+    The fronter keeps ``residual_retention_share · loss``; the rest is
+    ceded to the underlying capital provider.
+
+    Parameters
+    ----------
+    loss
+        Inbound loss in dollars (non-negative).
+    residual_retention_share
+        Fraction in ``[0, 1]`` the fronter retains. 0 = pure conduit
+        (allowed in some jurisdictions); 1 = no fronting at all
+        (degenerate). Out-of-range inputs are clamped at write time.
+    """
+    return max(0.0, loss) * _clamp_share(residual_retention_share)
+
+
+def ceded_fronting(loss: float, residual_retention_share: float) -> float:
+    """Return the loss ceded to the capital provider via fronting.
+
+    Complement of :func:`retained_fronting`:
+    ``(1 − residual_retention_share) · loss``.
+    """
+    return max(0.0, loss) * (1.0 - _clamp_share(residual_retention_share))
+
+
+def fronting_fee(premium: float, fronting_fee_share: float) -> float:
+    """Return the fronting fee paid to the fronter (premium slice).
+
+    Distinct from the loss retention — even at 0% loss retention the
+    fronter charges this fee for rented paper. Typical industry range:
+    3-8% of inbound premium.
+    """
+    return max(0.0, premium) * _clamp_share(fronting_fee_share)
+
+
+__all__ = [
+    "retained_xs",
+    "ceded_xs",
+    "retained_fronting",
+    "ceded_fronting",
+    "fronting_fee",
+]
