@@ -69,6 +69,29 @@ Acceptance criteria (per plan)
   risk_measure='tvar_99')`` on the same input. Pinned in
   ``tests/api/test_optimize_portfolio_cg_tvar.py``.
 
+Parallel cluster solves
+-----------------------
+The per-cluster subproblem is pure-Python arithmetic (no CBC, no
+numpy in the hot path), so threads are GIL-bound and offer no
+speedup. The ``n_workers`` parameter on :func:`solve_cg`, when set
+above 1, dispatches the per-iteration cluster solves to a
+:class:`concurrent.futures.ProcessPoolExecutor` for true CPU
+parallelism. Clusters are partitioned into ``n_workers`` contiguous
+batches per iteration so the per-task pickle/spawn overhead is
+amortized across many clusters. The pool spans the full subgradient
+loop (created once, reused per iteration) for the same reason.
+
+The parallel path is mathematically identical to the sequential one
+— each cluster's subproblem is independent given the current
+multipliers, and ``_aggregate`` is order-invariant. The pin in
+``tests/api/test_optimize_portfolio_cg_parallel.py`` is exact
+allocation + objective match against the sequential baseline.
+
+Default ``n_workers=None`` keeps the current sequential path
+bit-for-bit identical. Small books or short subgradient runs may
+*regress* under ``n_workers > 1`` because the spawn cost dwarfs the
+per-iteration work — measure before flipping the switch.
+
 Warm-starting
 -------------
 Each call to :func:`solve_cg` reports the final Lagrangian multipliers
@@ -383,6 +406,73 @@ def _solve_cluster_subproblem(
     return assignment
 
 
+def _solve_cluster_batch(
+    batch: list[tuple[str, list[dict[str, Any]]]],
+    *,
+    lambda_capital: float,
+    lambda_cession: float,
+    lambda_nonrenew: float,
+    tvar_coeffs: TvarCoeffs | None = None,
+) -> dict[str, str]:
+    """Solve a contiguous chunk of clusters at the current multipliers.
+
+    Module-level (not nested) so :class:`ProcessPoolExecutor` can
+    pickle it on ``spawn``-method pools (the macOS / Windows default
+    on Python 3.13). Returns the merged cohort-id → action_name
+    mapping for every cluster in the batch.
+
+    Used by :func:`solve_cg`'s parallel path; the sequential path
+    calls :func:`_solve_cluster_subproblem` directly inline. Both
+    paths produce mathematically identical output for the same
+    inputs — the only difference is concurrency.
+    """
+    merged: dict[str, str] = {}
+    for _cluster_id, cluster in batch:
+        merged.update(
+            _solve_cluster_subproblem(
+                cluster,
+                lambda_capital=lambda_capital,
+                lambda_cession=lambda_cession,
+                lambda_nonrenew=lambda_nonrenew,
+                tvar_coeffs=tvar_coeffs,
+            )
+        )
+    return merged
+
+
+def _partition_clusters_into_batches(
+    clusters: dict[str, list[dict[str, Any]]],
+    n_workers: int,
+) -> list[list[tuple[str, list[dict[str, Any]]]]]:
+    """Split clusters into ``n_workers`` contiguous batches.
+
+    Sorting by cluster id makes the partition deterministic across
+    runs (Python dicts preserve insertion order, but we don't want
+    parallelism behaviour to depend on the caller's cohort
+    ordering). Each batch carries ``(cluster_id, cluster_cohorts)``
+    pairs so the worker can recover the full subproblem without
+    needing the outer dict.
+
+    Returns fewer than ``n_workers`` batches when there are fewer
+    clusters than workers — natural and harmless.
+    """
+    sorted_items = sorted(clusters.items())
+    if n_workers <= 1 or len(sorted_items) <= 1:
+        return [sorted_items]
+    n_batches = min(n_workers, len(sorted_items))
+    # Even split with the remainder spread across the first few
+    # batches (numpy.array_split semantics, hand-rolled to avoid the
+    # import in this hot module).
+    per_batch, extras = divmod(len(sorted_items), n_batches)
+    batches: list[list[tuple[str, list[dict[str, Any]]]]] = []
+    start = 0
+    for i in range(n_batches):
+        size = per_batch + (1 if i < extras else 0)
+        batches.append(sorted_items[start : start + size])
+        start += size
+    return batches
+
+
 def _aggregate(
     assignment: dict[str, str],
     cohorts_by_id: dict[str, dict[str, Any]],
@@ -473,6 +563,7 @@ def solve_cg(
     convergence_tol: float = 1e-3,
     feasibility_tol: float = 1e-3,
     initial_multipliers: dict[str, float] | None = None,
+    n_workers: int | None = None,
 ) -> dict[str, Any]:
     """Column-generation prototype solve for the portfolio MIP.
 
@@ -497,6 +588,13 @@ def solve_cg(
     ``cession``, ``nonrenew``. Missing keys default to 0.0; negative
     values are rejected (KKT). Default ``None`` preserves the cold-
     start behaviour bit-for-bit.
+
+    ``n_workers`` (optional) dispatches the per-iteration cluster
+    solves to a :class:`ProcessPoolExecutor` of that size. Default
+    ``None`` (or ``<= 1``) runs sequential — bit-for-bit identical to
+    the pre-parallel behaviour and zero overhead. See the
+    "Parallel cluster solves" section of the module docstring for
+    when this is worth flipping.
 
     When ``risk_measure='tvar_99'`` the result dict additionally
     carries ``tvar_99_used: True`` and ``tvar_99_per_cohort``
@@ -552,68 +650,109 @@ def solve_cg(
     best_profit = float("-inf")
     iterations = 0
 
-    for it in range(max_iterations):
-        iterations = it + 1
-        # Subproblem solve per cluster (independent).
-        full_assignment: dict[str, str] = {}
-        for cluster_id, cluster in clusters.items():
-            sub = _solve_cluster_subproblem(
-                cluster,
-                lambda_capital=lam_cap,
-                lambda_cession=lam_cession,
-                lambda_nonrenew=lam_nr,
-                tvar_coeffs=tvar_coeffs,
+    # Parallel cluster dispatch is opt-in. The default `None` (or any
+    # value ≤ 1) keeps the legacy sequential path bit-for-bit
+    # identical and pays zero spawn cost. When `n_workers > 1` we
+    # create one pool spanning every iteration of the subgradient
+    # loop so the spawn cost amortizes across the full solve. Pool
+    # shutdown happens automatically on exit from the `with` block.
+    use_pool = n_workers is not None and n_workers > 1 and len(clusters) > 1
+    pool_cm: Any
+    if use_pool:
+        import concurrent.futures
+
+        pool_cm = concurrent.futures.ProcessPoolExecutor(max_workers=n_workers)
+    else:
+        # Lightweight nullcontext stand-in so the for-loop below can
+        # uniformly use `with pool_cm as executor` and branch only on
+        # `use_pool` for the actual dispatch.
+        import contextlib
+
+        pool_cm = contextlib.nullcontext(None)
+
+    with pool_cm as executor:
+        for it in range(max_iterations):
+            iterations = it + 1
+            # Subproblem solve per cluster (independent given the
+            # current Lagrangian multipliers).
+            full_assignment: dict[str, str] = {}
+            if use_pool:
+                # Partition once per iteration — multipliers change,
+                # so each iteration is a fresh dispatch round.
+                assert n_workers is not None
+                batches = _partition_clusters_into_batches(clusters, n_workers)
+                futures = [
+                    executor.submit(  # type: ignore[union-attr]
+                        _solve_cluster_batch,
+                        batch,
+                        lambda_capital=lam_cap,
+                        lambda_cession=lam_cession,
+                        lambda_nonrenew=lam_nr,
+                        tvar_coeffs=tvar_coeffs,
+                    )
+                    for batch in batches
+                ]
+                for fut in futures:
+                    full_assignment.update(fut.result())
+            else:
+                for cluster_id, cluster in clusters.items():
+                    sub = _solve_cluster_subproblem(
+                        cluster,
+                        lambda_capital=lam_cap,
+                        lambda_cession=lam_cession,
+                        lambda_nonrenew=lam_nr,
+                        tvar_coeffs=tvar_coeffs,
+                    )
+                    full_assignment.update(sub)
+
+            # Aggregate + check global constraints.
+            agg = _aggregate(full_assignment, cohorts_by_id, tvar_coeffs=tvar_coeffs)
+            cap_slack = agg["capital"] - capital_budget
+            cession_slack = agg["cession"] - cession_budget
+            nr_slack = agg["nonrenew_tiv"] - nonrenew_cap
+
+            # Feasibility tolerance lets the Lagrangian subgradient settle
+            # at a slight over-budget point when the binding constraint
+            # boundary causes oscillation between two action mixes — same
+            # convention as the existing test pinning capital_used ≤
+            # capital_budget × 1.001 (0.1 %) in
+            # test_cg_respects_global_capital_budget_when_feasible. The
+            # monolithic CBC solver carries its own ε too.
+            cap_tol = capital_budget * feasibility_tol
+            cession_tol = cession_budget * feasibility_tol
+            nr_tol = nonrenew_cap * feasibility_tol
+            feasible = (
+                cap_slack <= cap_tol
+                and cession_slack <= cession_tol
+                and nr_slack <= nr_tol
             )
-            full_assignment.update(sub)
+            if feasible and agg["profit"] > best_profit:
+                best_profit = agg["profit"]
+                best_assignment = dict(full_assignment)
 
-        # Aggregate + check global constraints.
-        agg = _aggregate(full_assignment, cohorts_by_id, tvar_coeffs=tvar_coeffs)
-        cap_slack = agg["capital"] - capital_budget
-        cession_slack = agg["cession"] - cession_budget
-        nr_slack = agg["nonrenew_tiv"] - nonrenew_cap
+            # Subgradient update — bump multiplier by max(0, slack) · step.
+            # Step size is small enough to prevent oscillation on the 10-
+            # cohort toy. Multipliers stay non-negative (KKT).
+            bumped = False
+            if cap_slack > 0 and capital_budget > 0:
+                lam_cap += step_size * (cap_slack / capital_budget)
+                bumped = True
+            if cession_slack > 0 and cession_budget > 0:
+                lam_cession += step_size * (cession_slack / cession_budget)
+                bumped = True
+            if nr_slack > 0 and nonrenew_cap > 0:
+                lam_nr += step_size * (nr_slack / nonrenew_cap)
+                bumped = True
 
-        # Feasibility tolerance lets the Lagrangian subgradient settle
-        # at a slight over-budget point when the binding constraint
-        # boundary causes oscillation between two action mixes — same
-        # convention as the existing test pinning capital_used ≤
-        # capital_budget × 1.001 (0.1 %) in
-        # test_cg_respects_global_capital_budget_when_feasible. The
-        # monolithic CBC solver carries its own ε too.
-        cap_tol = capital_budget * feasibility_tol
-        cession_tol = cession_budget * feasibility_tol
-        nr_tol = nonrenew_cap * feasibility_tol
-        feasible = (
-            cap_slack <= cap_tol
-            and cession_slack <= cession_tol
-            and nr_slack <= nr_tol
-        )
-        if feasible and agg["profit"] > best_profit:
-            best_profit = agg["profit"]
-            best_assignment = dict(full_assignment)
-
-        # Subgradient update — bump multiplier by max(0, slack) · step.
-        # Step size is small enough to prevent oscillation on the 10-
-        # cohort toy. Multipliers stay non-negative (KKT).
-        bumped = False
-        if cap_slack > 0 and capital_budget > 0:
-            lam_cap += step_size * (cap_slack / capital_budget)
-            bumped = True
-        if cession_slack > 0 and cession_budget > 0:
-            lam_cession += step_size * (cession_slack / cession_budget)
-            bumped = True
-        if nr_slack > 0 and nonrenew_cap > 0:
-            lam_nr += step_size * (nr_slack / nonrenew_cap)
-            bumped = True
-
-        # Early stop when we've found a feasible solution and the
-        # subgradient produced no further bump (constraints already
-        # tight enough).
-        if feasible and not bumped:
-            break
-        # Or when relative change is tiny.
-        if it > 0 and abs(cap_slack) / max(capital_budget, 1.0) < convergence_tol:
-            if feasible:
+            # Early stop when we've found a feasible solution and the
+            # subgradient produced no further bump (constraints already
+            # tight enough).
+            if feasible and not bumped:
                 break
+            # Or when relative change is tiny.
+            if it > 0 and abs(cap_slack) / max(capital_budget, 1.0) < convergence_tol:
+                if feasible:
+                    break
 
     solver_mode = "column_generation_prototype"
 
