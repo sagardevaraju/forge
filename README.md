@@ -158,8 +158,6 @@ LLM_FALLBACK_MODEL=gpt-4o
 LLM_RETRY_MAX=3
 LLM_RETRY_BASE_MS=500
 
-NEXT_PUBLIC_MAPBOX_TOKEN=  # optional — needed for the Mapbox basemap style
-
 NASA_FIRMS_KEY=            # optional — without it, fires use mock data
 NOAA_NCEI_TOKEN=
 

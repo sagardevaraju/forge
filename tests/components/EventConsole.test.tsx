@@ -8,9 +8,11 @@
  * column. Children of the stubbed Map render flat, so the cone Source and
  * fire-points Source both materialize as test-id nodes.
  *
- * The component imports `react-map-gl/maplibre`; we mock both that entry and
- * the legacy `react-map-gl/mapbox` so the file is resilient against a future
- * rebase that flips the renderer back.
+ * The component imports `react-map-gl/maplibre`; we mock that entry plus the
+ * companion `react-map-gl/mapbox` defensive stub so the test file is
+ * resilient against an accidental future import. Mapbox itself is banned
+ * from FORGE (paid service) — the basemap is unconditionally MapLibre +
+ * OpenFreeMap; these stubs only guard the import path.
  */
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import { render, screen, within, cleanup } from '@testing-library/react';
@@ -42,9 +44,6 @@ vi.mock('react-map-gl/mapbox', () => ({
 }));
 vi.mock('maplibre-gl/dist/maplibre-gl.css', () => ({}));
 vi.mock('mapbox-gl/dist/mapbox-gl.css', () => ({}));
-
-// Force the Mapbox-rendered branch so the summary card mounts on top.
-process.env.NEXT_PUBLIC_MAPBOX_TOKEN = 'pk.test.token';
 
 import { EventConsole } from '@/components/EventConsole';
 import type { ConeExposureCohort } from '@/components/ConeExposureBars';
