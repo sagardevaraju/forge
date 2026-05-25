@@ -38,8 +38,6 @@ const SCALE = [
 
 interface Props {
   aggregates: StateAggregate[];
-  /** Optional Mapbox / MapLibre token. Defaults to OpenFreeMap. */
-  mapboxToken?: string;
   /** Encoded metric — defaults to `total_tiv`. */
   metric?: 'total_tiv' | 'total_premium' | 'policy_count';
   /** Optional click handler — receives the iso_code of the clicked state. */
@@ -89,7 +87,6 @@ function buildFillPaint(
 
 export function PortfolioChoropleth({
   aggregates,
-  mapboxToken,
   metric = 'total_tiv',
   onStateClick,
 }: Props) {
@@ -98,11 +95,11 @@ export function PortfolioChoropleth({
 
   useEffect(() => {
     if (!mapContainer.current) return;
+    // OpenFreeMap is the canonical basemap — free, MapLibre-compatible,
+    // no token, no metering. Never swap this for a Mapbox URL.
     const map = new maplibregl.Map({
       container: mapContainer.current,
-      style: mapboxToken
-        ? `https://api.mapbox.com/styles/v1/mapbox/light-v11?access_token=${mapboxToken}`
-        : 'https://tiles.openfreemap.org/styles/positron',
+      style: 'https://tiles.openfreemap.org/styles/positron',
       center: [-98.0, 39.0],   // continental US center
       zoom: 3,
       attributionControl: false,
@@ -140,7 +137,7 @@ export function PortfolioChoropleth({
       map.remove();
       mapRef.current = null;
     };
-  }, [aggregates, mapboxToken, metric, onStateClick]);
+  }, [aggregates, metric, onStateClick]);
 
   // Legend: render a tiny side panel showing the 6 bins.
   const legendBuckets = SCALE.map((color, idx) => (

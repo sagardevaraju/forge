@@ -6,7 +6,8 @@
  * Task P2.23 — Cone uncertainty band from GEFS perturbation.
  *
  * Two-column layout for the active-event view:
- *   - Left: Mapbox base layer with the NHC cone polygon and FIRMS active-fire
+ *   - Left: MapLibre base layer (OpenFreeMap tiles — see MapBase) with the
+ *     NHC cone polygon and FIRMS active-fire
  *     point markers overlaid as separate GeoJSON sources. A small floating
  *     summary card shows the advisory number, peak wind, and fire count so
  *     operators get the headline numbers without scanning the map. A second

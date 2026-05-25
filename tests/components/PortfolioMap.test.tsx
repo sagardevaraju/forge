@@ -1,9 +1,11 @@
 /**
  * Task 20 — PortfolioMap aggregation and drill-down behavior.
  *
- * react-map-gl is mocked so the suite runs in jsdom (no WebGL) and so we
- * can assert on the data wired into the legend and the GeoJSON source
- * without needing a real Mapbox instance.
+ * react-map-gl/maplibre is mocked so the suite runs in jsdom (no WebGL)
+ * and so we can assert on the data wired into the legend and the GeoJSON
+ * source without needing a real map instance. Mapbox is banned from
+ * FORGE (paid service) — the production basemap is unconditionally
+ * MapLibre + OpenFreeMap.
  */
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, cleanup, within } from '@testing-library/react';
@@ -11,7 +13,6 @@ import type { Cohort } from '@/lib/db/cohorts';
 
 // Stub react-map-gl/maplibre so we render plain DOM nodes in jsdom. Each Map,
 // Source and Layer becomes a div so children (the legend) still mount.
-// Task 19 swapped Mapbox for MapLibre; this mock was updated in Task 26.
 vi.mock('react-map-gl/maplibre', () => ({
   __esModule: true,
   default: ({ children }: { children?: React.ReactNode }) => (
@@ -41,9 +42,6 @@ vi.mock('react-map-gl/maplibre', () => ({
 
 // Also stub the CSS import — vitest can't parse it via the jsdom transform.
 vi.mock('maplibre-gl/dist/maplibre-gl.css', () => ({}));
-
-// Force the fallback-free path so the legend renders on top of the map shell.
-process.env.NEXT_PUBLIC_MAPBOX_TOKEN = 'pk.test.token';
 
 import { PortfolioMap } from '@/components/PortfolioMap';
 import { PortfolioDrillDown } from '@/components/PortfolioDrillDown';
