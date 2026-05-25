@@ -227,6 +227,14 @@ and the FORGE GitHub repository.
 
 ## Release history
 
+- **v0.2.1** — 2026-05-25 — Real-elevation portfolio MIP artifact.
+  First release where the committed `artifacts/portfolio_optimization.json`
+  reflects real USGS NED elevations end-to-end (9,993 / 10,000
+  policies). Mean cohort `avg_elevation_m` shifts 2.79 m → 74.50 m;
+  MIP objective +1.46 %, book p99 −9.37 %, action mix shifts toward
+  `reprice_p20` and away from `non_renew`. See
+  [`docs/releases/v0.2.1.md`](releases/v0.2.1.md) · DOI: minted on
+  tag push.
 - **v0.2.0** — 2026-05-24 — AUDIT.3 calibration release. NHC OFCL
   forecast-error climatology drives perturbation σ; HURDAT2-sampled
   seed tracks replace the hand-tabulated `_DEMO_TRACK_*` literals;
