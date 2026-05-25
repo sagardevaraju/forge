@@ -112,12 +112,33 @@ they have data for. Negative warm-start values are rejected — KKT
 constrains the multipliers to be non-negative; a negative seed would
 push the subgradient in the wrong direction.
 
+Rockafellar-Uryasev joint book TVaR
+-----------------------------------
+``tvar_aggregation='rockafellar_uryasev'`` switches the CG path from
+its cluster-decomposed per-cohort-TVaR-sum approximation to the
+**exact joint book TVaR-99** via the Rockafellar & Uryasev (2000)
+auxiliary-variable formulation in the monolithic ``_build_problem``.
+The cluster-decomposed Lagrangian relaxation doesn't apply cleanly
+here — the R-U auxiliary variables (``α`` scalar + K per-scenario
+``z_s``) couple scenarios across *every* cohort, breaking the
+cluster-independence assumption the subgradient loop relies on.
+
+So under R-U the CG prototype routes directly to its existing
+LP-master fallback path: build the full LP relaxation (now with the
+R-U capital constraints in place of the per-cohort-sum block) via
+``_build_problem(binary=False, tvar_aggregation='rockafellar_uryasev')``,
+solve via PuLP/CBC, and project to integer via argmax per cohort.
+The subgradient loop is bypassed and ``solver_mode`` reports
+``column_generation_lp_master_ru``. Honest reflection of the
+prototype's scope — the decomposition was designed for the additive
+formulation; R-U falls back to the LP master rather than pretending
+to decompose what doesn't decompose.
+
 Scope notes
 -----------
 - **Prototype only.** The CG solver is NOT a drop-in replacement for
-  ``solve()``. Use it as a research vehicle for scaling experiments
-  (remaining followups: parallel cluster solves, true per-scenario
-  book-level TVaR via R-U auxiliary variables).
+  ``solve()``. The R-U path is the same monolithic LP under the
+  hood — research vehicle, not a production speedup.
 - **Single-period only.** No multi-period reinstatement state.
 """
 
@@ -136,6 +157,7 @@ from api_py.optimize_portfolio import (
     LOSS_FACTOR,
     CESSION_COST_RATE,
     REPRICE_FACTOR,
+    TVAR_AGGREGATIONS,
     _build_problem,
     _cohort_premium,
     _cohort_tiv,
@@ -564,6 +586,7 @@ def solve_cg(
     feasibility_tol: float = 1e-3,
     initial_multipliers: dict[str, float] | None = None,
     n_workers: int | None = None,
+    tvar_aggregation: str = "per_cohort_sum",
 ) -> dict[str, Any]:
     """Column-generation prototype solve for the portfolio MIP.
 
@@ -596,10 +619,20 @@ def solve_cg(
     "Parallel cluster solves" section of the module docstring for
     when this is worth flipping.
 
+    ``tvar_aggregation`` (optional) picks the TVaR-99 roll-up form
+    when ``risk_measure='tvar_99'``. ``'per_cohort_sum'`` (default)
+    runs the existing cluster-decomposed Lagrangian path.
+    ``'rockafellar_uryasev'`` switches to the exact joint book
+    TVaR-99 via R-U auxiliary variables — but R-U couples scenarios
+    across cohorts and breaks the cluster decomposition, so the CG
+    prototype routes that case directly to its LP-master fallback
+    (``solver_mode='column_generation_lp_master_ru'``). Ignored
+    when ``risk_measure='var_99'``.
+
     When ``risk_measure='tvar_99'`` the result dict additionally
-    carries ``tvar_99_used: True`` and ``tvar_99_per_cohort``
-    (cohort-id → TVaR-99 scalar) for traceability — matching the
-    monolithic result shape.
+    carries ``tvar_99_used: True``, ``tvar_99_per_cohort``
+    (cohort-id → TVaR-99 scalar) for traceability, and
+    ``tvar_aggregation_used`` — matching the monolithic result shape.
 
     The result dict *always* carries ``final_multipliers`` — the
     Lagrangian multipliers the subgradient loop landed on (or the
@@ -610,9 +643,11 @@ def solve_cg(
     Raises
     ------
     ValueError
-        If ``cohorts`` is empty, ``risk_measure`` is unknown, or
-        ``initial_multipliers`` contains an unknown key / negative
-        value.
+        If ``cohorts`` is empty, ``risk_measure`` /
+        ``tvar_aggregation`` is unknown, ``initial_multipliers``
+        contains an unknown key / negative value, or
+        ``tvar_aggregation='rockafellar_uryasev'`` is combined with
+        ``risk_measure != 'tvar_99'``.
     """
     if not cohorts:
         raise ValueError("solve_cg: cohorts list is empty")
@@ -621,6 +656,22 @@ def solve_cg(
             f"solve_cg: unknown risk_measure={risk_measure!r}; "
             f"expected 'var_99' or 'tvar_99'"
         )
+    if tvar_aggregation not in TVAR_AGGREGATIONS:
+        raise ValueError(
+            f"solve_cg: unknown tvar_aggregation={tvar_aggregation!r}; "
+            f"expected one of {TVAR_AGGREGATIONS}"
+        )
+    if tvar_aggregation == "rockafellar_uryasev" and risk_measure != "tvar_99":
+        raise ValueError(
+            "solve_cg: tvar_aggregation='rockafellar_uryasev' requires "
+            "risk_measure='tvar_99' (R-U is a TVaR aggregation, not a "
+            "separate risk measure)"
+        )
+
+    use_ru = (
+        risk_measure == "tvar_99"
+        and tvar_aggregation == "rockafellar_uryasev"
+    )
 
     start = time.time()
     cohorts_by_id = {str(c["id"]): c for c in cohorts}
@@ -634,8 +685,14 @@ def solve_cg(
     # once up front because the loss_scenarios distribution doesn't
     # change between subgradient iterations.
     use_tvar = risk_measure == "tvar_99"
+    # Per-cohort-sum precompute is only used by the cluster-
+    # decomposed subgradient path. R-U couples scenarios across
+    # cohorts so the precomputed per-cohort scalars don't apply —
+    # the LP-master block below builds R-U from scratch.
     tvar_coeffs: TvarCoeffs | None = (
-        _precompute_tvar_coefficients(cohorts) if use_tvar else None
+        _precompute_tvar_coefficients(cohorts)
+        if (use_tvar and not use_ru)
+        else None
     )
 
     # Initial multipliers — cold-start at 0 (no penalty); the
@@ -650,13 +707,27 @@ def solve_cg(
     best_profit = float("-inf")
     iterations = 0
 
+    # R-U bypass: scenarios couple across cohorts, so the cluster-
+    # decomposed subgradient doesn't apply. Skip straight to the
+    # LP-master block below by leaving `best_assignment = None` and
+    # `iterations = 0`. The LP-master then calls `_build_problem`
+    # with `tvar_aggregation='rockafellar_uryasev'` so the auxiliary
+    # α + z_s variables enter the LP.
+    full_assignment: dict[str, str] = {}
+
     # Parallel cluster dispatch is opt-in. The default `None` (or any
     # value ≤ 1) keeps the legacy sequential path bit-for-bit
     # identical and pays zero spawn cost. When `n_workers > 1` we
     # create one pool spanning every iteration of the subgradient
     # loop so the spawn cost amortizes across the full solve. Pool
     # shutdown happens automatically on exit from the `with` block.
-    use_pool = n_workers is not None and n_workers > 1 and len(clusters) > 1
+    # Disabled under R-U (no subgradient loop to parallelise).
+    use_pool = (
+        n_workers is not None
+        and n_workers > 1
+        and len(clusters) > 1
+        and not use_ru
+    )
     pool_cm: Any
     if use_pool:
         import concurrent.futures
@@ -671,11 +742,16 @@ def solve_cg(
         pool_cm = contextlib.nullcontext(None)
 
     with pool_cm as executor:
+        # Subgradient loop runs for VaR-99 and per-cohort-sum TVaR.
+        # R-U bypasses it (scenarios couple → no cluster decomposition).
+        ru_loop_skip = use_ru
         for it in range(max_iterations):
+            if ru_loop_skip:
+                break
             iterations = it + 1
             # Subproblem solve per cluster (independent given the
             # current Lagrangian multipliers).
-            full_assignment: dict[str, str] = {}
+            full_assignment = {}
             if use_pool:
                 # Partition once per iteration — multipliers change,
                 # so each iteration is a fresh dispatch round.
@@ -782,8 +858,14 @@ def solve_cg(
             cession_budget=cession_budget,
             risk_measure=risk_measure,
             binary=False,
+            tvar_aggregation=tvar_aggregation,
         )
-        solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=30.0)
+        # R-U LP can take longer than the per-cohort-sum LP because of
+        # the K-scenario linking constraints (K=1000 on the live book).
+        # 60s gives CBC headroom; the per-cohort-sum path keeps the
+        # historical 30s budget.
+        lp_time_limit = 60.0 if use_ru else 30.0
+        solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=lp_time_limit)
         lp_prob.solve(solver)
         lp_status = pulp.LpStatus[lp_prob.status]
         if lp_status == "Optimal":
@@ -805,7 +887,11 @@ def solve_cg(
                 )
                 projected[cid] = best_a
             best_assignment = projected
-            solver_mode = "column_generation_lp_fallback"
+            solver_mode = (
+                "column_generation_lp_master_ru"
+                if use_ru
+                else "column_generation_lp_fallback"
+            )
 
     wall = time.time() - start
 
@@ -818,6 +904,26 @@ def solve_cg(
         "cession": lam_cession,
         "nonrenew": lam_nr,
     }
+
+    def _tvar_99_per_cohort_for_result() -> dict[str, float]:
+        """Per-cohort TVaR-99 scalars for the result dict. Under the
+        per-cohort-sum path this is the precomputed ``tvar_coeffs``;
+        under R-U (which skips the precompute) it's computed on
+        demand from each cohort's ``loss_scenarios`` so the result
+        shape stays consistent regardless of aggregation."""
+        if tvar_coeffs is not None:
+            return {cid: coeffs[0] for cid, coeffs in tvar_coeffs.items()}
+        # R-U path — compute per-cohort TVaR on demand.
+        out: dict[str, float] = {}
+        for c in cohorts:
+            cid = str(c["id"])
+            scenarios = c.get("loss_scenarios")
+            if scenarios is None or len(scenarios) == 0:
+                out[cid] = float(c["loss_p99"])
+                continue
+            risk_coeff, _ = _tvar_99_tail(scenarios)
+            out[cid] = float(risk_coeff)
+        return out
 
     if best_assignment is None:
         # Subgradient AND LP-master fallback both failed; surface
@@ -836,11 +942,9 @@ def solve_cg(
             "final_multipliers": final_multipliers,
         }
         if use_tvar:
-            assert tvar_coeffs is not None
             result["tvar_99_used"] = True
-            result["tvar_99_per_cohort"] = {
-                cid: coeffs[0] for cid, coeffs in tvar_coeffs.items()
-            }
+            result["tvar_99_per_cohort"] = _tvar_99_per_cohort_for_result()
+            result["tvar_aggregation_used"] = tvar_aggregation
         return result
 
     agg = _aggregate(best_assignment, cohorts_by_id, tvar_coeffs=tvar_coeffs)
@@ -857,11 +961,9 @@ def solve_cg(
         "final_multipliers": final_multipliers,
     }
     if use_tvar:
-        assert tvar_coeffs is not None
         result["tvar_99_used"] = True
-        result["tvar_99_per_cohort"] = {
-            cid: coeffs[0] for cid, coeffs in tvar_coeffs.items()
-        }
+        result["tvar_99_per_cohort"] = _tvar_99_per_cohort_for_result()
+        result["tvar_aggregation_used"] = tvar_aggregation
     return result
 
 

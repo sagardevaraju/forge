@@ -225,6 +225,13 @@ def _tvar_99(scenarios: list[float]) -> float:
     return _tvar_99_tail(scenarios)[0]
 
 
+#: Recognised values for the ``tvar_aggregation`` keyword on
+#: :func:`_build_problem` / :func:`solve` / :func:`solve_cg`. Used by
+#: callers + tests to introspect the contract without round-tripping
+#: through a solve.
+TVAR_AGGREGATIONS: tuple[str, ...] = ("per_cohort_sum", "rockafellar_uryasev")
+
+
 def _build_problem(
     cohorts: list[dict[str, Any]],
     capital_budget: float,
@@ -232,6 +239,7 @@ def _build_problem(
     cession_budget: float,
     risk_measure: str,
     binary: bool,
+    tvar_aggregation: str = "per_cohort_sum",
 ) -> tuple["pulp.LpProblem", dict[tuple[str, str], "pulp.LpVariable"], dict[str, float]]:  # type: ignore[name-defined]
     """Assemble the MILP (binary=True) or its LP relaxation (binary=False).
 
@@ -241,7 +249,46 @@ def _build_problem(
 
     Returns ``(prob, x, tvar_per_cohort)``. ``tvar_per_cohort`` is empty
     unless ``risk_measure == 'tvar_99'``.
+
+    The ``tvar_aggregation`` keyword controls how the per-scenario
+    loss draws roll into the capital constraint:
+
+    - ``'per_cohort_sum'`` (default) — per-cohort TVaR-99 summed across
+      cohorts. This is the **conservative upper bound** on joint book
+      TVaR by coherent-risk subadditivity (``TVaR(Σ_c L_c) ≤ Σ_c
+      TVaR(L_c)``), and is the formulation used by every committed
+      portfolio MIP artifact through v0.2.1. Backward-compatible
+      default — bit-for-bit identical to the pre-R-U behaviour.
+    - ``'rockafellar_uryasev'`` — true **joint book TVaR-99** via the
+      Rockafellar & Uryasev (2000) auxiliary-variable formulation:
+      ``CVaR_α(L) = min_{η} {η + (1/(1−α)) · E[(L − η)+]}``. For our
+      K-scenario discrete distribution this discretises to
+      ``α + (1/(K · 0.01)) · Σ_s z_s ≤ capital_budget`` with
+      ``z_s ≥ Σ_c L_{c,s}(x) − α`` per scenario and ``z_s ≥ 0``.
+      Requires every cohort to carry ``loss_scenarios`` (no graceful
+      fallback — switch to ``'per_cohort_sum'`` for the loss_p99
+      backstop). Only meaningful when ``risk_measure == 'tvar_99'``;
+      raises ``ValueError`` otherwise.
+
+    Reference: Rockafellar, R. T. & Uryasev, S. (2000). "Optimization
+    of conditional value-at-risk." *Journal of Risk* 2(3): 21–41,
+    eqn. (15). The R-U auxiliary trick lets the joint book TVaR
+    enter the LP as a single linear constraint plus K linking
+    constraints, instead of needing a non-linear "top-1%-of-sum"
+    operator — which would be intractable in PuLP/CBC.
     """
+    if tvar_aggregation not in TVAR_AGGREGATIONS:
+        raise ValueError(
+            f"_build_problem: unknown tvar_aggregation={tvar_aggregation!r}; "
+            f"expected one of {TVAR_AGGREGATIONS}"
+        )
+    if tvar_aggregation == "rockafellar_uryasev" and risk_measure != "tvar_99":
+        raise ValueError(
+            "_build_problem: tvar_aggregation='rockafellar_uryasev' "
+            "requires risk_measure='tvar_99' (R-U is a TVaR aggregation, "
+            "not a separate risk measure)"
+        )
+
     import pulp
 
     prob = pulp.LpProblem("portfolio_mip", pulp.LpMaximize)
@@ -292,54 +339,161 @@ def _build_problem(
     # Capital coefficient is ``risk_coeff * LOSS_FACTOR[a]`` for non-XS
     # actions; ``cede_xs`` uses the per-scenario retained_xs math.
     use_tvar = risk_measure == "tvar_99"
+    use_ru = use_tvar and tvar_aggregation == "rockafellar_uryasev"
     tvar_per_cohort: dict[str, float] = {}
-    capital_terms = []
-    for c in cohorts:
-        cid = c["id"]
-        loss50 = float(c["loss_p50"])
-        loss99 = float(c["loss_p99"])
-        treaty = c.get("treaty") or {}
-        attachment = float(treaty.get("attachment", loss50 * 1.5))
-        exhaustion = float(treaty.get("exhaustion", loss99 * 2.0))
-        if exhaustion < attachment:
-            exhaustion = attachment
 
-        if use_tvar:
+    if use_ru:
+        # ── R-U joint book TVaR-99 ──────────────────────────────────────
+        # Auxiliary scalar α (the optimal η in eqn. (15) of Rockafellar
+        # & Uryasev 2000) and one per-scenario excess variable z_s.
+        # The capital constraint reduces to a single linear inequality
+        # over α and z_s; the per-scenario linking constraints pin
+        # z_s ≥ book_loss_s(x) − α (with z_s ≥ 0 via lowBound). Number
+        # of scenarios K must be consistent across cohorts — we read
+        # from the first cohort and validate the rest.
+        first_scenarios = cohorts[0].get("loss_scenarios")
+        if first_scenarios is None or len(first_scenarios) == 0:
+            raise ValueError(
+                "_build_problem: tvar_aggregation='rockafellar_uryasev' "
+                "requires every cohort to carry loss_scenarios; "
+                f"cohort {cohorts[0]['id']} is missing"
+            )
+        K = len(first_scenarios)
+        if K <= 0:
+            raise ValueError(
+                "_build_problem: loss_scenarios must be non-empty under "
+                "tvar_aggregation='rockafellar_uryasev'"
+            )
+
+        # Precompute per-(cohort, scenario) action coefficients. For
+        # non-XS actions: L_{c,s} × LOSS_FACTOR[a]. For cede_xs: the
+        # per-scenario retained_xs integration (same form the
+        # 'per_cohort_sum' path uses on its tail subset, applied here
+        # to all K scenarios). Per-cohort TVaR-99 still gets surfaced
+        # via tvar_per_cohort for downstream traceability.
+        per_cohort_scenarios: dict[str, list[float]] = {}
+        per_cohort_retained_xs: dict[str, list[float]] = {}
+        for c in cohorts:
+            cid = c["id"]
+            loss50 = float(c["loss_p50"])
+            loss99 = float(c["loss_p99"])
+            treaty = c.get("treaty") or {}
+            attachment = float(treaty.get("attachment", loss50 * 1.5))
+            exhaustion = float(treaty.get("exhaustion", loss99 * 2.0))
+            if exhaustion < attachment:
+                exhaustion = attachment
+
             scenarios = c.get("loss_scenarios")
             if scenarios is None or len(scenarios) == 0:
-                logger.warning(
-                    "cohort %s missing loss_scenarios under risk_measure="
-                    "'tvar_99'; falling back to loss_p99=%s for capital coef",
-                    cid,
-                    loss99,
+                raise ValueError(
+                    "_build_problem: tvar_aggregation='rockafellar_uryasev' "
+                    "requires every cohort to carry loss_scenarios; "
+                    f"cohort {cid} is missing"
                 )
+            if len(scenarios) != K:
+                raise ValueError(
+                    "_build_problem: tvar_aggregation='rockafellar_uryasev' "
+                    "requires every cohort to carry the same K "
+                    f"loss_scenarios; cohort {cid} has {len(scenarios)} "
+                    f"vs {K} for the first cohort"
+                )
+
+            scen_list = [float(L) for L in scenarios]
+            per_cohort_scenarios[cid] = scen_list
+            per_cohort_retained_xs[cid] = [
+                retained_xs(L, attachment, exhaustion) for L in scen_list
+            ]
+            # Per-cohort TVaR-99 for traceability — still meaningful
+            # even though the constraint doesn't sum these directly
+            # under R-U.
+            risk_coeff, _tail = _tvar_99_tail(scen_list)
+            tvar_per_cohort[cid] = float(risk_coeff)
+
+        # Auxiliary variables.
+        alpha = pulp.LpVariable("ru_alpha", cat="Continuous")  # free
+        z = {
+            s: pulp.LpVariable(f"ru_z_{s}", lowBound=0, cat="Continuous")
+            for s in range(K)
+        }
+
+        # Capital constraint: α + (1/(K·0.01)) · Σ_s z_s ≤ B.
+        # The 1/(K·0.01) prefactor is exactly 1/(K·(1−α)) for α=0.99
+        # in the canonical R-U formulation — the empirical mean of
+        # the top-1 % tail under uniform per-scenario probability.
+        prob += (
+            alpha + (1.0 / (K * 0.01)) * pulp.lpSum(z[s] for s in range(K))
+            <= capital_budget,
+            "capital_budget",
+        )
+
+        # Per-scenario linking: z_s ≥ Σ_c Σ_a coeff_{c,s,a}·x_{c,a} − α.
+        # Rearranged as Σ_c Σ_a coeff·x − α − z_s ≤ 0 for PuLP.
+        for s in range(K):
+            scenario_terms = []
+            for c in cohorts:
+                cid = c["id"]
+                L_cs = per_cohort_scenarios[cid][s]
+                retained_xs_cs = per_cohort_retained_xs[cid][s]
+                for a in ACTIONS:
+                    if a == "cede_xs":
+                        coeff = retained_xs_cs
+                    else:
+                        coeff = L_cs * LOSS_FACTOR[a]
+                    if coeff != 0.0:
+                        scenario_terms.append(coeff * x[(cid, a)])
+            prob += (
+                pulp.lpSum(scenario_terms) - alpha - z[s] <= 0,
+                f"ru_link_s{s}",
+            )
+    else:
+        # ── VaR-99 or per-cohort-sum TVaR-99 ──────────────────────────
+        capital_terms = []
+        for c in cohorts:
+            cid = c["id"]
+            loss50 = float(c["loss_p50"])
+            loss99 = float(c["loss_p99"])
+            treaty = c.get("treaty") or {}
+            attachment = float(treaty.get("attachment", loss50 * 1.5))
+            exhaustion = float(treaty.get("exhaustion", loss99 * 2.0))
+            if exhaustion < attachment:
+                exhaustion = attachment
+
+            if use_tvar:
+                scenarios = c.get("loss_scenarios")
+                if scenarios is None or len(scenarios) == 0:
+                    logger.warning(
+                        "cohort %s missing loss_scenarios under risk_measure="
+                        "'tvar_99'; falling back to loss_p99=%s for capital coef",
+                        cid,
+                        loss99,
+                    )
+                    risk_coeff = loss99
+                    cede_xs_coeff = retained_xs(loss99, attachment, exhaustion)
+                else:
+                    import numpy as np
+
+                    risk_coeff, tail = _tvar_99_tail(scenarios)
+                    cede_xs_coeff = float(
+                        np.mean(
+                            [
+                                retained_xs(float(L), attachment, exhaustion)
+                                for L in tail
+                            ]
+                        )
+                    )
+                tvar_per_cohort[cid] = risk_coeff
+            else:
                 risk_coeff = loss99
                 cede_xs_coeff = retained_xs(loss99, attachment, exhaustion)
-            else:
-                import numpy as np
 
-                risk_coeff, tail = _tvar_99_tail(scenarios)
-                cede_xs_coeff = float(
-                    np.mean(
-                        [
-                            retained_xs(float(L), attachment, exhaustion)
-                            for L in tail
-                        ]
+            for a in ACTIONS:
+                if a == "cede_xs":
+                    capital_terms.append(cede_xs_coeff * x[(cid, a)])
+                else:
+                    capital_terms.append(
+                        risk_coeff * LOSS_FACTOR[a] * x[(cid, a)]
                     )
-                )
-            tvar_per_cohort[cid] = risk_coeff
-        else:
-            risk_coeff = loss99
-            cede_xs_coeff = retained_xs(loss99, attachment, exhaustion)
-
-        for a in ACTIONS:
-            if a == "cede_xs":
-                capital_terms.append(cede_xs_coeff * x[(cid, a)])
-            else:
-                capital_terms.append(
-                    risk_coeff * LOSS_FACTOR[a] * x[(cid, a)]
-                )
-    prob += pulp.lpSum(capital_terms) <= capital_budget, "capital_budget"
+        prob += pulp.lpSum(capital_terms) <= capital_budget, "capital_budget"
 
     # ── Constraint 3: non-renewal cap on book TIV ──────────────────────
     total_tiv = sum(_cohort_tiv(c) for c in cohorts)
@@ -372,6 +526,7 @@ def solve(
     horizon_end: str = "2027-06-30",
     risk_measure: str = "var_99",
     time_limit: float = 30.0,
+    tvar_aggregation: str = "per_cohort_sum",
 ) -> dict[str, Any]:
     """Solve the Portfolio MILP.
 
@@ -409,6 +564,21 @@ def solve(
     risk_measure
         ``'var_99'`` (default) or ``'tvar_99'``. See P2.6 / P2.7
         docstrings preserved inline below for the full discussion.
+    tvar_aggregation
+        How to roll up per-scenario losses under ``risk_measure='tvar_99'``:
+
+        - ``'per_cohort_sum'`` (default) — conservative upper bound,
+          sums each cohort's independent TVaR-99. Backward-compatible
+          with every artifact through v0.2.1 and the only path that
+          gracefully falls back to ``loss_p99`` when a cohort lacks
+          ``loss_scenarios``.
+        - ``'rockafellar_uryasev'`` — exact joint book TVaR-99 via
+          auxiliary scalar α + per-scenario excess variables z_s
+          (Rockafellar & Uryasev 2000). Requires every cohort to
+          carry ``loss_scenarios`` (raises otherwise). Only meaningful
+          with ``risk_measure='tvar_99'``.
+
+        Ignored when ``risk_measure='var_99'``.
     time_limit
         CBC solver wall-clock limit (seconds). Defaults to 30s so a
         Vercel function staying inside its 60s timeout has 30s of
@@ -470,11 +640,13 @@ def solve(
         cession_budget=cession_budget,
         risk_measure=risk_measure,
         binary=True,
+        tvar_aggregation=tvar_aggregation,
     )
     solver = pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit)
     prob.solve(solver)
     status = pulp.LpStatus[prob.status]
     use_tvar = risk_measure == "tvar_99"
+    use_ru = use_tvar and tvar_aggregation == "rockafellar_uryasev"
 
     # ── Stage 2: LP-relaxation fallback if MILP didn't solve ──────────
     # CBC reports ``Not Solved`` when it bails out under timeLimit, and
@@ -497,6 +669,7 @@ def solve(
             cession_budget=cession_budget,
             risk_measure=risk_measure,
             binary=False,
+            tvar_aggregation=tvar_aggregation,
         )
         solver_lp = pulp.PULP_CBC_CMD(msg=False, timeLimit=time_limit)
         prob_lp.solve(solver_lp)
@@ -532,6 +705,7 @@ def solve(
         if use_tvar:
             result_infeasible["tvar_99_used"] = True
             result_infeasible["tvar_99_per_cohort"] = tvar_per_cohort
+            result_infeasible["tvar_aggregation_used"] = tvar_aggregation
         return result_infeasible
 
     # ── Materialize actions, applying argmax-rounding under fallback ──
@@ -685,6 +859,7 @@ def solve(
     if use_tvar:
         result["tvar_99_used"] = True
         result["tvar_99_per_cohort"] = tvar_per_cohort
+        result["tvar_aggregation_used"] = tvar_aggregation
     return result
 
 
@@ -704,6 +879,9 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel requires this ex
                 horizon_start=str(body.get("horizon_start", "2026-07-01")),
                 horizon_end=str(body.get("horizon_end", "2027-06-30")),
                 risk_measure=str(body.get("risk_measure", "var_99")),
+                tvar_aggregation=str(
+                    body.get("tvar_aggregation", "per_cohort_sum")
+                ),
             )
             self.send_response(200)
         except Exception as e:  # pragma: no cover — defensive
