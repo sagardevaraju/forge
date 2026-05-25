@@ -233,8 +233,8 @@ and the FORGE GitHub repository.
   policies). Mean cohort `avg_elevation_m` shifts 2.79 m → 74.50 m;
   MIP objective +1.46 %, book p99 −9.37 %, action mix shifts toward
   `reprice_p20` and away from `non_renew`. See
-  [`docs/releases/v0.2.1.md`](releases/v0.2.1.md) · DOI: minted on
-  tag push.
+  [`docs/releases/v0.2.1.md`](releases/v0.2.1.md) · DOI
+  [10.5281/zenodo.20381424](https://doi.org/10.5281/zenodo.20381424)
 - **v0.2.0** — 2026-05-24 — AUDIT.3 calibration release. NHC OFCL
   forecast-error climatology drives perturbation σ; HURDAT2-sampled
   seed tracks replace the hand-tabulated `_DEMO_TRACK_*` literals;
