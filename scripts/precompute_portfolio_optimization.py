@@ -69,6 +69,122 @@ from api_py.multi_peril_aal import (  # noqa: E402
 )
 from api_py.optimize_portfolio import ACTIONS, solve  # noqa: E402
 
+
+# Fraction of the gross retained-tail anchor that gets retained on the
+# books as capital. Lives at module level so the unit test can read it
+# without re-parsing the script. The fraction itself is policy — an
+# actuary's chosen risk appetite — and is documented in research.md.
+CAPITAL_BUDGET_FRACTION: float = 0.40
+
+
+def _compute_capital_budget_anchor(
+    cohorts: list[dict],
+    sim_ids: list[str],
+) -> dict:
+    """Compute the capital-budget anchor that matches the solver's
+    actual risk_measure.
+
+    The Portfolio MIP runs with ``risk_measure='var_99'`` on the prior-
+    only path and ``risk_measure='tvar_99'`` when sims are merged. The
+    constraint LHS (Σ retained tail) uses the chosen measure; this
+    helper makes sure the **budget RHS uses the same measure** so the
+    constraint is self-consistent.
+
+    Why this matters: the previous implementation always anchored on
+    Σ per-cohort p99, which **shrinks** when sims are merged because
+    each sim contributes K zero-loss draws to every cohort outside its
+    footprint. After ~190 promoted sims the median cohort has ~99 %
+    zero-loss scenarios → empirical p99 *rank* drags down → Σ p99
+    drops by ~40 %, while Σ TVaR-99 grows. Solver constraint LHS
+    (Σ TVaR-99) then exceeds budget → mechanical infeasibility.
+    See the 2026-05-25 audit on PR #68 for the full diagnosis.
+
+    Floor: even when sims are merged, the anchor never drops below the
+    Σ p99 baseline. Adding sims can only **grow** the budget — never
+    shrink it below what the prior-only solve would have used. (A
+    set of sims whose cat-y tail is *smaller* than the lognormal prior
+    mechanically would otherwise tighten the budget — which is
+    nonsense as a policy.)
+
+    Returns a dict with:
+      * ``anchor_value`` — the Σ measure (already gross, no
+        diversification credit)
+      * ``measure`` — ``"sum_cohort_tvar_99"`` or ``"sum_cohort_p99"``
+        depending on which path was taken
+      * ``label`` — operator-readable string for print()
+      * ``capital_budget`` — ``anchor_value × CAPITAL_BUDGET_FRACTION``
+      * ``sum_cohort_p99`` / ``sum_cohort_tvar99`` — both candidates,
+        surfaced for traceability + the print line that compares them
+    """
+    scenarios_matrix = np.array(
+        [c.get("loss_scenarios") or [] for c in cohorts],
+        dtype=float,
+    )
+    has_scenarios = scenarios_matrix.size > 0 and scenarios_matrix.shape[1] > 0
+    if has_scenarios:
+        sum_cohort_p99 = float(
+            np.percentile(scenarios_matrix, 99, axis=1).sum()
+        )
+        tvar99_per_cohort = []
+        for row in scenarios_matrix:
+            if row.size == 0:
+                tvar99_per_cohort.append(0.0)
+                continue
+            t = float(np.percentile(row, 99))
+            tail = row[row >= t]
+            tvar99_per_cohort.append(
+                float(tail.mean()) if tail.size else float(row.max())
+            )
+        sum_cohort_tvar99 = float(sum(tvar99_per_cohort))
+    else:
+        # No loss_scenarios anywhere — fall back to the scalar prior
+        # values that came in with each cohort dict. TVaR-99 has no
+        # empirical realisation here so we degenerate it to p99 (the
+        # solver's `tvar_99` path warns and falls back to p99 too).
+        sum_cohort_p99 = float(sum(c.get("loss_p99", 0.0) for c in cohorts))
+        sum_cohort_tvar99 = sum_cohort_p99
+
+    # Pre-merge Σ p99 = Σ of each cohort's scalar `loss_p99` field. This
+    # field is set at cohort-aggregation time from the **lognormal
+    # prior alone**, before any sim scenarios get concatenated, so it's
+    # invariant to whatever sims happen to be merged into
+    # `loss_scenarios`. Used as the **prior-baseline floor** under the
+    # merged-sims path: even if the diluted post-merge percentile +
+    # TVaR collapse (extreme zero dilution can drop both), the anchor
+    # never falls below the no-sims budget.
+    sum_pre_merge_p99 = float(sum(c.get("loss_p99", 0.0) for c in cohorts))
+
+    if sim_ids:
+        # Merged-sims path → solver uses risk_measure='tvar_99'.
+        # Anchor on Σ TVaR-99 (the constraint's own measure). Floor at
+        # both Σ post-merge p99 and the prior-baseline Σ p99 so:
+        #   - the budget can only GROW with merged sims (the
+        #     monotonicity policy)
+        #   - extreme zero-dilution can never collapse both empirical
+        #     measures to a smaller-than-prior anchor
+        anchor_value = max(
+            sum_cohort_tvar99,
+            sum_cohort_p99,
+            sum_pre_merge_p99,
+        )
+        measure = "sum_cohort_tvar_99"
+        label = "Σ per-cohort TVaR-99 (matches risk_measure='tvar_99')"
+    else:
+        # Prior-only path → solver uses risk_measure='var_99'.
+        anchor_value = sum_cohort_p99
+        measure = "sum_cohort_p99"
+        label = "Σ per-cohort p99 (matches risk_measure='var_99')"
+
+    return {
+        "anchor_value": anchor_value,
+        "measure": measure,
+        "label": label,
+        "capital_budget": anchor_value * CAPITAL_BUDGET_FRACTION,
+        "sum_cohort_p99": sum_cohort_p99,
+        "sum_cohort_tvar99": sum_cohort_tvar99,
+        "sum_pre_merge_p99": sum_pre_merge_p99,
+    }
+
 # Load the zip3 → state geography once. The book is currently CONUS coastal
 # SE (TX/LA/NC/FL — 4 states, 38 zip3s). Out-of-book zip3s fall back to a
 # 'default' AAL rate inside multi_peril_aal.
@@ -504,47 +620,32 @@ def main(argv: list[str] | None = None) -> None:
         threshold = float(np.percentile(book_loss_scenarios, 99))
         tail = book_loss_scenarios[book_loss_scenarios >= threshold]
         book_tvar_99 = float(tail.mean()) if tail.size > 0 else float(book_loss_scenarios.max())
-        # Conservative gross sum-of-cohort p99 — ignores diversification.
-        # This is the actuarial worst-case retained tail under the
-        # default treaty layers (every cohort independently breaches p99
-        # in the same year). The capital budget anchors here, NOT on the
-        # diversified book_tvar_99, because:
-        #
-        #   * The diversified book_tvar_99 collapses to ≈ p50 + light
-        #     tail on a prior-only artifact (no cat events) — making
-        #     0.40 × book_tvar_99 tighter than the minimum retained tail
-        #     even with full cede_xs, so the baseline solve is
-        #     infeasible on a fresh book without sim merges.
-        #   * The sum-of-cohort p99 grows monotonically with merged
-        #     sims (each promoted hurricane pushes the per-cohort
-        #     empirical p99 up), so the budget tracks cat exposure
-        #     correctly under the merge path.
-        sum_cohort_p99 = float(np.percentile(scenarios_matrix, 99, axis=1).sum())
     else:
         expected_loss_p50 = sum(c["loss_p50"] for c in cohorts)
         expected_loss_p99 = sum(c["loss_p99"] for c in cohorts)
         book_tvar_99 = expected_loss_p99
-        sum_cohort_p99 = expected_loss_p99
+
+    # Capital-budget anchor selection — must match the risk_measure the
+    # solver runs under so the constraint RHS and LHS are the same
+    # statistic of the same distribution. Mismatch was the root cause
+    # of the 2026-05-25 post-reoptimize infeasibility; the helper
+    # carries the full diagnosis in its docstring.
+    anchor = _compute_capital_budget_anchor(cohorts, sim_ids)
+    retained_tail_anchor = anchor["anchor_value"]
+    capital_budget = anchor["capital_budget"]
 
     print(f"  Book TIV: ${total_tiv:,.0f}")
     print(f"  Book premium: ${total_premium:,.0f}")
     print(f"  Book p50 loss (diversified):       ${expected_loss_p50:,.0f}")
     print(f"  Book p99 loss (diversified):       ${expected_loss_p99:,.0f}")
     print(f"  Book TVaR-99 (mean top 1 %, div):  ${book_tvar_99:,.0f}")
-    print(f"  Σ per-cohort p99 (gross):           ${sum_cohort_p99:,.0f}")
+    print(f"  Σ per-cohort p99 (gross):           ${anchor['sum_cohort_p99']:,.0f}")
+    print(f"  Σ per-cohort TVaR-99 (gross):       ${anchor['sum_cohort_tvar99']:,.0f}")
     print(f"  Implied loss ratio at p50:          {expected_loss_p50/total_premium*100:.1f}%")
 
-    # Capital budget anchored on Σ per-cohort p99 (gross, no
-    # diversification credit) at 0.40 ×. This is the actuarial
-    # conservative anchor: retain up to 40 % of the worst-case
-    # one-in-100 tail if every cohort breached independently. Yields a
-    # feasible solve at the prior-only baseline AND tracks cat exposure
-    # when sims are merged (Σ per-cohort empirical p99 climbs with each
-    # promoted hurricane).
-    capital_budget = sum_cohort_p99 * 0.40
     max_nonrenew_pct = 0.15                     # may non-renew up to 15% of TIV
     cession_budget = total_premium * 0.10       # 10% of premium for cession
-    print(f"  ⇒ capital_budget = ${capital_budget:,.0f} (40 % of Σ per-cohort p99)")
+    print(f"  ⇒ capital_budget = ${capital_budget:,.0f} (40 % of {anchor['label']})")
 
     result = solve(
         cohorts=cohorts,
@@ -614,10 +715,22 @@ def main(argv: list[str] | None = None) -> None:
     # Round to 2 decimal places for the artifact copy only; the in-memory
     # ``cohorts`` list (already consumed by ``solve()`` above) keeps full
     # precision for any downstream in-process use (P2.6+).
+    #
+    # 2026-05-25 — truncate `loss_scenarios` to the prior-only K=1000
+    # before persisting. With ~190 promoted sims merged, the in-memory
+    # list grows to ~187,000 entries per cohort → ~459 MB JSON artifact
+    # (vs the v0.2.1 ~5 MB). The full merged scenarios are reproducible
+    # from `artifacts/simulations/*.parquet` + the prior, and the
+    # artifact's schema (set by the v0.2.1 contract) is K=1000 prior
+    # draws. The capital-budget anchor + book_totals stats above
+    # already consumed the full merged distribution in-memory; only
+    # the persisted artifact gets trimmed.
     cohorts_for_artifact = [
         {
             **c,
-            "loss_scenarios": [round(x, 2) for x in c["loss_scenarios"]],
+            "loss_scenarios": [
+                round(x, 2) for x in c["loss_scenarios"][:K_SCENARIOS]
+            ],
         }
         for c in cohorts
     ]
@@ -691,6 +804,21 @@ def main(argv: list[str] | None = None) -> None:
             "capital_budget": capital_budget,
             "max_nonrenew_pct": max_nonrenew_pct,
             "cession_budget": cession_budget,
+            # Capital-budget anchor metadata — surfaces every measure
+            # that fed into the selection so an analyst can verify
+            # which one was binding and reproduce the figure offline.
+            # Documented in `_compute_capital_budget_anchor`.
+            "capital_budget_anchor": {
+                "measure": anchor["measure"],
+                "label": anchor["label"],
+                "anchor_value": anchor["anchor_value"],
+                "fraction": CAPITAL_BUDGET_FRACTION,
+                "candidates": {
+                    "sum_cohort_p99": anchor["sum_cohort_p99"],
+                    "sum_cohort_tvar99": anchor["sum_cohort_tvar99"],
+                    "sum_pre_merge_p99": anchor["sum_pre_merge_p99"],
+                },
+            },
         },
         "book_totals": {
             "tiv": total_tiv,
