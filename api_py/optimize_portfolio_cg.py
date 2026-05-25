@@ -69,13 +69,32 @@ Acceptance criteria (per plan)
   risk_measure='tvar_99')`` on the same input. Pinned in
   ``tests/api/test_optimize_portfolio_cg_tvar.py``.
 
+Warm-starting
+-------------
+Each call to :func:`solve_cg` reports the final Lagrangian multipliers
+the subgradient loop landed on under the key ``final_multipliers`` in
+the result dict. Passing those values back via ``initial_multipliers``
+on a subsequent solve lets the loop start *at* the dual point the
+previous solve converged to — which on the live 570-cohort book cuts
+the subgradient iterations from ~30 (the cold-start cap) to the
+single-digit range when the multipliers are still near-optimal for the
+new budget triple. This is the standard column-generation warm-start
+pattern from Birge & Louveaux §6.4 (the dual point at the optimum of
+the previous master is the natural starting basis for the new master).
+
+The warm-start is opt-in (the default ``initial_multipliers=None``
+keeps the cold-start behaviour bit-for-bit identical to v0.2.1). Missing
+keys default to 0.0 so a caller can warm-start only the multiplier(s)
+they have data for. Negative warm-start values are rejected — KKT
+constrains the multipliers to be non-negative; a negative seed would
+push the subgradient in the wrong direction.
+
 Scope notes
 -----------
 - **Prototype only.** The CG solver is NOT a drop-in replacement for
   ``solve()``. Use it as a research vehicle for scaling experiments
-  (P3.11 followups: warm-start with previous solution, parallel
-  cluster solves, true per-scenario book-level TVaR via R-U auxiliary
-  variables on each cluster's sub-LP).
+  (remaining followups: parallel cluster solves, true per-scenario
+  book-level TVaR via R-U auxiliary variables).
 - **Single-period only.** No multi-period reinstatement state.
 """
 
@@ -403,6 +422,45 @@ def _aggregate(
 # ── public API ─────────────────────────────────────────────────────────────
 
 
+#: Recognised multiplier keys for :func:`solve_cg`'s
+#: ``initial_multipliers`` parameter and the returned
+#: ``final_multipliers`` dict. Kept as a module-level constant so a
+#: caller chaining solves can introspect the contract without
+#: round-tripping through a solve.
+MULTIPLIER_KEYS: tuple[str, ...] = ("capital", "cession", "nonrenew")
+
+
+def _coerce_initial_multipliers(
+    initial: dict[str, float] | None,
+) -> tuple[float, float, float]:
+    """Validate + unpack the warm-start dict into the three scalars
+    the subgradient loop initialises. Returns ``(0, 0, 0)`` on the
+    cold-start path (``initial is None``)."""
+    if initial is None:
+        return 0.0, 0.0, 0.0
+    unknown = set(initial) - set(MULTIPLIER_KEYS)
+    if unknown:
+        raise ValueError(
+            f"solve_cg: unknown keys in initial_multipliers={unknown}; "
+            f"expected subset of {MULTIPLIER_KEYS}"
+        )
+    out: list[float] = []
+    for key in MULTIPLIER_KEYS:
+        v = float(initial.get(key, 0.0))
+        if v < 0.0:
+            # KKT requires λ ≥ 0 for ≤-style budget constraints. A
+            # negative warm-start would push the subgradient toward
+            # rewarding constraint violation — i.e. literally
+            # diverging — so we reject it loudly rather than clamp
+            # silently.
+            raise ValueError(
+                f"solve_cg: initial_multipliers[{key!r}]={v!r} is "
+                f"negative; KKT requires non-negative multipliers"
+            )
+        out.append(v)
+    return out[0], out[1], out[2]
+
+
 def solve_cg(
     cohorts: list[dict[str, Any]],
     *,
@@ -414,6 +472,7 @@ def solve_cg(
     step_size: float = 0.05,
     convergence_tol: float = 1e-3,
     feasibility_tol: float = 1e-3,
+    initial_multipliers: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Column-generation prototype solve for the portfolio MIP.
 
@@ -432,15 +491,30 @@ def solve_cg(
     same as monolithic). ``max_iterations`` / ``step_size`` /
     ``convergence_tol`` are prototype-specific tuning knobs.
 
+    ``initial_multipliers`` (optional) lets a caller warm-start the
+    Lagrangian subgradient from a previous solve's
+    ``final_multipliers`` dict. Recognised keys: ``capital``,
+    ``cession``, ``nonrenew``. Missing keys default to 0.0; negative
+    values are rejected (KKT). Default ``None`` preserves the cold-
+    start behaviour bit-for-bit.
+
     When ``risk_measure='tvar_99'`` the result dict additionally
     carries ``tvar_99_used: True`` and ``tvar_99_per_cohort``
     (cohort-id → TVaR-99 scalar) for traceability — matching the
     monolithic result shape.
 
+    The result dict *always* carries ``final_multipliers`` — the
+    Lagrangian multipliers the subgradient loop landed on (or the
+    warm-start values, untouched, if the LP-master fallback fired
+    without the subgradient running). Feed these straight back as
+    ``initial_multipliers`` on a follow-up solve to warm-start.
+
     Raises
     ------
     ValueError
-        If `cohorts` is empty or `risk_measure` is unknown.
+        If ``cohorts`` is empty, ``risk_measure`` is unknown, or
+        ``initial_multipliers`` contains an unknown key / negative
+        value.
     """
     if not cohorts:
         raise ValueError("solve_cg: cohorts list is empty")
@@ -466,12 +540,13 @@ def solve_cg(
         _precompute_tvar_coefficients(cohorts) if use_tvar else None
     )
 
-    # Initial multipliers — start at 0 (no penalty); the subgradient
-    # update will bump them up if the unrelaxed solution violates a
-    # global constraint.
-    lam_cap = 0.0
-    lam_cession = 0.0
-    lam_nr = 0.0
+    # Initial multipliers — cold-start at 0 (no penalty); the
+    # subgradient update bumps them up if the unrelaxed solution
+    # violates a global constraint. Warm-start: pull from caller's
+    # `initial_multipliers` dict (validated above).
+    lam_cap, lam_cession, lam_nr = _coerce_initial_multipliers(
+        initial_multipliers
+    )
 
     best_assignment: dict[str, str] | None = None
     best_profit = float("-inf")
@@ -595,6 +670,16 @@ def solve_cg(
 
     wall = time.time() - start
 
+    # Final dual point the subgradient loop reached (or the warm-start
+    # values, untouched, if the LP-master fallback fired without the
+    # loop iterating). Feed straight back via ``initial_multipliers``
+    # to warm-start a follow-up solve.
+    final_multipliers = {
+        "capital": lam_cap,
+        "cession": lam_cession,
+        "nonrenew": lam_nr,
+    }
+
     if best_assignment is None:
         # Subgradient AND LP-master fallback both failed; surface
         # infeasible so the caller can decide whether to escalate.
@@ -609,6 +694,7 @@ def solve_cg(
             "solver_mode": solver_mode,
             "iterations": iterations,
             "wall_clock_s": wall,
+            "final_multipliers": final_multipliers,
         }
         if use_tvar:
             assert tvar_coeffs is not None
@@ -629,6 +715,7 @@ def solve_cg(
         "solver_mode": solver_mode,
         "iterations": iterations,
         "wall_clock_s": wall,
+        "final_multipliers": final_multipliers,
     }
     if use_tvar:
         assert tvar_coeffs is not None
@@ -639,4 +726,9 @@ def solve_cg(
     return result
 
 
-__all__ = ["solve_cg", "cluster_cohorts", "TvarCoeffs"]
+__all__ = [
+    "solve_cg",
+    "cluster_cohorts",
+    "TvarCoeffs",
+    "MULTIPLIER_KEYS",
+]
