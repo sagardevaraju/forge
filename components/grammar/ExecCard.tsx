@@ -21,6 +21,7 @@
  * sub-views and footer summaries.
  */
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
+import { InfoIcon } from '@/components/grammar/InfoTooltip';
 import type { TrustTier } from '@/lib/grammar/trust-tiers';
 
 interface ExecCardProps {
@@ -35,6 +36,11 @@ interface ExecCardProps {
    * mid-figure on narrow grid cells). Renders zinc-500, tabular, 11px.
    */
   caption?: string;
+  /**
+   * Optional glossary key. When set, an InfoIcon renders next to the label
+   * so a layman can hover/click to read the definition.
+   */
+  term?: string;
   tier: TrustTier;
   variant?: 'hero' | 'default' | 'compact';
   className?: string;
@@ -54,6 +60,7 @@ export function ExecCard({
   band,
   caption,
   tier,
+  term,
   variant = 'default',
   className,
 }: ExecCardProps) {
@@ -84,8 +91,9 @@ export function ExecCard({
   return (
     <div data-testid="exec-card" className={classes}>
       <div className="flex items-start justify-between gap-2 min-h-[20px]">
-        <span className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-zinc-500 leading-tight line-clamp-1">
+        <span className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-zinc-500 leading-tight line-clamp-1 inline-flex items-center gap-1">
           {label}
+          {term && <InfoIcon term={term} iconSize="sm" />}
         </span>
         <TrustTierBadge tier={tier} />
       </div>

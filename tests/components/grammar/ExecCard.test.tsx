@@ -28,3 +28,16 @@ describe('ExecCard', () => {
     expect(screen.getByText(/p10 \$38\.2M/)).toBeInTheDocument();
   });
 });
+
+describe('ExecCard — glossary term prop', () => {
+  test('renders an info-icon button when term is provided', () => {
+    render(<ExecCard label="Tail exposure" value="$96.7M" tier="MODEL_OUTPUT" term="tail-exposure" />);
+    const btn = screen.getByRole('button', { name: /definition of tail exposure/i });
+    expect(btn).toBeInTheDocument();
+  });
+
+  test('does NOT render an info-icon button when term is omitted', () => {
+    render(<ExecCard label="Random" value="1" tier="MODEL_OUTPUT" />);
+    expect(screen.queryByRole('button', { name: /definition of/i })).toBeNull();
+  });
+});
