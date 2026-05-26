@@ -356,7 +356,7 @@ export function PortfolioHeader(p: Props) {
             Loosen <code className="font-mono bg-amber-100 px-1 py-0.5 rounded">capital_budget</code>{' '}
             (the what-if slider above), raise the non-renew cap, or remove
             promoted simulations whose tails outstrip the prior — see the{' '}
-            <a href="/methodology#portfolio-mip" className="underline">methodology</a>{' '}
+            <a href="/methodology#mip" className="underline">methodology</a>{' '}
             page.
           </span>
         </div>
