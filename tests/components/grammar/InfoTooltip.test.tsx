@@ -67,3 +67,45 @@ describe('InfoIcon — hover + focus reveal', () => {
     expect(popup).toHaveAttribute('data-state', 'open');
   });
 });
+
+describe('InfoIcon — click pinning', () => {
+  test('click on trigger pins the popup open', () => {
+    render(<InfoIcon term="tvar-99" />);
+    const btn = screen.getByRole('button');
+    fireEvent.click(btn);
+    const popupId = btn.getAttribute('aria-describedby')!;
+    expect(document.getElementById(popupId)).toHaveAttribute('data-state', 'pinned');
+  });
+
+  test('a second click un-pins (back to closed)', () => {
+    render(<InfoIcon term="tvar-99" />);
+    const btn = screen.getByRole('button');
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    const popupId = btn.getAttribute('aria-describedby')!;
+    expect(document.getElementById(popupId)).toHaveAttribute('data-state', 'closed');
+  });
+
+  test('Escape on the trigger dismisses a pinned popup', () => {
+    render(<InfoIcon term="tvar-99" />);
+    const btn = screen.getByRole('button');
+    fireEvent.click(btn);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    const popupId = btn.getAttribute('aria-describedby')!;
+    expect(document.getElementById(popupId)).toHaveAttribute('data-state', 'closed');
+  });
+
+  test('outside click dismisses a pinned popup', () => {
+    render(
+      <div>
+        <InfoIcon term="tvar-99" />
+        <div data-testid="outside">outside</div>
+      </div>,
+    );
+    const btn = screen.getByRole('button');
+    fireEvent.click(btn);
+    fireEvent.mouseDown(screen.getByTestId('outside'));
+    const popupId = btn.getAttribute('aria-describedby')!;
+    expect(document.getElementById(popupId)).toHaveAttribute('data-state', 'closed');
+  });
+});

@@ -11,7 +11,7 @@
  *
  * No external popover / tooltip dependencies. Inline Lucide-style info-SVG
  * (variant D from the 2026-05-25 brainstorm). Hover and focus reveal the
- * popup; click pinning + Esc + outside-click dismiss land in Task 3.
+ * popup; click pins it open with Esc + outside-click dismissal (Task 3).
  */
 import {
   useCallback,
@@ -21,12 +21,13 @@ import {
   useState,
   type FocusEvent,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import { lookupTerm } from '@/lib/grammar/glossary';
 
-// 'pinned' is wired in Plan Task 3 (click-to-pin); the guards in
-// useTooltipState below already check for it so Task 3 only touches
-// the click handler.
+// 'closed' = hidden; 'open' = hover/focus reveal (auto-dismisses);
+// 'pinned' = click-to-pin (Task 3), persists until Esc, outside click,
+// or a second click on the trigger.
 type PopupState = 'closed' | 'open' | 'pinned';
 
 interface InfoTooltipProps {
@@ -110,7 +111,7 @@ interface CoreProps extends InfoTooltipProps {
   triggerChildren?: ReactNode;
 }
 
-function useTooltipState() {
+function useTooltipState(triggerRef: RefObject<HTMLElement | null>) {
   const [state, setState] = useState<PopupState>('closed');
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -151,6 +152,31 @@ function useTooltipState() {
     [],
   );
 
+  const handleClick = useCallback(() => {
+    clearLeaveTimer();
+    setState((prev) => (prev === 'pinned' ? 'closed' : 'pinned'));
+  }, []);
+
+  // Esc + outside-click dismissal only fires when the popup is pinned.
+  useEffect(() => {
+    if (state !== 'pinned') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setState('closed');
+    };
+    const onDown = (e: MouseEvent) => {
+      if (!triggerRef.current) return;
+      const target = e.target as Node;
+      if (triggerRef.current.contains(target)) return;
+      setState('closed');
+    };
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onDown);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onDown);
+    };
+  }, [state, triggerRef]);
+
   useEffect(() => () => clearLeaveTimer(), []);
 
   return {
@@ -161,6 +187,7 @@ function useTooltipState() {
       onPointerLeave: handlePointerLeave,
       onFocus: handleFocus,
       onBlur: handleBlur,
+      onClick: handleClick,
     },
   };
 }
@@ -168,7 +195,8 @@ function useTooltipState() {
 function CoreTooltip({ term, iconSize = 'md', className, triggerChildren }: CoreProps) {
   const popupId = useId();
   const entry = lookupTerm(term);
-  const { state, handlers } = useTooltipState();
+  const wrapperRef = useRef<HTMLSpanElement | null>(null);
+  const { state, handlers } = useTooltipState(wrapperRef);
 
   // If the entry doesn't exist, render a no-popup placeholder marked for the
   // glossary-coverage sweep test. The trigger is still a <button> so layout
@@ -178,6 +206,7 @@ function CoreTooltip({ term, iconSize = 'md', className, triggerChildren }: Core
   if (!entry) {
     return (
       <span
+        ref={wrapperRef}
         className={['relative inline-flex items-center gap-1', className].filter(Boolean).join(' ')}
       >
         <button
@@ -197,13 +226,17 @@ function CoreTooltip({ term, iconSize = 'md', className, triggerChildren }: Core
     );
   }
 
+  const { onClick, ...spanHandlers } = handlers;
+
   return (
     <span
+      ref={wrapperRef}
       className={['relative inline-flex items-center gap-1', className].filter(Boolean).join(' ')}
-      {...handlers}
+      {...spanHandlers}
     >
       <button
         type="button"
+        onClick={onClick}
         aria-describedby={popupId}
         aria-label={`Definition of ${entry.label}`}
         className={[
