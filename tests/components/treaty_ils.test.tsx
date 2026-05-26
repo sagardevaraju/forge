@@ -62,7 +62,10 @@ describe('TreatyLadder — ILS / cat-bond (Task P3.21)', () => {
     const row = screen.getByTestId('treaty-table-row-ils');
     expect(row).toBeInTheDocument();
     const cells = row.querySelectorAll('td');
-    expect(cells[0]!.textContent).toBe('ILS');
+    // Task 13 — `toMatch(/^ILS/)` because the InfoTooltip popup on the
+    // first ILS row appends the term-popup text ("ILSILS / Cat Bond…")
+    // to the cell's textContent.
+    expect(cells[0]!.textContent).toMatch(/^ILS/);
     // Range cell
     expect(cells[1]!.textContent).toBe('$120M to $200M');
     // RoL-equivalent cell (coupon)

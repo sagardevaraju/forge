@@ -29,6 +29,7 @@
 import { useState } from 'react';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
 import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
+import { InfoIcon, Term } from '@/components/grammar/InfoTooltip';
 import type { TrustTier } from '@/lib/grammar/trust-tiers';
 import type {
   TreatyStack,
@@ -543,7 +544,9 @@ function CaptivePanel({ layer }: CaptivePanelProps) {
       className="rounded border border-zinc-200 bg-white p-3 flex flex-col gap-2"
     >
       <div className="flex items-center justify-between text-sm">
-        <span className="font-medium">Captive vehicle</span>
+        <span className="inline-flex items-center gap-1 font-medium">
+          <Term term="captive">Captive vehicle</Term>
+        </span>
         <span
           data-testid="captive-trapped-share"
           className="text-xs text-zinc-600 tabular-nums"
@@ -603,7 +606,9 @@ function CaptivePanel({ layer }: CaptivePanelProps) {
         </div>
         <div className="flex items-center gap-1">
           <span className="inline-block w-2 h-2 rounded-sm" style={{ backgroundColor: UPR_FILL }} />
-          <span className="text-zinc-700">UPR {fmt(upr)}</span>
+          <span className="inline-flex items-center gap-1 text-zinc-700">
+            <Term term="upr">UPR</Term> {fmt(upr)}
+          </span>
         </div>
         <div className="flex items-center gap-1">
           <span className="inline-block w-2 h-2 rounded-sm" style={{ backgroundColor: FREE_FILL }} />
@@ -627,6 +632,15 @@ interface LayerTableProps {
 
 function LayerTable({ layers }: LayerTableProps) {
   if (layers.length === 0) return null;
+  // Track which layer types have already rendered their glossary icon so we
+  // attach an InfoIcon to the FIRST row of each type only — keeps the table
+  // legible when several XS / ILS rows stack up.
+  const iconShown = new Set<string>();
+  const firstFor = (key: string): boolean => {
+    if (iconShown.has(key)) return false;
+    iconShown.add(key);
+    return true;
+  };
   return (
     <table data-testid="treaty-layer-table" className="w-full text-xs border-collapse">
       <thead>
@@ -641,9 +655,15 @@ function LayerTable({ layers }: LayerTableProps) {
       <tbody>
         {layers.map((layer, idx) => {
           if (layer.type === 'qs') {
+            const showIcon = firstFor('qs');
             return (
               <tr key={`qs-${idx}`} className="border-b border-zinc-100">
-                <td className="py-1 pr-3 font-medium">QS</td>
+                <td className="py-1 pr-3 font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    QS
+                    {showIcon && <InfoIcon term="quota-share" iconSize="sm" />}
+                  </span>
+                </td>
                 <td className="py-1 pr-3">{`${Math.round(layer.share * 100)}% share`}</td>
                 <td className="py-1 pr-3">
                   {layer.rol !== undefined ? `${Math.round(layer.rol * 100)}%` : '—'}
@@ -663,13 +683,19 @@ function LayerTable({ layers }: LayerTableProps) {
             // "Reinstatements" stays empty (cat-bonds are
             // collateralized one-shot — exhaustion = end of life,
             // not a reinstatement).
+            const showIcon = firstFor('ils');
             return (
               <tr
                 key={`ils-${idx}`}
                 data-testid="treaty-table-row-ils"
                 className="border-b border-zinc-100"
               >
-                <td className="py-1 pr-3 font-medium">ILS</td>
+                <td className="py-1 pr-3 font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    ILS
+                    {showIcon && <InfoIcon term="ils" iconSize="sm" />}
+                  </span>
+                </td>
                 <td className="py-1 pr-3">
                   {`${roundToMillion(layer.attachment)} to ${roundToMillion(layer.exhaustion)}`}
                 </td>
@@ -687,13 +713,19 @@ function LayerTable({ layers }: LayerTableProps) {
             // Task P3.20 — render a single row that points at the
             // captive panel above (the trapped/free split lives there).
             const d = captiveDerived(layer);
+            const showIcon = firstFor('captive');
             return (
               <tr
                 key={`captive-${idx}`}
                 data-testid="treaty-table-row-captive"
                 className="border-b border-zinc-100"
               >
-                <td className="py-1 pr-3 font-medium">Captive</td>
+                <td className="py-1 pr-3 font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    Captive
+                    {showIcon && <InfoIcon term="captive" iconSize="sm" />}
+                  </span>
+                </td>
                 <td className="py-1 pr-3">
                   {`${formatMoneyM(d.total)} total · ${Math.round(
                     d.trapped_share * 100,
@@ -711,21 +743,31 @@ function LayerTable({ layers }: LayerTableProps) {
             // fronting fee (the analogous premium-side rate);
             // "Reinstatements" stays empty (fronting layers are
             // continuous, not per-event-reinstating).
+            const showIcon = firstFor('fronting');
+            const showFeeIcon = firstFor('fronting-fee');
             return (
               <tr
                 key={`fronting-${idx}`}
                 data-testid="treaty-table-row-fronting"
                 className="border-b border-zinc-100"
               >
-                <td className="py-1 pr-3 font-medium">Fronting</td>
+                <td className="py-1 pr-3 font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    Fronting
+                    {showIcon && <InfoIcon term="fronting" iconSize="sm" />}
+                  </span>
+                </td>
                 <td className="py-1 pr-3">
                   {`${Math.round(
                     (1 - layer.residual_retention_share) * 100,
                   )}% ceded to ${layer.capital_provider}`}
                 </td>
-                <td className="py-1 pr-3">{`${Math.round(
-                  layer.fronting_fee_share * 100,
-                )}% fee`}</td>
+                <td className="py-1 pr-3">
+                  <span className="inline-flex items-center gap-1">
+                    {`${Math.round(layer.fronting_fee_share * 100)}% fee`}
+                    {showFeeIcon && <InfoIcon term="fronting-fee" iconSize="sm" />}
+                  </span>
+                </td>
                 <td className="py-1 pr-3">—</td>
                 <td className="py-1 text-zinc-600">{layer.description ?? ''}</td>
               </tr>
@@ -751,9 +793,15 @@ function LayerTable({ layers }: LayerTableProps) {
               </span>
             );
           })();
+          const showXsIcon = firstFor('xs');
           return (
             <tr key={`xs-${idx}`} className="border-b border-zinc-100">
-              <td className="py-1 pr-3 font-medium">XS</td>
+              <td className="py-1 pr-3 font-medium">
+                <span className="inline-flex items-center gap-1">
+                  XS
+                  {showXsIcon && <InfoIcon term="excess-of-loss" iconSize="sm" />}
+                </span>
+              </td>
               <td className="py-1 pr-3">
                 {`${roundToMillion(layer.attachment)} to ${roundToMillion(layer.exhaustion)}`}
               </td>
@@ -850,9 +898,10 @@ export function TreatyLadder({ stack }: TreatyLadderProps) {
       </div>
       <p className="text-xs text-zinc-600">
         Layer ladder, QS at the bottom plus each XS layer drawn from
-        attachment to exhaustion. The dashed red line marks the carrier&rsquo;s
-        book p99 ({formatMoneyM(visibleStack.book_p99)}); layers above it cover the
-        tail, layers below it provide working-loss relief.
+        attachment to exhaustion. The dashed red line marks the carrier&rsquo;s{' '}
+        <Term term="p99">book p99</Term> ({formatMoneyM(visibleStack.book_p99)});
+        layers above it cover the tail, layers below it provide working-loss
+        relief.
       </p>
       <div className="border rounded bg-white p-3">
         <LadderSvg stack={visibleStack} yMax={yMax} />

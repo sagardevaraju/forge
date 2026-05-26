@@ -19,6 +19,7 @@ import {
   type SeverityValue,
 } from '@/lib/sim/severity';
 import { mmiRadiusKm } from '@/lib/sim/footprint';
+import { InfoIcon } from '@/components/grammar/InfoTooltip';
 
 export interface SeverityStripProps {
   peril: Peril;
@@ -48,7 +49,9 @@ export function SeverityStrip({
   return (
     <div className="absolute bottom-8 left-2 bg-slate-900/95 border border-slate-700 rounded-lg p-3 flex items-center gap-4 text-xs shadow-lg">
       <div className="flex items-center gap-3">
-        <span className="text-slate-400 uppercase tracking-wide">Severity</span>
+        <span className="text-slate-400 uppercase tracking-wide inline-flex items-center gap-1">
+          Severity <InfoIcon term="severity" iconSize="sm" />
+        </span>
         {scale.kind === 'continuous' ? (
           <div className="flex items-center gap-2">
             <input

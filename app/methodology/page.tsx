@@ -36,9 +36,9 @@ interface TocItem {
 
 const TOC: TocItem[] = [
   { id: 'trust-tiers', label: '1 · Trust tiers' },
-  { id: 'portfolio-mip', label: '2 · Portfolio MIP' },
+  { id: 'mip', label: '2 · Portfolio MIP' },
   { id: 'peril-severity', label: '3 · Peril severity' },
-  { id: 'risk-measure', label: '4 · Risk measure (TVaR-99)' },
+  { id: 'risk-measures', label: '4 · Risk measure (TVaR-99)' },
   { id: 'vrp-lp', label: '5 · Adjuster LP — integrality' },
   { id: 'magic-constants', label: '6 · Magic constants' },
   { id: 'coastal-zip3s', label: '7 · Coastal ZIP3 catalog' },
@@ -219,7 +219,7 @@ export default async function MethodologyPage() {
           {/* §2 Portfolio MIP */}
           <section>
             <SectionHeading
-              id="portfolio-mip"
+              id="mip"
               eyebrow="§2 · Optimization"
               title="Portfolio MIP"
             />
@@ -266,7 +266,7 @@ export default async function MethodologyPage() {
                 badge over mock data.
               </p>
             </div>
-            <p className="text-[13px] text-zinc-700 leading-relaxed mt-4 mb-3">
+            <p id="treaty" className="text-[13px] text-zinc-700 leading-relaxed mt-4 mb-3 scroll-mt-20">
               The capital constraint uses <strong>retained TVaR-99</strong>{' '}
               — mean of the top 1 % of book-aggregated loss scenarios after
               each cohort&apos;s chosen action has been applied, with{' '}
@@ -335,7 +335,7 @@ export default async function MethodologyPage() {
           {/* §4 Risk measure */}
           <section>
             <SectionHeading
-              id="risk-measure"
+              id="risk-measures"
               eyebrow="§4 · Coherence"
               title="Risk measure (TVaR-99)"
             />

@@ -24,6 +24,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { InfoIcon } from '@/components/grammar/InfoTooltip';
 
 interface WhatIfControlProps {
   label: string;
@@ -37,6 +38,8 @@ interface WhatIfControlProps {
   ariaLabel?: string;
   disabled?: boolean;
   onCommit: (proposed: number) => void;
+  /** Optional glossary term — when provided, renders an InfoIcon next to the label. */
+  term?: string;
   /**
    * Display scale for the numeric input only. `display = raw / inputScale`
    * and the input commits `Number(text) * inputScale` as the raw value
@@ -74,6 +77,7 @@ export function WhatIfControl({
   inputScale = 1,
   inputDecimals,
   inputSuffix,
+  term,
 }: WhatIfControlProps) {
   const resolvedDecimals = inputDecimals ?? (inputScale === 1 ? 0 : 2);
   const formatForInput = (raw: number): string => {
@@ -166,7 +170,10 @@ export function WhatIfControl({
           htmlFor={`whatif-${label}`}
           className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-zinc-500"
         >
-          {label}
+          <span className="inline-flex items-center gap-1">
+            {label}
+            {term && <InfoIcon term={term} iconSize="sm" />}
+          </span>
         </label>
         <div className="relative flex items-center">
           <input

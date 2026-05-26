@@ -47,6 +47,7 @@
 import { db } from '@/lib/db/client';
 import { ClaimsTable, type PreflagPolicy } from '@/components/ClaimsTable';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
+import { Term } from '@/components/grammar/InfoTooltip';
 import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
 import { loadPortfolioOptimization } from '@/lib/db/portfolio_optimization';
 import { AdjusterLoadRollup } from '@/components/AdjusterLoadRollup';
@@ -191,7 +192,9 @@ export default async function ClaimsPage() {
   return (
     <div className="p-6">
       <div className="flex items-center gap-2 mb-4">
-        <h1 className="text-2xl font-bold">Claims Pre-Brief</h1>
+        <h1 className="text-2xl font-bold">
+          <Term term="claims-pre-brief">Claims Pre-Brief</Term>
+        </h1>
         <TrustTierBadge tier="SYNTHETIC_SCAFFOLD" />
       </div>
       <p className="text-sm text-zinc-600 mb-2">

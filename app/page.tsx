@@ -59,15 +59,17 @@ export default async function Landing() {
     : 0;
   return (
     <div className="p-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-      <ExecCard label="Book TIV" value={`$${(totals.tiv / 1e9).toFixed(2)}B`} tier="SYNTHETIC_SCAFFOLD" />
-      <ExecCard label="Policies" value={totals.policies.toLocaleString()} tier="SYNTHETIC_SCAFFOLD" />
+      <ExecCard label="Book TIV" term="book-tiv" value={`$${(totals.tiv / 1e9).toFixed(2)}B`} tier="SYNTHETIC_SCAFFOLD" />
+      <ExecCard label="Policies" term="policies" value={totals.policies.toLocaleString()} tier="SYNTHETIC_SCAFFOLD" />
       <ExecCard
         label="Projected cession spend"
+        term="projected-cession-spend"
         value={`$${(projectedCessionSpend / 1e6).toFixed(1)}M`}
         tier={optimization ? 'MODEL_OUTPUT' : 'SYNTHETIC_SCAFFOLD'}
       />
       <ExecCard
         label="Open advisories"
+        term="advisory"
         value={`${openAdvisories.count}`}
         tier={openAdvisories.source === 'live' ? 'LIVE_FEED' : 'SYNTHETIC_SCAFFOLD'}
       />

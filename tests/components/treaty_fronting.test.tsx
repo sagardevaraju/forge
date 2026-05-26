@@ -85,11 +85,15 @@ describe('TreatyLadder — fronting vehicle (Task P3.19)', () => {
     expect(row).toBeInTheDocument();
     // First cell == layer-kind label "Fronting".
     const cells = row.querySelectorAll('td');
-    expect(cells[0]!.textContent).toBe('Fronting');
+    // Task 13 — `toMatch(/^Fronting/)` because the InfoTooltip popup on the
+    // first occurrence of the row label appends the term-popup text
+    // ("FrontingA licensed insurer…") to the cell's textContent.
+    expect(cells[0]!.textContent).toMatch(/^Fronting/);
     // Second cell == cession share text (95% ceded to captive).
     expect(cells[1]!.textContent).toBe('95% ceded to captive');
-    // Third cell == fronting fee rate (6% fee).
-    expect(cells[2]!.textContent).toBe('6% fee');
+    // Third cell == fronting fee rate (6% fee). Same Task-13 popup-bleed
+    // — the fronting-fee InfoIcon lives next to the "6% fee" text.
+    expect(cells[2]!.textContent).toMatch(/^6% fee/);
     // Fourth cell == reinstatements placeholder (— for fronting).
     expect(cells[3]!.textContent).toBe('—');
   });

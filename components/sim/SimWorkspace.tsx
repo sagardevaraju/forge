@@ -23,6 +23,7 @@ import { PromoteButton } from './PromoteButton';
 import { rebuildFootprint, type SimulationFootprint } from '@/lib/sim/footprint';
 import { PERIL_SCALES, perilLabel, severityLabel, type Peril, type SeverityValue } from '@/lib/sim/severity';
 import type { PreviewImpact } from '@/lib/sim/preview';
+import { InfoIcon } from '@/components/grammar/InfoTooltip';
 
 export interface SimWorkspaceProps {
   initialSims: SimListItem[];
@@ -131,6 +132,9 @@ export function SimWorkspace(props: SimWorkspaceProps) {
 
       {/* Centre column: map + drawing tools */}
       <main className="relative">
+        <div className="absolute top-2 left-2 z-10 inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-slate-300 bg-slate-900/80 border border-slate-700 rounded px-2 py-1 shadow">
+          Footprint <InfoIcon term="footprint" iconSize="sm" />
+        </div>
         <SimMap
           peril={peril}
           severity={severity}

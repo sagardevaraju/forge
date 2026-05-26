@@ -46,6 +46,7 @@ import { useState, useMemo, useEffect, useRef, Fragment } from 'react';
 import { zip3CountyLabel } from '@/lib/regulatory/zip3_geo';
 import { noticeWindowForZip3 } from '@/lib/regulatory/notice_periods';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
+import { InfoIcon } from '@/components/grammar/InfoTooltip';
 
 export interface PreflagPolicy {
   policy_id: number;
@@ -265,15 +266,40 @@ export function ClaimsTable({ policies, priorSeverities }: Props) {
         <thead>
           <tr className="border-b">
             <th className="text-left p-2">Policy ID</th>
-            <th className="text-left p-2">ZIP3</th>
-            <th className="text-right p-2">TIV</th>
-            <th className="text-left p-2">Build</th>
-            <th className="text-left p-2">Flood zone</th>
-            <th className="text-left p-2">Severity</th>
-            <th className="text-right p-2">Notice (days)</th>
+            <th className="text-left p-2">
+              <span className="inline-flex items-center gap-1">
+                ZIP3 <InfoIcon term="zip3" iconSize="sm" />
+              </span>
+            </th>
             <th className="text-right p-2">
-              <span className="inline-flex items-center gap-1.5" data-testid="loss-trust-tier">
+              <span className="inline-flex items-center gap-1 justify-end">
+                TIV <InfoIcon term="tiv" iconSize="sm" />
+              </span>
+            </th>
+            <th className="text-left p-2">
+              <span className="inline-flex items-center gap-1">
+                Build <InfoIcon term="build-type" iconSize="sm" />
+              </span>
+            </th>
+            <th className="text-left p-2">
+              <span className="inline-flex items-center gap-1">
+                Flood zone <InfoIcon term="flood-zone" iconSize="sm" />
+              </span>
+            </th>
+            <th className="text-left p-2">
+              <span className="inline-flex items-center gap-1">
+                Severity <InfoIcon term="severity" iconSize="sm" />
+              </span>
+            </th>
+            <th className="text-right p-2">
+              <span className="inline-flex items-center gap-1 justify-end">
+                Notice (days) <InfoIcon term="notice-days" iconSize="sm" />
+              </span>
+            </th>
+            <th className="text-right p-2">
+              <span className="inline-flex items-center gap-1.5 justify-end" data-testid="loss-trust-tier">
                 Expected loss
+                <InfoIcon term="expected-loss" iconSize="sm" />
                 <TrustTierBadge tier="MODEL_OUTPUT" />
               </span>
             </th>
@@ -282,7 +308,9 @@ export function ClaimsTable({ policies, priorSeverities }: Props) {
               title="Change vs last refresh (max($100, 2%) tolerance)"
               data-testid="severity-diff-header"
             >
-              Δ
+              <span className="inline-flex items-center gap-1 justify-center">
+                Δ <InfoIcon term="expected-loss" iconSize="sm" />
+              </span>
             </th>
           </tr>
         </thead>

@@ -1,5 +1,6 @@
 'use client';
 import { PERILS, PERIL_LABELS, type Peril } from '@/lib/sim/severity';
+import { InfoIcon } from '@/components/grammar/InfoTooltip';
 
 const LABELS = PERIL_LABELS;
 
@@ -21,6 +22,9 @@ export function PerilPicker({ active, onChange }: PerilPickerProps) {
   return (
     <div className="flex flex-col gap-1" role="group" aria-label="Select peril">
       <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">+ New simulation</div>
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1 inline-flex items-center gap-1">
+        Peril <InfoIcon term="peril" iconSize="sm" />
+      </div>
       {PERILS.map((p) => (
         <button
           key={p}
