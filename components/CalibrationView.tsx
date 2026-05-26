@@ -27,6 +27,7 @@
 
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
 import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
+import { InfoIcon } from '@/components/grammar/InfoTooltip';
 import type { TrustTier } from '@/lib/grammar/trust-tiers';
 
 // ---------------------------------------------------------------------------
@@ -342,7 +343,11 @@ export function CalibrationView({ data }: CalibrationViewProps) {
       {/* ---------------- Reliability diagrams (p10 / p50 / p90) ---------------- */}
       <section data-testid="reliability-section" className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">Reliability, XGB quantile heads</h2>
+          <h2 className="text-lg font-semibold">
+            <span className="inline-flex items-center gap-1">
+              Reliability <InfoIcon term="reliability-diagram" iconSize="sm" />, XGB quantile heads <InfoIcon term="quantile-head" iconSize="sm" />
+            </span>
+          </h2>
           <TrustTierBadge tier={trustTier} />
         </div>
         <p className="text-xs text-zinc-600">
@@ -369,7 +374,9 @@ export function CalibrationView({ data }: CalibrationViewProps) {
       {/* ---------------- PIT histogram ---------------- */}
       <section data-testid="pit-section" className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-semibold">PIT histogram, scenario generator</h2>
+          <h2 className="text-lg font-semibold">
+            <span className="inline-flex items-center gap-1">PIT histogram <InfoIcon term="pit" iconSize="sm" />, scenario generator</span>
+          </h2>
           <TrustTierBadge tier={pitTier} />
         </div>
         <p className="text-xs text-zinc-600">
