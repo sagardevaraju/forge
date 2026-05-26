@@ -11,7 +11,14 @@
  *
  * No external popover / tooltip dependencies. Inline Lucide-style info-SVG
  * (variant D from the 2026-05-25 brainstorm). Hover and focus reveal the
- * popup; click pins it open with Esc + outside-click dismissal (Task 3).
+ * popup; click pins it open with Esc + outside-click dismissal.
+ *
+ * 2026-05-26 — popup is now rendered via React's `createPortal` to
+ * `document.body` with `position: fixed`, escaping every ancestor
+ * `overflow: hidden` (PortfolioDrillDown, treaty bars, choropleth wrapper,
+ * the portfolio page's own h-[60vh] overflow-hidden parent, etc.). Left is
+ * clamped to the viewport so popups never clip horizontally regardless of
+ * where the trigger sits.
  */
 import {
   useCallback,
@@ -23,18 +30,25 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { lookupTerm } from '@/lib/grammar/glossary';
 
 // 'closed' = hidden; 'open' = hover/focus reveal (auto-dismisses);
-// 'pinned' = click-to-pin (Task 3), persists until Esc, outside click,
-// or a second click on the trigger.
+// 'pinned' = click-to-pin, persists until Esc, outside click, or a second
+// click on the trigger.
 type PopupState = 'closed' | 'open' | 'pinned';
 
-// Popup placement (Task 4). 'bottom-start' = popup left-aligned with the
-// trigger (default); 'bottom-end' = right-aligned, used when the trigger
-// sits in the right 30 % of the viewport so the 280 px popup grows
-// leftward instead of clipping. Top placements are out of scope.
+// Popup placement. 'bottom-start' = popup left-aligned with the trigger
+// (default); 'bottom-end' = right-aligned, used when the trigger sits late
+// in the viewport so the 280 px popup grows leftward instead of clipping.
+// Top placements are out of scope.
 type Placement = 'bottom-start' | 'bottom-end';
+
+// Visual constants. Popup width is a hard contract — the placement math
+// and the viewport-clamp both reference it; if you bump it, bump these too.
+const POPUP_WIDTH = 280;
+const POPUP_GAP = 6; // vertical distance from trigger bottom to popup top
+const VIEWPORT_PADDING = 8; // min distance from popup edge to viewport edge
 
 interface InfoTooltipProps {
   term: string;
@@ -50,22 +64,64 @@ interface PopupRendererProps {
   state: PopupState;
   popupId: string;
   placement: Placement;
+  anchorRect: DOMRect | null;
+  popupRef: RefObject<HTMLDivElement | null>;
 }
 
-function PopupRenderer({ term, state, popupId, placement }: PopupRendererProps) {
+function PopupRenderer({
+  term,
+  state,
+  popupId,
+  placement,
+  anchorRect,
+  popupRef,
+}: PopupRendererProps) {
   const entry = lookupTerm(term);
+  // SSR guard — `createPortal(..., document.body)` requires a real document.
+  if (typeof document === 'undefined') return null;
   if (!entry) return null;
-  const alignClass = placement === 'bottom-end' ? 'right-0' : 'left-0';
-  return (
+
+  // Compute viewport-fixed position from the trigger's bounding rect.
+  // Before the first measurement we park the popup off-screen rather than
+  // at (0,0) so it never flashes in the corner.
+  let top = -9999;
+  let left = -9999;
+  if (anchorRect) {
+    top = anchorRect.bottom + POPUP_GAP;
+    if (placement === 'bottom-end') {
+      // Right-aligned: popup's right edge matches the trigger's right edge.
+      left = anchorRect.right - POPUP_WIDTH;
+    } else {
+      // Left-aligned: popup's left edge matches the trigger's left edge.
+      left = anchorRect.left;
+    }
+    // Clamp inside the viewport so the popup never clips horizontally
+    // regardless of which side of the page the trigger sits on.
+    const vw =
+      typeof window !== 'undefined' ? window.innerWidth : POPUP_WIDTH * 4;
+    if (left < VIEWPORT_PADDING) left = VIEWPORT_PADDING;
+    if (left + POPUP_WIDTH > vw - VIEWPORT_PADDING) {
+      left = vw - POPUP_WIDTH - VIEWPORT_PADDING;
+    }
+  }
+
+  const popup = (
     <div
+      ref={popupRef}
       id={popupId}
       role="tooltip"
       aria-hidden={state === 'closed'}
       data-state={state}
       data-placement={placement}
+      style={{
+        position: 'fixed',
+        top: `${top}px`,
+        left: `${left}px`,
+        width: `${POPUP_WIDTH}px`,
+        zIndex: 9999,
+        borderColor: 'rgba(24, 24, 27, 0.14)',
+      }}
       className={[
-        'absolute top-full mt-1.5 z-50 w-[280px]',
-        alignClass,
         'rounded-md border bg-white p-3 shadow-[0_6px_20px_rgba(24,24,27,0.12),0_1px_3px_rgba(24,24,27,0.08)]',
         'text-[12px] leading-[1.45] text-zinc-900 font-normal normal-case tracking-normal',
         'transition-opacity duration-100',
@@ -73,7 +129,6 @@ function PopupRenderer({ term, state, popupId, placement }: PopupRendererProps) 
           ? 'opacity-0 invisible pointer-events-none'
           : 'opacity-100 visible',
       ].join(' ')}
-      style={{ borderColor: 'rgba(24, 24, 27, 0.14)' }}
     >
       <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-emerald-700">
         {entry.label}
@@ -94,6 +149,8 @@ function PopupRenderer({ term, state, popupId, placement }: PopupRendererProps) 
       )}
     </div>
   );
+
+  return createPortal(popup, document.body);
 }
 
 function InfoSvg({ size }: { size: 'sm' | 'md' }) {
@@ -122,7 +179,10 @@ interface CoreProps extends InfoTooltipProps {
   triggerChildren?: ReactNode;
 }
 
-function useTooltipState(triggerRef: RefObject<HTMLElement | null>) {
+function useTooltipState(
+  triggerRef: RefObject<HTMLElement | null>,
+  popupRef: RefObject<HTMLElement | null>,
+) {
   const [state, setState] = useState<PopupState>('closed');
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -151,17 +211,18 @@ function useTooltipState(triggerRef: RefObject<HTMLElement | null>) {
     setState((prev) => (prev === 'pinned' ? prev : 'open'));
   }, []);
 
-  const handleBlur = useCallback(
-    (e: FocusEvent<HTMLSpanElement>) => {
-      // If focus moved to another element inside the wrapper (e.g. the
-      // methodology link inside the popup), keep it open. The bubbled
-      // FocusEvent's `relatedTarget` is the element receiving focus.
-      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-      clearLeaveTimer();
-      setState((prev) => (prev === 'pinned' ? prev : 'closed'));
-    },
-    [],
-  );
+  const handleBlur = useCallback((e: FocusEvent<HTMLSpanElement>) => {
+    // If focus moved into the trigger wrapper OR into the (portaled) popup,
+    // keep it open. We have to check both because the popup is no longer a
+    // DOM descendant of the wrapper after the portal change — without the
+    // popupRef branch, tabbing from the trigger to the popup's methodology
+    // link would dismiss the popup mid-keystroke.
+    const next = e.relatedTarget as Node | null;
+    if (e.currentTarget.contains(next)) return;
+    if (popupRef.current && popupRef.current.contains(next)) return;
+    clearLeaveTimer();
+    setState((prev) => (prev === 'pinned' ? prev : 'closed'));
+  }, []);
 
   const handleClick = useCallback(() => {
     clearLeaveTimer();
@@ -169,15 +230,19 @@ function useTooltipState(triggerRef: RefObject<HTMLElement | null>) {
   }, []);
 
   // Esc + outside-click dismissal only fires when the popup is pinned.
+  // Since the popup is portaled into `document.body`, the "inside" check
+  // has to look at BOTH the trigger wrapper AND the popup ref — otherwise
+  // clicks on the popup itself (e.g. to copy text from the definition)
+  // would be treated as outside-clicks and dismiss the popup.
   useEffect(() => {
     if (state !== 'pinned') return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setState('closed');
     };
     const onDown = (e: MouseEvent) => {
-      if (!triggerRef.current) return;
       const target = e.target as Node;
-      if (triggerRef.current.contains(target)) return;
+      if (triggerRef.current && triggerRef.current.contains(target)) return;
+      if (popupRef.current && popupRef.current.contains(target)) return;
       setState('closed');
     };
     window.addEventListener('keydown', onKey);
@@ -186,7 +251,7 @@ function useTooltipState(triggerRef: RefObject<HTMLElement | null>) {
       window.removeEventListener('keydown', onKey);
       document.removeEventListener('mousedown', onDown);
     };
-  }, [state, triggerRef]);
+  }, [state, triggerRef, popupRef]);
 
   useEffect(() => () => clearLeaveTimer(), []);
 
@@ -203,24 +268,53 @@ function useTooltipState(triggerRef: RefObject<HTMLElement | null>) {
   };
 }
 
-function CoreTooltip({ term, iconSize = 'md', className, triggerChildren }: CoreProps) {
+function CoreTooltip({
+  term,
+  iconSize = 'md',
+  className,
+  triggerChildren,
+}: CoreProps) {
   const popupId = useId();
   const entry = lookupTerm(term);
   const wrapperRef = useRef<HTMLSpanElement | null>(null);
-  const { state, handlers } = useTooltipState(wrapperRef);
+  const popupRef = useRef<HTMLDivElement | null>(null);
+  const { state, handlers } = useTooltipState(wrapperRef, popupRef);
   const [placement, setPlacement] = useState<Placement>('bottom-start');
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
 
-  // Recompute placement when the popup opens, so we read the actual
-  // trigger position at that moment (and not whatever it was at mount).
-  // Flip to bottom-end (right-aligned popup) when the trigger sits in
-  // the right 30 % of the viewport — gives the 280 px popup room to grow
-  // leftward without clipping the viewport edge.
+  // Recompute placement + anchor rect whenever the popup is visible.
+  // We re-listen on `scroll` (capture: true, so we hear ancestor scrolls
+  // that don't bubble) and `resize` so the popup tracks the trigger as
+  // the page changes underneath it. The `state === 'closed'` branch
+  // releases the anchor so the popup parks off-screen until next open.
   useEffect(() => {
-    if (state === 'closed') return;
-    if (!wrapperRef.current) return;
-    const rect = wrapperRef.current.getBoundingClientRect();
-    const vw = window.innerWidth;
-    setPlacement(rect.left > vw * 0.7 ? 'bottom-end' : 'bottom-start');
+    if (state === 'closed') {
+      setAnchorRect(null);
+      return;
+    }
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    const updatePosition = () => {
+      const w = wrapperRef.current;
+      if (!w) return;
+      const rect = w.getBoundingClientRect();
+      const vw = window.innerWidth;
+      // Flip to bottom-end when the trigger sits in the right 30 % of the
+      // viewport — biases the popup to grow leftward before the
+      // viewport-clamp kicks in.
+      setPlacement(rect.left > vw * 0.7 ? 'bottom-end' : 'bottom-start');
+      setAnchorRect(rect);
+    };
+    updatePosition();
+    window.addEventListener('scroll', updatePosition, {
+      capture: true,
+      passive: true,
+    });
+    window.addEventListener('resize', updatePosition);
+    return () => {
+      window.removeEventListener('scroll', updatePosition, { capture: true });
+      window.removeEventListener('resize', updatePosition);
+    };
   }, [state]);
 
   // If the entry doesn't exist, render a no-popup placeholder marked for the
@@ -232,7 +326,9 @@ function CoreTooltip({ term, iconSize = 'md', className, triggerChildren }: Core
     return (
       <span
         ref={wrapperRef}
-        className={['relative inline-flex items-center gap-1', className].filter(Boolean).join(' ')}
+        className={['relative inline-flex items-center gap-1', className]
+          .filter(Boolean)
+          .join(' ')}
       >
         <button
           type="button"
@@ -256,7 +352,9 @@ function CoreTooltip({ term, iconSize = 'md', className, triggerChildren }: Core
   return (
     <span
       ref={wrapperRef}
-      className={['relative inline-flex items-center gap-1', className].filter(Boolean).join(' ')}
+      className={['relative inline-flex items-center gap-1', className]
+        .filter(Boolean)
+        .join(' ')}
       {...spanHandlers}
     >
       <button
@@ -272,7 +370,14 @@ function CoreTooltip({ term, iconSize = 'md', className, triggerChildren }: Core
         {triggerChildren}
         <InfoSvg size={iconSize} />
       </button>
-      <PopupRenderer term={term} state={state} popupId={popupId} placement={placement} />
+      <PopupRenderer
+        term={term}
+        state={state}
+        popupId={popupId}
+        placement={placement}
+        anchorRect={anchorRect}
+        popupRef={popupRef}
+      />
     </span>
   );
 }
