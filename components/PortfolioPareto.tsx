@@ -38,6 +38,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
 import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
+import { InfoIcon } from '@/components/grammar/InfoTooltip';
 import type { PortfolioOptimization } from '@/lib/portfolio-actions';
 
 interface Props {
@@ -216,9 +217,10 @@ export function PortfolioPareto({ baselineOptimization, totalTiv: _totalTiv }: P
           <div className="flex items-center gap-2">
             <h2
               id="pareto-heading"
-              className="text-[15px] font-semibold text-zinc-900 tracking-[-0.005em]"
+              className="text-[15px] font-semibold text-zinc-900 tracking-[-0.005em] inline-flex items-center gap-1.5"
             >
               Pareto sweep
+              <InfoIcon term="pareto-sweep" iconSize="sm" />
             </h2>
             <TrustTierBadge tier="MODEL_OUTPUT" />
           </div>
@@ -257,7 +259,15 @@ export function PortfolioPareto({ baselineOptimization, totalTiv: _totalTiv }: P
       {open && cells && (
         <div id="pareto-grid" data-testid="pareto-grid" className="flex flex-col gap-2">
           <p className="text-[11px] text-zinc-600 leading-snug">
-            3×3 grid on (capital budget × cession budget), at multipliers{' '}
+            3×3 grid on (
+            <span className="inline-flex items-center gap-1">
+              capital budget <InfoIcon term="capital-budget" iconSize="sm" />
+            </span>
+            {' '}×{' '}
+            <span className="inline-flex items-center gap-1">
+              cession budget <InfoIcon term="cession-budget" iconSize="sm" />
+            </span>
+            ), at multipliers{' '}
             <span className="font-medium">0.7× / 1.0× / 1.5×</span> of the
             baseline. Max non-renew % is pinned to the baseline (
             <span className="tabular-nums">
@@ -346,11 +356,12 @@ export function PortfolioPareto({ baselineOptimization, totalTiv: _totalTiv }: P
                       </div>
                     )}
                     {isRelaxed && (
-                      <div className="text-[9px] text-amber-700 uppercase tracking-wide">
+                      <div className="text-[9px] text-amber-700 uppercase tracking-wide inline-flex items-center gap-1">
                         Relaxed{' '}
                         {cell.relaxation_factor !== undefined
                           ? `${cell.relaxation_factor}×`
                           : ''}
+                        <InfoIcon term="infeasible-relaxed" iconSize="sm" />
                       </div>
                     )}
                   </div>

@@ -50,11 +50,32 @@ import {
   ACTION_LABELS,
 } from '@/lib/portfolio-actions';
 import { pointInPolygon, type PolygonLike } from '@/lib/geo/point_in_polygon';
+import { InfoIcon } from '@/components/grammar/InfoTooltip';
+import type { GlossaryKey } from '@/lib/grammar/glossary';
 import type { FetchNhcConeResult } from '@/app/api/agent/tools/fetch_nhc_cone';
 import type {
   NwsAlert,
   NwsAlertCounts,
 } from '@/app/api/agent/tools/fetch_nws_alerts';
+
+/**
+ * Map each portfolio action variant to its canonical glossary key. The
+ * 7-bucket reprice grid (reprice_n20 .. reprice_p20) collapses onto the
+ * single `reprice` term — the glossary entry already documents the grid.
+ */
+const ACTION_TERM: Record<ActionName, GlossaryKey> = {
+  retain: 'retain',
+  reprice_n20: 'reprice',
+  reprice_n10: 'reprice',
+  reprice_0: 'reprice',
+  reprice_p5: 'reprice',
+  reprice_p10: 'reprice',
+  reprice_p15: 'reprice',
+  reprice_p20: 'reprice',
+  non_renew: 'non-renew',
+  cede_qs: 'cede-qs',
+  cede_xs: 'cede-xs',
+};
 
 interface Props {
   cohorts: Cohort[];
@@ -376,7 +397,10 @@ export function PortfolioMap({
                       className="h-2.5 w-2.5 rounded-full self-center"
                       style={{ background: ACTION_COLORS[action] }}
                     />
-                    <span className="text-zinc-700">{ACTION_LABELS[action]}</span>
+                    <span className="text-zinc-700 inline-flex items-center gap-1">
+                      {ACTION_LABELS[action]}{' '}
+                      <InfoIcon term={ACTION_TERM[action]} iconSize="sm" />
+                    </span>
                     <span className="text-zinc-500 text-right">
                       {((v.tiv / aggregateTiv) * 100).toFixed(1)}%
                     </span>

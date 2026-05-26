@@ -120,7 +120,7 @@ describe('PortfolioPareto', () => {
     const opt = makeOptimization();
     render(<PortfolioPareto baselineOptimization={opt} totalTiv={3_100_000_000} />);
     expect(
-      screen.getByRole('button', { name: /pareto sweep/i }),
+      screen.getByRole('button', { name: /(?:Show|Hide) Pareto sweep/i }),
     ).toBeInTheDocument();
     // No grid before toggle.
     expect(screen.queryByTestId('pareto-grid')).toBeNull();
@@ -134,7 +134,7 @@ describe('PortfolioPareto', () => {
 
     const opt = makeOptimization();
     render(<PortfolioPareto baselineOptimization={opt} totalTiv={3_100_000_000} />);
-    fireEvent.click(screen.getByRole('button', { name: /pareto sweep/i }));
+    fireEvent.click(screen.getByRole('button', { name: /(?:Show|Hide) Pareto sweep/i }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(9));
 
@@ -166,7 +166,7 @@ describe('PortfolioPareto', () => {
   test('renders the 9-cell grid populated with achieved objectives in $M', async () => {
     const opt = makeOptimization();
     render(<PortfolioPareto baselineOptimization={opt} totalTiv={3_100_000_000} />);
-    fireEvent.click(screen.getByRole('button', { name: /pareto sweep/i }));
+    fireEvent.click(screen.getByRole('button', { name: /(?:Show|Hide) Pareto sweep/i }));
 
     await waitFor(() => expect(screen.getByTestId('pareto-grid')).toBeInTheDocument());
 
@@ -192,7 +192,7 @@ describe('PortfolioPareto', () => {
 
     const opt = makeOptimization();
     render(<PortfolioPareto baselineOptimization={opt} totalTiv={3_100_000_000} />);
-    fireEvent.click(screen.getByRole('button', { name: /pareto sweep/i }));
+    fireEvent.click(screen.getByRole('button', { name: /(?:Show|Hide) Pareto sweep/i }));
 
     await waitFor(() => expect(screen.getByTestId('pareto-loading')).toBeInTheDocument());
 
@@ -235,7 +235,7 @@ describe('PortfolioPareto', () => {
 
     const opt = makeOptimization();
     render(<PortfolioPareto baselineOptimization={opt} totalTiv={3_100_000_000} />);
-    fireEvent.click(screen.getByRole('button', { name: /pareto sweep/i }));
+    fireEvent.click(screen.getByRole('button', { name: /(?:Show|Hide) Pareto sweep/i }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(9));
     const cells = await screen.findAllByTestId('pareto-cell');
@@ -250,7 +250,7 @@ describe('PortfolioPareto', () => {
   test('toggling the panel off hides the grid', async () => {
     const opt = makeOptimization();
     render(<PortfolioPareto baselineOptimization={opt} totalTiv={3_100_000_000} />);
-    const toggle = screen.getByRole('button', { name: /pareto sweep/i });
+    const toggle = screen.getByRole('button', { name: /(?:Show|Hide) Pareto sweep/i });
 
     fireEvent.click(toggle);
     await waitFor(() => expect(screen.getByTestId('pareto-grid')).toBeInTheDocument());
@@ -262,7 +262,7 @@ describe('PortfolioPareto', () => {
   test('surfaces the MODEL_OUTPUT trust tier and a provenance footnote', async () => {
     const opt = makeOptimization();
     render(<PortfolioPareto baselineOptimization={opt} totalTiv={3_100_000_000} />);
-    fireEvent.click(screen.getByRole('button', { name: /pareto sweep/i }));
+    fireEvent.click(screen.getByRole('button', { name: /(?:Show|Hide) Pareto sweep/i }));
 
     await waitFor(() => expect(screen.getByTestId('pareto-grid')).toBeInTheDocument());
 
@@ -315,7 +315,7 @@ describe('PortfolioPareto', () => {
 
     const opt = makeOptimization();
     render(<PortfolioPareto baselineOptimization={opt} totalTiv={3_100_000_000} />);
-    fireEvent.click(screen.getByRole('button', { name: /pareto sweep/i }));
+    fireEvent.click(screen.getByRole('button', { name: /(?:Show|Hide) Pareto sweep/i }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(9));
     const cells = await screen.findAllByTestId('pareto-cell');

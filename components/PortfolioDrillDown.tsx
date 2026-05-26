@@ -37,6 +37,7 @@ import {
 } from '@/lib/portfolio-actions';
 import { renderRecommendation } from '@/lib/portfolio/narrative';
 import { ECONOMICS_TABLE } from '@/lib/portfolio/economics';
+import { InfoIcon } from '@/components/grammar/InfoTooltip';
 
 interface PinRow {
   policy_id: number;
@@ -372,8 +373,16 @@ export function PortfolioDrillDown({
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
           <tr style={{ borderBottom: '1px solid #e5e7eb', color: '#52525b' }}>
-            <th style={{ textAlign: 'left', padding: '4px 6px 4px 0' }}>Cohort</th>
-            <th style={{ textAlign: 'right', padding: 4 }}>TIV</th>
+            <th style={{ textAlign: 'left', padding: '4px 6px 4px 0' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                Cohort <InfoIcon term="cohort" iconSize="sm" />
+              </span>
+            </th>
+            <th style={{ textAlign: 'right', padding: 4 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                TIV <InfoIcon term="tiv" iconSize="sm" />
+              </span>
+            </th>
             <th style={{ textAlign: 'left', padding: 4 }}>Action</th>
           </tr>
         </thead>
