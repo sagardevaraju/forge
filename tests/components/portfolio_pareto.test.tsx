@@ -268,10 +268,14 @@ describe('PortfolioPareto', () => {
 
     const panel = screen.getByTestId('pareto-panel');
     // The TrustTierBadge renders the short label ("Model"); the full
-    // "Model output" gloss lives in the title attribute.
+    // "Model" gloss lives in the InfoTooltip popup (Plan Task 6 —
+    // migrated off the native title= attribute).
     const badge = within(panel).getByTestId('trust-tier-badge');
     expect(badge.textContent).toMatch(/model/i);
-    expect(badge.getAttribute('title') ?? '').toMatch(/model output/i);
+    const definitionBtn = within(panel).getByRole('button', {
+      name: /definition of model/i,
+    });
+    expect(definitionBtn).toBeInTheDocument();
     expect(within(panel).getByTestId('provenance-footnote').textContent).toMatch(
       /9 parallel solves/i,
     );

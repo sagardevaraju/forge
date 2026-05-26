@@ -1,11 +1,18 @@
 /**
- * Task 1 (Redesign Phase 1) — TrustTierBadge grammar primitive.
+ * TrustTierBadge — provenance pill rendered next to every numbered surface.
  *
- * A pure, stateless pill that renders a trust-tier label with its tooltip and
- * Tailwind palette pulled from `lib/grammar/trust-tiers.ts`. Every later view
- * composes against this primitive instead of hand-rolling green/amber pills.
+ * Pre-2026-05: used the native `title=` attribute for hover help (the
+ * browser default tooltip — no styling, no keyboard reveal). This file
+ * now wraps the existing pill in <InfoTooltip term={meta.glossaryKey}>
+ * so Live / Model / Demo / Recommend / Override chips get the same rich
+ * popup pattern as every other jargon term across the UI.
+ *
+ * The look of the pill itself (label, dot, color) is unchanged — only the
+ * hover affordance is upgraded. Trust-tier glossary entries live in
+ * `lib/grammar/glossary.ts` (Plan Task 1).
  */
 import { TRUST_TIER_META, type TrustTier } from '@/lib/grammar/trust-tiers';
+import { InfoTooltip } from '@/components/grammar/InfoTooltip';
 
 interface TrustTierBadgeProps {
   tier: TrustTier;
@@ -22,9 +29,11 @@ export function TrustTierBadge({ tier, className }: TrustTierBadgeProps) {
     .filter(Boolean)
     .join(' ');
   return (
-    <span data-testid="trust-tier-badge" title={meta.tooltip} className={classes}>
-      <span aria-hidden="true" className="h-1 w-1 rounded-full bg-current opacity-70" />
-      {meta.label}
-    </span>
+    <InfoTooltip term={meta.glossaryKey}>
+      <span data-testid="trust-tier-badge" className={classes}>
+        <span aria-hidden="true" className="h-1 w-1 rounded-full bg-current opacity-70" />
+        {meta.label}
+      </span>
+    </InfoTooltip>
   );
 }

@@ -37,7 +37,11 @@ describe('ExecCard — glossary term prop', () => {
   });
 
   test('does NOT render an info-icon button when term is omitted', () => {
+    // The TrustTierBadge always renders its own glossary button
+    // ("Definition of Model" etc.) — so we assert that ExecCard's own
+    // label-side info-icon is absent (no "Definition of <label>" button),
+    // not that no glossary button exists at all.
     render(<ExecCard label="Random" value="1" tier="MODEL_OUTPUT" />);
-    expect(screen.queryByRole('button', { name: /definition of/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /definition of random/i })).toBeNull();
   });
 });

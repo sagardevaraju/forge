@@ -295,7 +295,11 @@ describe('PortfolioPersonaScope — per-persona content', () => {
     expect(gapCard).not.toBeNull();
     expect(within(gapCard as HTMLElement).getByText('—')).toBeInTheDocument();
     // The trust badge for the synthetic card should read "Demo".
-    expect(within(gapCard as HTMLElement).getByText('Demo')).toBeInTheDocument();
+    // The InfoTooltip popup (Plan Task 6) also renders the "Demo" label
+    // inside the closed (invisible) popup body, so query specifically
+    // the badge pill via its test id.
+    const badge = within(gapCard as HTMLElement).getByTestId('trust-tier-badge');
+    expect(badge).toHaveTextContent('Demo');
   });
 });
 
