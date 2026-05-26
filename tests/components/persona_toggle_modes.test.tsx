@@ -224,9 +224,11 @@ describe('PortfolioPersonaScope — per-persona content', () => {
     expect(within(header).getAllByTestId('exec-card').length).toBe(5);
     expect(screen.getByTestId('whatif-rail')).toBeInTheDocument();
     expect(screen.queryByTestId('persona-quick-links')).toBeNull();
-    // The headline cat-ops cards are present.
-    expect(within(header).getByText('Expected margin')).toBeInTheDocument();
-    expect(within(header).getByText('Cession spend')).toBeInTheDocument();
+    // The headline cat-ops cards are present. Each card label also appears
+    // inside the InfoTooltip popup (rendered always-on but invisible until
+    // hover/focus), so `getAllByText` returns 2 matches per labeled card.
+    expect(within(header).getAllByText('Expected margin').length).toBeGreaterThanOrEqual(1);
+    expect(within(header).getAllByText('Cession spend').length).toBeGreaterThanOrEqual(1);
   });
 
   test('?persona=actuary swaps margin → Retained TVaR-99 + adds CRPS + shows /calibration', () => {
@@ -237,9 +239,11 @@ describe('PortfolioPersonaScope — per-persona content', () => {
     // "Retained TVaR-99" — schema v5 now ships a real coherent tail
     // measure (mean of top 1 % of merged book-loss scenarios) rather
     // than re-purposing book_totals.loss_p99 as a VaR proxy.
-    expect(within(header).getByText('Retained TVaR-99')).toBeInTheDocument();
-    expect(within(header).queryByText('Expected margin')).toBeNull();
-    expect(within(header).getByText('CRPS')).toBeInTheDocument();
+    // Card label appears in both the visible header and the always-rendered
+    // (invisible) InfoTooltip popup, so use `getAllByText`/`queryAllByText`.
+    expect(within(header).getAllByText('Retained TVaR-99').length).toBeGreaterThanOrEqual(1);
+    expect(within(header).queryAllByText('Expected margin').length).toBe(0);
+    expect(within(header).getAllByText('CRPS').length).toBeGreaterThanOrEqual(1);
     // Quick-links band carries the /calibration link.
     const links = screen.getByTestId('persona-quick-links');
     const calLink = within(links).getByText('Calibration');

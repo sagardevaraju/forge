@@ -159,6 +159,7 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
         <ExecCard
           key={kind}
           label="Total TIV"
+          term="book-tiv"
           value={$B(p.totalTiv)}
           tier="SYNTHETIC_SCAFFOLD"
           variant={variant}
@@ -169,6 +170,7 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
         <ExecCard
           key={kind}
           label="Expected margin"
+          term="expected-margin"
           value={$Mor(p.objective)}
           delta={infeasible ? undefined : p.objectiveDelta}
           tier={infeasible ? 'SYNTHETIC_SCAFFOLD' : 'RECOMMENDATION'}
@@ -189,6 +191,7 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
         <ExecCard
           key={kind}
           label="Retained TVaR-99"
+          term="tvar-99"
           value={$Mor(infeasible ? null : p.capitalUsed)}
           tier={infeasible ? 'SYNTHETIC_SCAFFOLD' : 'MODEL_OUTPUT'}
         />
@@ -198,6 +201,7 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
         <ExecCard
           key={kind}
           label="CRPS"
+          term="crps"
           value={p.crps != null ? p.crps.toFixed(3) : '—'}
           tier="SYNTHETIC_SCAFFOLD"
         />
@@ -215,6 +219,7 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
         <ExecCard
           key={kind}
           label="Tail exposure"
+          term="tail-exposure"
           value={$Mor(infeasible ? null : p.capitalUsed)}
           caption={`of ${$M(p.capitalBudget)} capital budget`}
           delta={infeasible ? undefined : p.capitalUsedDelta}
@@ -226,6 +231,7 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
         <ExecCard
           key={kind}
           label="Non-renew used"
+          term="non-renew"
           value={$Mor(infeasible ? null : p.nonrenewUsedTiv)}
           caption={`of ${$M(p.nonrenewCapTiv)} cap`}
           delta={infeasible ? undefined : p.nonrenewUsedDelta}
@@ -237,6 +243,7 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
         <ExecCard
           key={kind}
           label="Cession spend"
+          term="cession"
           value={$Mor(infeasible ? null : p.cessionSpend)}
           caption={`of ${$M(p.cessionBudget)} budget`}
           tier={infeasible ? 'SYNTHETIC_SCAFFOLD' : 'MODEL_OUTPUT'}
@@ -247,6 +254,7 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
         <ExecCard
           key={kind}
           label="RoL by layer"
+          term="rate-on-line"
           value={formatRolLayers(p.rolLayers ?? [])}
           tier={p.rolLayers && p.rolLayers.length > 0 ? 'MODEL_OUTPUT' : 'SYNTHETIC_SCAFFOLD'}
         />
@@ -266,6 +274,7 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
           <ExecCard
             key={kind}
             label="Retained tail (post-XS)"
+            term="retained-tail"
             value={$M(retained)}
             tier={minAttach != null ? 'MODEL_OUTPUT' : 'SYNTHETIC_SCAFFOLD'}
           />
@@ -276,6 +285,7 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
         <ExecCard
           key={kind}
           label="VRP demand adj."
+          term="adjuster-load"
           value={p.vrpDemand != null ? `${p.vrpDemand > 0 ? '+' : ''}${p.vrpDemand}` : '—'}
           tier="SYNTHETIC_SCAFFOLD"
         />
@@ -285,6 +295,7 @@ function renderCard(kind: PersonaCardKind, p: Props, variant: 'hero' | 'default'
         <ExecCard
           key={kind}
           label="SAA optimality gap"
+          term="objective"
           value={p.saaGap != null ? `${(p.saaGap * 100).toFixed(2)}%` : '—'}
           tier="SYNTHETIC_SCAFFOLD"
         />
