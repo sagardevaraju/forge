@@ -108,4 +108,46 @@ describe('InfoIcon — click pinning', () => {
     const popupId = btn.getAttribute('aria-describedby')!;
     expect(document.getElementById(popupId)).toHaveAttribute('data-state', 'closed');
   });
+
+  test('click inside the popup does not dismiss it', () => {
+    // The wrapper-contains check on outside-mousedown should treat clicks
+    // inside the popup as "inside" — so the popup stays pinned. Locks
+    // down the invariant against a future portal/createPortal refactor.
+    render(<InfoIcon term="tvar-99" />);
+    const btn = screen.getByRole('button');
+    fireEvent.click(btn);
+    const popupId = btn.getAttribute('aria-describedby')!;
+    const popup = document.getElementById(popupId)!;
+    fireEvent.mouseDown(popup);
+    expect(popup).toHaveAttribute('data-state', 'pinned');
+  });
+});
+
+describe('InfoIcon — popup placement', () => {
+  test('flips to right-aligned when the trigger sits in the right 30% of the viewport', () => {
+    // Force jsdom's window.innerWidth then place the trigger past the
+    // 70% mark using getBoundingClientRect.
+    Object.defineProperty(window, 'innerWidth', { value: 1000, writable: true });
+    const { container } = render(<InfoIcon term="tvar-99" />);
+    const span = container.querySelector('span.relative')! as HTMLSpanElement;
+    span.getBoundingClientRect = () =>
+      ({ left: 850, right: 870, top: 0, bottom: 12, width: 20, height: 12 }) as DOMRect;
+    fireEvent.pointerEnter(span);
+    // The popup carries data-placement so the renderer can pick `left-0` vs `right-0`.
+    const btn = screen.getByRole('button');
+    const popupId = btn.getAttribute('aria-describedby')!;
+    expect(document.getElementById(popupId)).toHaveAttribute('data-placement', 'bottom-end');
+  });
+
+  test('uses bottom-start when trigger sits in the left half', () => {
+    Object.defineProperty(window, 'innerWidth', { value: 1000, writable: true });
+    const { container } = render(<InfoIcon term="tvar-99" />);
+    const span = container.querySelector('span.relative')! as HTMLSpanElement;
+    span.getBoundingClientRect = () =>
+      ({ left: 100, right: 120, top: 0, bottom: 12, width: 20, height: 12 }) as DOMRect;
+    fireEvent.pointerEnter(span);
+    const btn = screen.getByRole('button');
+    const popupId = btn.getAttribute('aria-describedby')!;
+    expect(document.getElementById(popupId)).toHaveAttribute('data-placement', 'bottom-start');
+  });
 });

@@ -30,6 +30,12 @@ import { lookupTerm } from '@/lib/grammar/glossary';
 // or a second click on the trigger.
 type PopupState = 'closed' | 'open' | 'pinned';
 
+// Popup placement (Task 4). 'bottom-start' = popup left-aligned with the
+// trigger (default); 'bottom-end' = right-aligned, used when the trigger
+// sits in the right 30 % of the viewport so the 280 px popup grows
+// leftward instead of clipping. Top placements are out of scope.
+type Placement = 'bottom-start' | 'bottom-end';
+
 interface InfoTooltipProps {
   term: string;
   children?: ReactNode;
@@ -43,18 +49,22 @@ interface PopupRendererProps {
   term: string;
   state: PopupState;
   popupId: string;
+  placement: Placement;
 }
 
-function PopupRenderer({ term, state, popupId }: PopupRendererProps) {
+function PopupRenderer({ term, state, popupId, placement }: PopupRendererProps) {
   const entry = lookupTerm(term);
   if (!entry) return null;
+  const alignClass = placement === 'bottom-end' ? 'right-0' : 'left-0';
   return (
     <div
       id={popupId}
       role="tooltip"
       data-state={state}
+      data-placement={placement}
       className={[
-        'absolute left-0 top-full mt-1.5 z-50 w-[280px]',
+        'absolute top-full mt-1.5 z-50 w-[280px]',
+        alignClass,
         'rounded-md border bg-white p-3 shadow-[0_6px_20px_rgba(24,24,27,0.12),0_1px_3px_rgba(24,24,27,0.08)]',
         'text-[12px] leading-[1.45] text-zinc-900 font-normal normal-case tracking-normal',
         'transition-opacity duration-100',
@@ -197,6 +207,20 @@ function CoreTooltip({ term, iconSize = 'md', className, triggerChildren }: Core
   const entry = lookupTerm(term);
   const wrapperRef = useRef<HTMLSpanElement | null>(null);
   const { state, handlers } = useTooltipState(wrapperRef);
+  const [placement, setPlacement] = useState<Placement>('bottom-start');
+
+  // Recompute placement when the popup opens, so we read the actual
+  // trigger position at that moment (and not whatever it was at mount).
+  // Flip to bottom-end (right-aligned popup) when the trigger sits in
+  // the right 30 % of the viewport — gives the 280 px popup room to grow
+  // leftward without clipping the viewport edge.
+  useEffect(() => {
+    if (state === 'closed') return;
+    if (!wrapperRef.current) return;
+    const rect = wrapperRef.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    setPlacement(rect.left > vw * 0.7 ? 'bottom-end' : 'bottom-start');
+  }, [state]);
 
   // If the entry doesn't exist, render a no-popup placeholder marked for the
   // glossary-coverage sweep test. The trigger is still a <button> so layout
@@ -247,7 +271,7 @@ function CoreTooltip({ term, iconSize = 'md', className, triggerChildren }: Core
         {triggerChildren}
         <InfoSvg size={iconSize} />
       </button>
-      <PopupRenderer term={term} state={state} popupId={popupId} />
+      <PopupRenderer term={term} state={state} popupId={popupId} placement={placement} />
     </span>
   );
 }
