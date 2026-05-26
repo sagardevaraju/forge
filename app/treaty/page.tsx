@@ -17,6 +17,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { TreatyLadder } from '@/components/TreatyLadder';
+import { Term } from '@/components/grammar/InfoTooltip';
 import type { TreatyStack } from '@/lib/treaty/types';
 
 export const dynamic = 'force-dynamic';
@@ -39,12 +40,20 @@ export default async function TreatyPage() {
   const stack = await loadTreatyArtifact();
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-bold mb-1">Treaty</h1>
+      <h1 className="text-2xl font-bold mb-1">
+        <Term term="treaty">Treaty</Term>
+      </h1>
       <p className="text-sm text-zinc-600 mb-4">
-        The placed reinsurance stack, quota share at the bottom plus each excess-of-loss
-        layer. Attachment, exhaustion, rate-on-line, and reinstatements remaining are surfaced
-        per layer so the ops desk can see at a glance where the carrier&rsquo;s tail exposure
-        sits relative to the cover.
+        The placed reinsurance stack,{' '}
+        <Term term="quota-share">quota share</Term> at the bottom plus each{' '}
+        <Term term="excess-of-loss">excess-of-loss</Term> layer.{' '}
+        <Term term="attachment">Attachment</Term>,{' '}
+        <Term term="exhaustion">exhaustion</Term>,{' '}
+        <Term term="rate-on-line">rate-on-line</Term>, and{' '}
+        <Term term="reinstatement">reinstatements</Term> remaining are surfaced
+        per layer so the ops desk can see at a glance where the carrier&rsquo;s{' '}
+        <Term term="tail-exposure">tail exposure</Term> sits relative to the
+        cover.
       </p>
       {stack ? (
         <TreatyLadder stack={stack} />

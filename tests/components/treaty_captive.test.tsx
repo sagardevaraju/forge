@@ -127,7 +127,10 @@ describe('TreatyLadder — captive vehicle (Task P3.20)', () => {
     const row = screen.getByTestId('treaty-table-row-captive');
     expect(row).toBeInTheDocument();
     const cells = row.querySelectorAll('td');
-    expect(cells[0]!.textContent).toBe('Captive');
+    // Task 13 — `toMatch(/^Captive/)` because the InfoTooltip popup
+    // renders the term label inside the cell's DOM (hidden state),
+    // appending "CaptiveA reinsurance company…" to textContent.
+    expect(cells[0]!.textContent).toMatch(/^Captive/);
     expect(cells[1]!.textContent).toMatch(/95% trapped/);
   });
 
