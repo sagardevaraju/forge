@@ -60,6 +60,7 @@ function PopupRenderer({ term, state, popupId, placement }: PopupRendererProps) 
     <div
       id={popupId}
       role="tooltip"
+      aria-hidden={state === 'closed'}
       data-state={state}
       data-placement={placement}
       className={[

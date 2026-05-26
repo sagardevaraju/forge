@@ -66,6 +66,24 @@ describe('InfoIcon — hover + focus reveal', () => {
     // State should remain open (relatedTarget is inside the wrapper).
     expect(popup).toHaveAttribute('data-state', 'open');
   });
+
+  test('closed popup has aria-hidden=true so testing-library skips its text', () => {
+    render(<InfoIcon term="tvar-99" />);
+    const btn = screen.getByRole('button');
+    const popupId = btn.getAttribute('aria-describedby')!;
+    const popup = document.getElementById(popupId)!;
+    // Closed popup is aria-hidden, so accessibility-based queries skip it.
+    expect(popup).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  test('open popup drops aria-hidden so screen readers can announce it', () => {
+    render(<InfoIcon term="tvar-99" />);
+    const btn = screen.getByRole('button');
+    fireEvent.focus(btn);
+    const popupId = btn.getAttribute('aria-describedby')!;
+    const popup = document.getElementById(popupId)!;
+    expect(popup).toHaveAttribute('aria-hidden', 'false');
+  });
 });
 
 describe('InfoIcon — click pinning', () => {
