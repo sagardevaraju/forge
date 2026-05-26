@@ -176,7 +176,10 @@ describe('ClaimsPage — cohort loss_p50 replaces LOSS_FACTOR heuristic', () => 
     render(ui);
 
     // The loss column header should be present in the rendered table.
-    expect(screen.getByText(/Expected loss/i)).toBeInTheDocument();
+    // Task 11 — `getAllByText` because the InfoTooltip popup also renders the
+    // term label ("Expected loss") in its hidden-state DOM; the table header
+    // is the first occurrence.
+    expect(screen.getAllByText(/Expected loss/i)[0]).toBeInTheDocument();
 
     // A dedicated trust-tier marker for the loss column exists and reads MODEL_OUTPUT.
     const lossTier = screen.getByTestId('loss-trust-tier');
@@ -301,7 +304,9 @@ describe('ClaimsPage — cohort loss_p50 replaces LOSS_FACTOR heuristic', () => 
     render(ui);
 
     // Page mounted; loss column is rendered; every loss cell is "—".
-    expect(screen.getByText(/Expected loss/i)).toBeInTheDocument();
+    // Task 11 — `getAllByText` because the InfoTooltip popup also renders the
+    // term label in its hidden-state DOM.
+    expect(screen.getAllByText(/Expected loss/i)[0]).toBeInTheDocument();
     // Two policies → two "—" cells in the loss column.
     const dashes = screen.getAllByText('—');
     expect(dashes.length).toBeGreaterThanOrEqual(2);
