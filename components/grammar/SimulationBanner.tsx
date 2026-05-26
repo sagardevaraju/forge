@@ -22,6 +22,7 @@ import {
   readReoptimizeStream,
   type ReoptimizeEvent,
 } from '@/lib/reoptimize-stream';
+import { InfoIcon } from '@/components/grammar/InfoTooltip';
 
 export interface UnresolvedSim {
   id: string;
@@ -195,10 +196,12 @@ export function SimulationBanner({ unresolved }: SimulationBannerProps) {
         ⚠
       </span>
       <div className="flex-1">
-        <div className="text-sm text-amber-200 font-medium">{headline}</div>
-        <div className="text-xs text-amber-400/80 mt-0.5">
-          Adds K=1000 per sim to joint TVaR-99. Re-optimize to see updated
-          portfolio actions.
+        <div className="text-sm text-amber-200 font-medium inline-flex items-center gap-1">
+          {headline}
+          <InfoIcon term="unresolved-simulation" iconSize="sm" />
+        </div>
+        <div className="text-xs text-amber-400/80 mt-0.5 inline-flex items-center gap-1 flex-wrap">
+          Adds <span className="inline-flex items-center gap-1">K=1000<InfoIcon term="k-1000" iconSize="sm" /></span> per sim to joint <span className="inline-flex items-center gap-1">TVaR-99<InfoIcon term="tvar-99" iconSize="sm" /></span>. Re-optimize to see updated portfolio actions.
         </div>
         {err && <div className="text-xs text-red-400 mt-1">{err}</div>}
       </div>
