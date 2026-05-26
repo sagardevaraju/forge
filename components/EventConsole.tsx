@@ -45,6 +45,7 @@ import {
   type SitrepDataSource,
 } from './SitrepPanel';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
+import { InfoIcon } from '@/components/grammar/InfoTooltip';
 import { ConeExposureBars, type ConeExposureCohort } from './ConeExposureBars';
 import type { FetchNhcConeResult } from '@/app/api/agent/tools/fetch_nhc_cone';
 import type { FireDetection } from '@/app/api/agent/tools/fetch_firms_fires';
@@ -320,15 +321,22 @@ export function EventConsole({
               className="absolute top-3 left-3 bg-white p-3 border rounded shadow-sm text-xs max-w-xs"
             >
               <div className="flex items-center justify-between gap-2 mb-1">
-                <div className="font-semibold">
-                  Storm: {cone.advisory_number || 'N/A'}
+                <div className="font-semibold flex items-center gap-1">
+                  <span>Storm: {cone.advisory_number || 'N/A'}</span>
+                  <InfoIcon term="advisory" iconSize="sm" />
                 </div>
                 <TrustTierBadge
                   tier={cone.source === 'live' ? 'LIVE_FEED' : 'SYNTHETIC_SCAFFOLD'}
                 />
               </div>
-              <div>Peak wind: {cone.peak_wind ?? 'N/A'} mph</div>
-              <div>{(fires ?? []).length} active fires nearby</div>
+              <div className="flex items-center gap-1">
+                <span>Peak wind: {cone.peak_wind ?? 'N/A'} mph</span>
+                <InfoIcon term="peak-wind" iconSize="sm" />
+              </div>
+              <div className="flex items-center gap-1">
+                <span>{(fires ?? []).length} active fires nearby</span>
+                <InfoIcon term="firms" iconSize="sm" />
+              </div>
             </div>
           )}
           {/* Task P2.22 — multi-advisory legend strip. Sits below the summary
@@ -342,7 +350,10 @@ export function EventConsole({
               data-testid="advisory-ribbon-legend"
               className="absolute top-3 right-3 bg-white p-2 border rounded shadow-sm text-[11px] leading-tight"
             >
-              <div className="font-semibold mb-1">Prior advisories</div>
+              <div className="font-semibold mb-1 flex items-center gap-1">
+                <span>Prior advisories</span>
+                <InfoIcon term="advisory" iconSize="sm" />
+              </div>
               <ul className="space-y-1">
                 {priorCones.map((prior, idx) => (
                   <li
@@ -388,8 +399,9 @@ export function EventConsole({
             >
               <div className="font-semibold mb-1 flex items-center gap-2">
                 <span>Active alerts</span>
-                <span className="text-[10px] text-slate-500 font-normal">
+                <span className="text-[10px] text-slate-500 font-normal inline-flex items-center gap-0.5">
                   NWS · live
+                  <InfoIcon term="nws" iconSize="sm" />
                 </span>
                 <button
                   type="button"
@@ -466,6 +478,9 @@ export function EventConsole({
                         }}
                       />
                       <span className="text-slate-700">{label}</span>
+                      {cat === 'storm_surge' && (
+                        <InfoIcon term="storm-surge" iconSize="sm" />
+                      )}
                       <span className="text-slate-500 tabular-nums">×{n}</span>
                     </li>
                   ))}

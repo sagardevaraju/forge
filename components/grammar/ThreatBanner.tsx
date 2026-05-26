@@ -15,6 +15,7 @@
  * tests and snapshots.
  */
 import { formatRefreshAge } from '@/lib/grammar/freshness';
+import { InfoIcon } from '@/components/grammar/InfoTooltip';
 
 /**
  * Per-category count of currently-active NWS alerts. Mirrors the
@@ -95,6 +96,7 @@ function AlertChips({ counts }: { counts: ThreatBannerAlertCounts | undefined })
         >
           <span className="tabular-nums font-semibold">{counts[key]}</span>
           <span>{label}</span>
+          {key === 'storm_surge' && <InfoIcon term="storm-surge" iconSize="sm" />}
         </span>
       ))}
     </span>
@@ -165,10 +167,18 @@ export function ThreatBanner({
           demo · no active storms
         </span>
       )}
-      {advisoryNumber !== undefined && <span>advisory {advisoryNumber}</span>}
+      {advisoryNumber !== undefined && (
+        <span className="inline-flex items-center gap-1">
+          <span>advisory {advisoryNumber}</span>
+          <InfoIcon term="advisory" iconSize="sm" />
+        </span>
+      )}
       {peakWind !== undefined && (
-        <span>
-          peak wind {peakWind} mph{deltaSuffix}
+        <span className="inline-flex items-center gap-1">
+          <span>
+            peak wind {peakWind} mph{deltaSuffix}
+          </span>
+          <InfoIcon term="peak-wind" iconSize="sm" />
         </span>
       )}
       {coneRefreshedAt !== undefined && (

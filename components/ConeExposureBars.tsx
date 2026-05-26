@@ -30,6 +30,7 @@ import { useMemo } from 'react';
 import { pointInPolygon, type PolygonLike } from '@/lib/geo/point_in_polygon';
 import { TrustTierBadge } from '@/components/grammar/TrustTierBadge';
 import { ProvenanceFootnote } from '@/components/grammar/ProvenanceFootnote';
+import { InfoIcon } from '@/components/grammar/InfoTooltip';
 
 export interface ConeExposureCohort {
   id: string;
@@ -161,7 +162,10 @@ export function ConeExposureBars({
       className="border rounded p-3 bg-white text-xs space-y-2 max-w-[280px]"
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="font-semibold">Book exposure under cone</div>
+        <div className="font-semibold flex items-center gap-1">
+          <span>Book exposure under cone</span>
+          <InfoIcon term="cone-exposure" iconSize="sm" />
+        </div>
         {/*
           Trust-tier badge MUST honor the cone source. A MODEL_OUTPUT
           badge over a mock cone is the same CLAUDE.md "LIVE_FEED-over-
