@@ -299,7 +299,16 @@ describe('fetch_fema_declarations', () => {
 });
 
 describe('fetch_storm_events (real DB)', () => {
-  test('returns rows for FL with sensible aggregate counts', async () => {
+  // This assertion needs the `storm_events` table populated via
+  // `scripts/ingest_storm_events.py` — a NOAA NCEI network fetch. The lean CI
+  // gate seeds the policy book deterministically but does NOT ingest storm
+  // events, so it opts out with FORGE_SKIP_STORM_EVENTS_INTEGRATION=1,
+  // mirroring FORGE_SKIP_REOPTIMIZE_INTEGRATION (CLAUDE.md: "ship a
+  // FORGE_SKIP_<TEST>=1 opt-out from day one"). Local/full-data runs leave the
+  // flag unset and exercise it normally.
+  const realDbTest =
+    process.env.FORGE_SKIP_STORM_EVENTS_INTEGRATION === '1' ? test.skip : test;
+  realDbTest('returns rows for FL with sensible aggregate counts', async () => {
     const out = await fetchStormEvents.handler({ state: 'FL' });
     expect(out.length).toBeGreaterThan(0);
     for (const r of out) {
