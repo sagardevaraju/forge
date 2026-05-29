@@ -84,12 +84,32 @@ interface RolLayer {
 
 function summarizeRolLayers(stack: TreatyStack | null): RolLayer[] | undefined {
   if (!stack) return undefined;
-  return stack.layers.map((l: TreatyLayer) => {
-    if (l.type === 'qs') {
-      return { type: 'QS', rol: l.rol ?? 0 };
+  const rows: RolLayer[] = [];
+  for (const l of stack.layers as TreatyLayer[]) {
+    switch (l.type) {
+      case 'qs':
+        // Proportional treaty — no attachment point; `rol` is optional on QS.
+        rows.push({ type: 'QS', rol: l.rol ?? 0 });
+        break;
+      case 'xs':
+        rows.push({ type: 'XS', rol: l.rol, attachment: l.attachment });
+        break;
+      case 'ils':
+        // Cat bond: `coupon_rate` is the rate-on-line analogue (annual cost
+        // as a fraction of principal), and the bond attaches like an XS
+        // layer — so it belongs in both the RoL list and the min-attachment
+        // retained-tail calc downstream.
+        rows.push({ type: 'ILS', rol: l.coupon_rate, attachment: l.attachment });
+        break;
+      // Fronting and captive layers carry no rate-on-line (a fronting fee
+      // share / captive reserve is not a RoL). Emitting them as "0%" would
+      // fabricate a rate, so they're intentionally omitted from the
+      // RoL-by-layer summary rather than shown.
+      default:
+        break;
     }
-    return { type: 'XS', rol: l.rol, attachment: l.attachment };
-  });
+  }
+  return rows;
 }
 
 async function loadTreatyArtifact(): Promise<TreatyStack | null> {
