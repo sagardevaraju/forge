@@ -53,7 +53,12 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - run: npm ci
+      # `npm install`, not `npm ci`: package-lock.json is generated on macOS
+      # (dev machine) and omits the linux-only optional native deps
+      # (@emnapi/runtime, @emnapi/core), so strict `npm ci` fails on the Linux
+      # runner with "package-lock.json out of sync". `npm install` reconciles
+      # the platform optionals at install time.
+      - run: npm install --no-audit --no-fund
       - run: pip install -r requirements.txt
 
       # Create tables in ./forge-local.db, then seed it. TURSO_URL is unset, so
