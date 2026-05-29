@@ -46,7 +46,11 @@ import {
 } from '@/lib/portfolio-actions';
 // Task P3.4 — every solve writes one row to the decision ledger. The write
 // is best-effort: a ledger failure must not block the user-facing solve.
-import { operatorFromHeaders, writeDecision } from '@/lib/audit/decisions';
+import {
+  operatorFromHeaders,
+  writeDecision,
+  type DecisionOutput,
+} from '@/lib/audit/decisions';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -314,7 +318,12 @@ async function recordDecision(
   cohortHash: string,
   horizon_start: string | undefined,
   horizon_end: string | undefined,
-  outputs: PortfolioOptimization & Record<string, unknown>,
+  // The base domain type plus any solve-specific flags the caller appends
+  // (`error`, `relaxation_factor`). All three call sites pass a value
+  // assignable to `PortfolioOptimization`; the previous
+  // `& Record<string, unknown>` annotation forced an index signature onto
+  // callers that concrete object types can't satisfy (TS2345).
+  outputs: PortfolioOptimization,
 ): Promise<void> {
   try {
     await writeDecision({
@@ -325,7 +334,10 @@ async function recordDecision(
         horizon_start: horizon_start ?? null,
         horizon_end: horizon_end ?? null,
       },
-      outputs,
+      // `DecisionOutput` is the ledger's deliberately-loose
+      // `Record<string, unknown>` boundary; widen here rather than
+      // constraining every caller's concrete output type.
+      outputs: outputs as unknown as DecisionOutput,
     });
   } catch (e) {
     // Log but never propagate — see docstring.
