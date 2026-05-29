@@ -1,9 +1,26 @@
 // @vitest-environment jsdom
 import { describe, test, expect, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { InfoIcon } from '@/components/grammar/InfoTooltip';
 
 afterEach(() => cleanup());
+
+describe('InfoIcon — SSR / hydration safety', () => {
+  test('renders to static (server) markup without attempting a client-only portal', () => {
+    // Regression for the hydration mismatch surfaced in the browser console:
+    // PopupRenderer branched on `typeof document` and called
+    // `createPortal(..., document.body)` during the client's *first* render,
+    // while the server rendered null — so hydration mismatched. The fix gates
+    // the portal behind a post-mount flag so the first (server + hydration)
+    // render produces no portal. React's server renderer rejects portals, so
+    // if the component still tries to portal at SSR/first-render time this
+    // throws "Portals are not currently supported by the server renderer".
+    expect(() =>
+      renderToStaticMarkup(<InfoIcon term="tvar-99" />),
+    ).not.toThrow();
+  });
+});
 
 describe('InfoIcon — hover + focus reveal', () => {
   test('renders a button trigger with aria-describedby', () => {
