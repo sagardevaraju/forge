@@ -77,8 +77,16 @@ function PopupRenderer({
   popupRef,
 }: PopupRendererProps) {
   const entry = lookupTerm(term);
-  // SSR guard — `createPortal(..., document.body)` requires a real document.
-  if (typeof document === 'undefined') return null;
+  // Defer the portal until after mount so the server render AND the client's
+  // first (hydration) render agree — both produce null. Branching on
+  // `typeof document` instead caused a hydration mismatch: the server (no
+  // document) rendered null while the client's initial render created the
+  // `createPortal(..., document.body)` subtree, which React's hydration pass
+  // rejected. The popup is `aria-hidden` and parked off-screen until hover,
+  // so appearing one tick after mount is invisible to users.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
   if (!entry) return null;
 
   // Compute viewport-fixed position from the trigger's bounding rect.
