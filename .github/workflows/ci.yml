@@ -1,0 +1,76 @@
+name: ci
+
+# Build + test gate for the TypeScript/Next.js side of FORGE.
+#
+# Why this exists: `main` previously had no commit-time or merge-time gate —
+# the only place `next build` ran was the Vercel deploy, which gates deploys,
+# not merges. Two type errors reached `main` that way. This workflow runs the
+# exact build + test that would have caught them, on every PR and every push
+# to main.
+#
+# Scope: this is the *deterministic* gate. It seeds the policy book
+# (reproducible) but deliberately skips the few integration tests that need
+# external/network data or a heavy precompute pipeline — they can't run green
+# from a clean checkout and would make the gate flaky:
+#   - FORGE_SKIP_REOPTIMIZE_INTEGRATION  → real MIP precompute (slow)
+#   - FORGE_SKIP_STORM_EVENTS_INTEGRATION → NOAA NCEI network ingest
+#
+# The Python suite (pytest) is NOT yet gated here: it needs a pinned 3.12
+# runner + the full precompute/ingest pipeline to run green, and pinning that
+# is a separate, validated follow-up. See CLAUDE.md "Tests".
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref so a fast follow-up push doesn't
+# queue behind a stale build.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: build + vitest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Python is needed only to seed the policy book — `seed_policy_book.py`
+      # writes the 10k synthetic policies the DB-backed vitest tests read.
+      # Pinned to 3.12 to match vercel.json's runtime.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: npm ci
+      - run: pip install -r requirements.txt
+
+      # Create tables in ./forge-local.db, then seed it. TURSO_URL is unset, so
+      # both the TS client (lib/db/client.ts) and the Python seed
+      # (scripts/seed_policy_book.py, hardcoded ./forge-local.db) resolve to
+      # the same local SQLite file.
+      - name: Migrate + seed local DB
+        run: |
+          npm run migrate
+          python scripts/seed_policy_book.py
+
+      # `next build` runs tsc + next lint — this is the step that catches the
+      # type errors that motivated this workflow.
+      - run: npm run build
+
+      - name: Vitest
+        env:
+          FORGE_SKIP_REOPTIMIZE_INTEGRATION: "1"
+          FORGE_SKIP_STORM_EVENTS_INTEGRATION: "1"
+        run: npm test
