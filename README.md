@@ -1,12 +1,10 @@
 # FORGE
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20368096.svg)](https://doi.org/10.5281/zenodo.20368096)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.20381424-007ec6.svg)](https://zenodo.org/records/20381424)
 
 **Forecast-driven Operational Risk Governance Engine**
 
 A catastrophe decision intelligence platform for U.S. P&C insurance carriers. FORGE collapses the Monday cat-ops meeting — meteorology brief, actuarial run, field-ops spreadsheet, reinsurance model — into one scenario-coupled console where portfolio, operations, and claims decisions all consume the same Monte Carlo scenario set.
-
-> *"Forge the posture before the cone shifts."*
 
 ---
 
@@ -271,9 +269,9 @@ dataset card:
   year         = {2026},
   month        = {may},
   publisher    = {Zenodo},
-  version      = {0.1.0},
-  doi          = {10.5281/zenodo.20368096},
-  url          = {https://doi.org/10.5281/zenodo.20368096}
+  version      = {0.2.1},
+  doi          = {10.5281/zenodo.20381424},
+  url          = {https://doi.org/10.5281/zenodo.20381424}
 }
 ```
 
@@ -292,7 +290,7 @@ see [`LICENSE`](LICENSE) for the full text.
   [MIT License](https://opensource.org/licenses/MIT)
 - **Dataset and documentation** (synthetic policy book, scenario set,
   `docs/`, `research.md`, `README.md`, Zenodo deposit at
-  [10.5281/zenodo.20368096](https://doi.org/10.5281/zenodo.20368096)):
+  [10.5281/zenodo.20381424](https://doi.org/10.5281/zenodo.20381424)):
   [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)
 
 `SPDX-License-Identifier: MIT AND CC-BY-4.0`
