@@ -136,16 +136,27 @@ runtime entry. Cron stays (see §5.3).
 - Not needed: `BLOB_READ_WRITE_TOKEN` (no online persistence),
   `NEXT_PUBLIC_MAPBOX_TOKEN` (basemap is MapLibre + OpenFreeMap — Mapbox banned).
 
-### 5.3 Cron
-`/api/cron/refresh` is **Node-only** (verified: no Python spawn). Keep it; it
-needs `CRON_SECRET`, and the `*/15 * * * *` cadence requires the Pro plan (Hobby
-caps cron frequency — drop to daily there). Confirm it performs no writes to
-`artifacts/` (read-only FS) during planning.
+### 5.3 Cron — Hobby/free tier
+**Target plan is Hobby/free.** Vercel Hobby caps cron at **once per day** (max 2
+jobs), so the current `*/15 * * * *` schedule will not fire every 15 minutes
+regardless of what `vercel.json` says. Change the schedule to daily
+(`0 0 * * *`) — `/api/cron/refresh` is Node-only (verified: no Python spawn) and
+needs `CRON_SECRET`. Confirm during planning that it performs no writes to
+`artifacts/` (read-only FS); if it does, gate those writes off in prod. If the
+refresh isn't needed for the static showcase, removing the cron entirely is also
+fine.
 
 ### 5.4 Link & deploy
 `vercel link` (no `.vercel` dir exists yet) → set env → deploy. Validate with
 `vercel dev` locally first (it serves the Python function over HTTP, exercising
 the prod invocation path).
+
+**Hobby/free-tier viability.** Everything here fits Hobby: Python Functions are
+supported; the K=1000 numpy MC runs in seconds, far under the 300s Hobby
+function-duration cap; the draw UI and OpenFreeMap basemap need no token; Turso's
+free tier covers the seeded book; and a public deployment (no password
+protection) is exactly what a showcase wants. The only Hobby constraint that
+bites is cron frequency (§5.3).
 
 ## 6. Error handling
 
