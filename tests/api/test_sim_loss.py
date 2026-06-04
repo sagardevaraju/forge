@@ -206,3 +206,30 @@ def test_generate_legacy_intensity_fallback():
         "1234567890123_abcdef03", _footprint(peril="hail", intensity="severe"),
         SAMPLE_POLICIES, cohort_keyer=lambda p: f"{p[5]}_{p[4]}", K=50)
     assert result["losses"].sum() > 0
+
+
+def test_summarize_builds_histogram_and_tail_stats():
+    from api_py.sim_loss import _summarize
+    # 4 cohorts × K=200; per-scenario totals = column sums.
+    rng = np.random.default_rng(0)
+    losses = rng.lognormal(mean=12.0, sigma=0.5, size=(4, 200))
+    result = {"K": 200, "cohort_keys": ["a", "b", "c", "d"], "losses": losses,
+              "meta": {"sim_id": "x", "peril": "hail", "intensity": "severe"}}
+    out = _summarize(result, bins=20)
+    assert set(out["summary"]) == {"mean", "p50", "p90", "p99", "tvar99", "min", "max"}
+    assert len(out["histogram"]["counts"]) == 20
+    assert len(out["histogram"]["bin_edges"]) == 21
+    assert sum(out["histogram"]["counts"]) == 200            # every scenario binned
+    totals = losses.sum(axis=0)
+    assert out["summary"]["tvar99"] >= out["summary"]["p99"]  # tail mean ≥ quantile
+    assert out["summary"]["max"] == float(totals.max())
+
+
+def test_summarize_handles_all_zero_losses():
+    from api_py.sim_loss import _summarize
+    result = {"K": 10, "cohort_keys": [], "losses": np.zeros((0, 10)),
+              "meta": {"sim_id": "x", "peril": "hail", "intensity": "severe"}}
+    out = _summarize(result, bins=5)
+    assert out["summary"]["mean"] == 0.0
+    assert out["summary"]["tvar99"] == 0.0
+    assert sum(out["histogram"]["counts"]) == 10

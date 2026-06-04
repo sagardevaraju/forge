@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -356,6 +357,34 @@ def generate_sim_losses(
         "losses": losses,
         "meta": {"sim_id": sim_id, "peril": peril, "intensity": intensity,
                  "beta": beta, "sigma": sigma},
+    }
+
+
+def _summarize(result: dict[str, Any], bins: int = 30) -> dict[str, Any]:
+    """Reduce the (n_cohorts, K) loss matrix to a client-renderable
+    distribution: a histogram of the K portfolio-level scenario totals plus
+    tail summary stats. Computed here (numpy) so the client never re-derives
+    the tail. TVaR-99 is the mean of the worst 1% of scenario totals."""
+    losses = result["losses"]
+    K = int(result["K"])
+    totals = losses.sum(axis=0) if getattr(losses, "size", 0) else np.zeros(K)
+    counts, edges = np.histogram(totals, bins=bins)
+    q99 = float(np.quantile(totals, 0.99)) if totals.size else 0.0
+    tail = totals[totals >= q99]
+    return {
+        "histogram": {
+            "bin_edges": [float(x) for x in edges],
+            "counts": [int(c) for c in counts],
+        },
+        "summary": {
+            "mean": float(totals.mean()) if totals.size else 0.0,
+            "p50": float(np.quantile(totals, 0.50)) if totals.size else 0.0,
+            "p90": float(np.quantile(totals, 0.90)) if totals.size else 0.0,
+            "p99": q99,
+            "tvar99": float(tail.mean()) if tail.size else 0.0,
+            "min": float(totals.min()) if totals.size else 0.0,
+            "max": float(totals.max()) if totals.size else 0.0,
+        },
     }
 
 
