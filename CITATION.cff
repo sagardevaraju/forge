@@ -25,8 +25,8 @@ url: "https://github.com/sagardevaraju/forge"
 date-released: 2026-05-25
 identifiers:
   - type: doi
-    value: 10.5281/zenodo.20368096
-    description: "Zenodo DOI for FORGE v0.1.0 (minted 2026-05-24)"
+    value: 10.5281/zenodo.20381424
+    description: "Zenodo DOI for FORGE v0.2.1 (minted 2026-05-25)"
 keywords:
   - reinsurance
   - catastrophe modeling

@@ -6,17 +6,17 @@ template](https://github.com/huggingface/datasets/blob/main/templates/README.md)
 and the [Datasheets for Datasets](https://arxiv.org/abs/1803.09010)
 framework (Gebru et al. 2018).
 
-> **DOI:** [10.5281/zenodo.20368096](https://doi.org/10.5281/zenodo.20368096)
-> — minted by Zenodo on the v0.1.0 release (2026-05-24). Future releases
+> **DOI:** [10.5281/zenodo.20381424](https://doi.org/10.5281/zenodo.20381424)
+> — minted by Zenodo on the v0.2.1 release (2026-05-25). Future releases
 > auto-mint version DOIs via the GitHub↔Zenodo integration (configured
 > via `.zenodo.json`).
 
 ```yaml
 ---
 title: "FORGE — Synthetic Policy Book + Multi-Peril Scenario Set"
-version: "0.1.0"
+version: "0.2.1"
 license: "CC-BY-4.0"
-doi: "10.5281/zenodo.20368096"
+doi: "10.5281/zenodo.20381424"
 authors:
   - name: "Sagar Devaraju"
     affiliation: "FORGE"
@@ -150,7 +150,7 @@ Operational LP, the claims pre-flagger, every notebook in
 
 Released under [Creative Commons Attribution 4.0](
 https://creativecommons.org/licenses/by/4.0/). Attribution: cite the
-Zenodo DOI ([10.5281/zenodo.20368096](https://doi.org/10.5281/zenodo.20368096))
+Zenodo DOI ([10.5281/zenodo.20381424](https://doi.org/10.5281/zenodo.20381424))
 and the FORGE GitHub repository.
 
 ## 9. Citation
@@ -162,9 +162,9 @@ and the FORGE GitHub repository.
   year         = {2026},
   month        = {may},
   publisher    = {Zenodo},
-  version      = {0.1.0},
-  doi          = {10.5281/zenodo.20368096},
-  url          = {https://doi.org/10.5281/zenodo.20368096}
+  version      = {0.2.1},
+  doi          = {10.5281/zenodo.20381424},
+  url          = {https://doi.org/10.5281/zenodo.20381424}
 }
 ```
 
@@ -215,7 +215,7 @@ and the FORGE GitHub repository.
 ### Distribution
 - **How will the dataset be distributed?** GitHub repository
   ([sagardevaraju/forge](https://github.com/sagardevaraju/forge)) +
-  Zenodo DOI ([10.5281/zenodo.20368096](https://doi.org/10.5281/zenodo.20368096)).
+  Zenodo DOI ([10.5281/zenodo.20381424](https://doi.org/10.5281/zenodo.20381424)).
 
 ### Maintenance
 - **Who is supporting / hosting / maintaining the dataset?**
