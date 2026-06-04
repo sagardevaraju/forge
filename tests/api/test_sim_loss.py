@@ -233,3 +233,41 @@ def test_summarize_handles_all_zero_losses():
     assert out["summary"]["mean"] == 0.0
     assert out["summary"]["tvar99"] == 0.0
     assert sum(out["histogram"]["counts"]) == 10
+
+
+def test_run_request_skips_persist_when_disabled(monkeypatch):
+    from api_py import sim_loss
+    monkeypatch.setenv("FORGE_SIM_PERSIST", "0")
+    calls = []
+    monkeypatch.setattr(sim_loss, "write_artifact",
+                        lambda *a, **k: calls.append("write") or (Path("x"), Path("y")))
+    resp = sim_loss.run_request({
+        "sim_id": "1234567890123_abcdef00", "footprint": _footprint(),
+        "policies": SAMPLE_POLICIES, "K": 50,
+    })
+    assert calls == []                       # persist skipped
+    assert resp["artifact_path"] is None
+    assert resp["K"] == 50
+    assert "histogram" in resp and "summary" in resp
+    assert resp["n_cohorts"] >= 0
+
+
+def test_run_request_persists_when_enabled(monkeypatch):
+    from api_py import sim_loss
+    monkeypatch.setenv("FORGE_SIM_PERSIST", "1")
+    calls = []
+    monkeypatch.setattr(sim_loss, "write_artifact",
+                        lambda sim_id, result, **k: (calls.append(sim_id),
+                                                     (Path(f"/tmp/{sim_id}.parquet"), Path("m")))[1])
+    resp = sim_loss.run_request({
+        "sim_id": "1234567890123_abcdef00", "footprint": _footprint(),
+        "policies": SAMPLE_POLICIES, "K": 50,
+    })
+    assert calls == ["1234567890123_abcdef00"]
+    assert resp["artifact_path"] == "/tmp/1234567890123_abcdef00.parquet"
+
+
+def test_run_request_rejects_missing_fields():
+    from api_py import sim_loss
+    with pytest.raises(ValueError):
+        sim_loss.run_request({"policies": SAMPLE_POLICIES})

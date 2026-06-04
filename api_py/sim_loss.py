@@ -417,6 +417,51 @@ def write_artifact(
     return parquet_path, meta_path
 
 
+def run_request(payload: dict[str, Any]) -> dict[str, Any]:
+    """Shared entry for the Vercel HTTP handler and the _solve_stdin dev shim.
+
+    Validates the payload, runs generate_sim_losses with the canonical
+    quintile-aware cohort keyer (so keys match the MIP cohort store),
+    conditionally persists the parquet cache (skipped on a read-only FS or
+    when FORGE_SIM_PERSIST=0 — both true on Vercel), and returns the
+    client-facing response dict including the loss-distribution summary.
+
+    Raises ValueError when sim_id or footprint is missing.
+    """
+    sim_id = payload.get("sim_id")
+    footprint = payload.get("footprint")
+    if not sim_id or not footprint:
+        raise ValueError("sim_id and footprint required")
+    K = int(payload.get("K") or 1000)
+    policy_tuples = [tuple(p) for p in (payload.get("policies") or [])]
+
+    from api_py.cohort_keys import cohort_key as _cohort_key, policy_quintile_lookup
+    quintile_by_id = policy_quintile_lookup(policy_tuples)
+    result = generate_sim_losses(
+        sim_id=sim_id,
+        footprint=footprint,
+        policies=policy_tuples,
+        cohort_keyer=lambda p: _cohort_key(p, quintile_by_id[int(p[0])]),
+        K=K,
+    )
+
+    artifact_path = None
+    if os.environ.get("FORGE_SIM_PERSIST", "1") != "0":
+        try:
+            parquet_path, _ = write_artifact(sim_id, result)
+            artifact_path = str(parquet_path)
+        except OSError:
+            artifact_path = None  # read-only FS (Vercel) — distribution still returned
+
+    return {
+        "sim_id": sim_id,
+        "K": result["K"],
+        "n_cohorts": len(result["cohort_keys"]),
+        "artifact_path": artifact_path,
+        **_summarize(result),
+    }
+
+
 # ── Vercel HTTP handler ─────────────────────────────────────────────────
 class handler(BaseHTTPRequestHandler):
     """POST /api/sim/promote — body: {sim_id, footprint, policies, K}."""
@@ -429,33 +474,12 @@ class handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._send_json(400, {"error": "invalid JSON body"})
             return
-
-        sim_id = payload.get("sim_id")
-        footprint = payload.get("footprint")
-        policies = payload.get("policies") or []
-        K = int(payload.get("K") or 1000)
-        if not sim_id or not footprint:
-            self._send_json(400, {"error": "sim_id and footprint required"})
+        try:
+            resp = run_request(payload)
+        except ValueError as e:
+            self._send_json(400, {"error": str(e)})
             return
-
-        policy_tuples = [tuple(p) for p in policies]
-        # Build book-wide quintile lookup so keys match the MIP cohort store.
-        from api_py.cohort_keys import cohort_key as _cohort_key, policy_quintile_lookup
-        quintile_by_id = policy_quintile_lookup(policy_tuples)
-        result = generate_sim_losses(
-            sim_id=sim_id,
-            footprint=footprint,
-            policies=policy_tuples,
-            cohort_keyer=lambda p: _cohort_key(p, quintile_by_id[int(p[0])]),
-            K=K,
-        )
-        parquet_path, _ = write_artifact(sim_id, result)
-        self._send_json(200, {
-            "sim_id": sim_id,
-            "K": result["K"],
-            "n_cohorts": len(result["cohort_keys"]),
-            "artifact_path": str(parquet_path.relative_to(parquet_path.parent.parent.parent)),
-        })
+        self._send_json(200, resp)
 
     def _send_json(self, status: int, payload) -> None:
         body = json.dumps(payload).encode()
