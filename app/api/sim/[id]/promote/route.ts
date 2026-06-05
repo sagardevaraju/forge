@@ -32,6 +32,27 @@ function runPython(payload: unknown): Promise<unknown> {
   });
 }
 
+function runSimLoss(payload: unknown): Promise<{
+  sim_id: string; K: number; n_cohorts: number; artifact_path: string | null;
+  histogram: { bin_edges: number[]; counts: number[] };
+  summary: Record<string, number>;
+}> {
+  // Prod (Vercel): no Python binary in the Node function — call the deployed
+  // sim_loss Python function over HTTP. Dev: spawn the local interpreter.
+  if (process.env.VERCEL) {
+    const base = `https://${process.env.VERCEL_URL}`;
+    return fetch(`${base}/api_py/sim_loss`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then(async (r) => {
+      if (!r.ok) throw new Error(`sim_loss function ${r.status}: ${await r.text()}`);
+      return r.json();
+    });
+  }
+  return runPython(payload) as ReturnType<typeof runSimLoss>;
+}
+
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await ctx.params;
   if (!isValidSimId(id)) {
@@ -52,12 +73,15 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   )).rows.map((p) => [Number(p.id), Number(p.lat), Number(p.lon), Number(p.tiv),
                        String(p.build_type ?? 'wood_frame'), String(p.zip3)]);
 
-  let pyResult: { K: number; n_cohorts: number; artifact_path: string };
+  let pyResult: Awaited<ReturnType<typeof runSimLoss>>;
   try {
-    pyResult = (await runPython({ sim_id: id, footprint, policies, K: 1000 })) as typeof pyResult;
+    pyResult = await runSimLoss({ sim_id: id, footprint, policies, K: 1000 });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ error: `loss compute failed: ${msg}` }, { status: 500 });
+    // Prod: the upstream sim_loss function failed/unreachable → 502 Bad Gateway.
+    // Dev: local Python spawn failure → 500.
+    const status = process.env.VERCEL ? 502 : 500;
+    return NextResponse.json({ error: `loss compute failed: ${msg}` }, { status });
   }
 
   const now = new Date().toISOString();
@@ -70,7 +94,9 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     sim_id: id,
     K: pyResult.K,
     n_cohorts: pyResult.n_cohorts,
-    artifact_path: pyResult.artifact_path,
+    artifact_path: pyResult.artifact_path ?? null,
+    histogram: pyResult.histogram,
+    summary: pyResult.summary,
     compute_time_ms: 0,  // SIM.10: populate from real measurement in v1.1
   });
 }
