@@ -1,7 +1,7 @@
 {
   "functions": {
     "app/api/agent/chat/route.ts": { "runtime": "nodejs" },
-    "api_py/*.py": { "runtime": "python3.12" }
+    "api_py/sim_loss.py": { "runtime": "python3.12" }
   },
-  "crons": [{ "path": "/api/cron/refresh", "schedule": "*/15 * * * *" }]
+  "crons": [{ "path": "/api/cron/refresh", "schedule": "0 0 * * *" }]
 }
