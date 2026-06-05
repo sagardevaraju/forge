@@ -286,3 +286,22 @@ def test_solve_stdin_sim_loss_emits_distribution(monkeypatch, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["K"] == 50
     assert "histogram" in out and "summary" in out
+
+
+def test_run_request_survives_missing_pyarrow(monkeypatch):
+    """On Vercel, if FORGE_SIM_PERSIST is forgotten, write_artifact's local
+    `import pyarrow` raises ModuleNotFoundError (an ImportError, not OSError).
+    run_request must degrade gracefully: skip persistence, still return the
+    distribution with artifact_path=None — never propagate a 500."""
+    from api_py import sim_loss
+    monkeypatch.delenv("FORGE_SIM_PERSIST", raising=False)   # default → persist attempted
+    def _raise_missing(*a, **k):
+        raise ModuleNotFoundError("No module named 'pyarrow'")
+    monkeypatch.setattr(sim_loss, "write_artifact", _raise_missing)
+    resp = sim_loss.run_request({
+        "sim_id": "1234567890123_abcdef00", "footprint": _footprint(),
+        "policies": SAMPLE_POLICIES, "K": 50,
+    })
+    assert resp["artifact_path"] is None
+    assert "histogram" in resp and "summary" in resp
+    assert resp["K"] == 50

@@ -450,8 +450,11 @@ def run_request(payload: dict[str, Any]) -> dict[str, Any]:
         try:
             parquet_path, _ = write_artifact(sim_id, result)
             artifact_path = str(parquet_path)
-        except OSError:
-            artifact_path = None  # read-only FS (Vercel) — distribution still returned
+        except (OSError, ImportError):
+            # Persistence is best-effort. Skipped on Vercel: read-only FS (OSError)
+            # or pyarrow absent from the slim runtime (ImportError) — the loss
+            # distribution is still returned with artifact_path=None.
+            artifact_path = None
 
     return {
         "sim_id": sim_id,
