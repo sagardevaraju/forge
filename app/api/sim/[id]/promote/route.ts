@@ -1,56 +1,42 @@
 /**
  * POST /api/sim/[id]/promote — Task SIM.11
  *
- * Spawns a Python child process (`python -m api_py._solve_stdin sim_loss`)
- * that reads {sim_id, footprint, policies, K} from stdin, runs
- * generate_sim_losses + write_artifact, prints a JSON summary, and exits.
- * The route then flips promoted=1 in the DB and returns K + cohort count.
+ * Computes the K=1000 Monte-Carlo loss distribution IN-PROCESS via the
+ * TypeScript model (`lib/sim/loss-model.ts`, a verified port of
+ * `api_py/sim_loss.py`), then flips promoted=1 in the DB and returns the
+ * histogram + tail summary. No Python spawn / HTTP round-trip — Vercel can't
+ * deploy a standalone Python function inside this Next.js app, so the live
+ * promote path is pure in-process TS and behaves identically in dev and prod.
+ * `api_py/sim_loss.py` stays the offline source of truth for the portfolio
+ * precompute/reoptimize; parity is held by tests/lib/sim/loss-model.test.ts.
  */
 import { NextResponse } from 'next/server';
-import { spawn } from 'child_process';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { db } from '@/lib/db/client';
 import { isValidSimId } from '@/lib/sim/id';
+import { simulateLossDistribution } from '@/lib/sim/loss-model';
+import { previewImpact, type Policy } from '@/lib/sim/preview';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function runPython(payload: unknown): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn('python', ['-m', 'api_py._solve_stdin', 'sim_loss'], {
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
-    });
-    let out = '';
-    let err = '';
-    proc.stdout.on('data', (d) => (out += d.toString()));
-    proc.stderr.on('data', (d) => (err += d.toString()));
-    proc.on('close', (code) => {
-      if (code !== 0) return reject(new Error(err || `python exited ${code}`));
-      try { resolve(JSON.parse(out)); } catch (e) { reject(e); }
-    });
-    proc.stdin.write(JSON.stringify(payload));
-    proc.stdin.end();
-  });
-}
-
-function runSimLoss(payload: unknown): Promise<{
-  sim_id: string; K: number; n_cohorts: number; artifact_path: string | null;
-  histogram: { bin_edges: number[]; counts: number[] };
-  summary: Record<string, number>;
-}> {
-  // Prod (Vercel): no Python binary in the Node function — call the deployed
-  // sim_loss Python function over HTTP. Dev: spawn the local interpreter.
-  if (process.env.VERCEL) {
-    const base = `https://${process.env.VERCEL_URL}`;
-    return fetch(`${base}/api/sim_loss`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    }).then(async (r) => {
-      if (!r.ok) throw new Error(`sim_loss function ${r.status}: ${await r.text()}`);
-      return r.json();
-    });
+/**
+ * Read the common-factor β/σ from the tracked + deployed calibration artifact.
+ * Mirrors the Python `_load_correlation`. When the artifact is missing or
+ * unfitted (no numeric beta/sigma), returns {} and the loss-model falls back
+ * to its 0.5 / 0.3 defaults — matching the Python path.
+ */
+function loadBetaSigma(): { beta?: number; sigma?: number } {
+  try {
+    const p = join(process.cwd(), 'artifacts', 'calibration.json');
+    const cf = JSON.parse(readFileSync(p, 'utf8'))?.common_factor ?? {};
+    const beta = typeof cf.beta === 'number' ? cf.beta : undefined;
+    const sigma = typeof cf.sigma === 'number' ? cf.sigma : undefined;
+    return { beta, sigma };
+  } catch {
+    return {}; // loss-model defaults to 0.5 / 0.3
   }
-  return runPython(payload) as ReturnType<typeof runSimLoss>;
 }
 
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
@@ -68,35 +54,38 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   }
   const footprint = JSON.parse(String(row.footprint));
 
-  const policies = (await db.execute(
-    'SELECT id, lat, lon, tiv, build_type, zip3 FROM policies WHERE lat IS NOT NULL AND lon IS NOT NULL',
-  )).rows.map((p) => [Number(p.id), Number(p.lat), Number(p.lon), Number(p.tiv),
-                       String(p.build_type ?? 'wood_frame'), String(p.zip3)]);
-
-  let pyResult: Awaited<ReturnType<typeof runSimLoss>>;
   try {
-    pyResult = await runSimLoss({ sim_id: id, footprint, policies, K: 1000 });
+    const policies: Policy[] = (await db.execute(
+      'SELECT id, lat, lon, tiv, build_type, zip3 FROM policies WHERE lat IS NOT NULL AND lon IS NOT NULL',
+    )).rows.map((p) => ({
+      id: Number(p.id),
+      lat: Number(p.lat),
+      lon: Number(p.lon),
+      tiv: Number(p.tiv),
+      build_type: String(p.build_type ?? 'wood_frame'),
+      zip3: String(p.zip3),
+    }));
+
+    const { beta, sigma } = loadBetaSigma();
+    const dist = simulateLossDistribution(footprint, policies, { seed: id, K: 1000, beta, sigma });
+    const preview = previewImpact(policies, footprint);
+
+    const now = new Date().toISOString();
+    await db.execute({
+      sql: 'UPDATE simulations SET promoted = 1, promoted_at = ? WHERE id = ?',
+      args: [now, id],
+    });
+
+    return NextResponse.json({
+      sim_id: id,
+      K: 1000,
+      n_cohorts: preview.cohorts_affected,
+      histogram: dist.histogram,
+      summary: dist.summary,
+      compute_time_ms: 0, // SIM.10: populate from real measurement in v1.1
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    // Prod: the upstream sim_loss function failed/unreachable → 502 Bad Gateway.
-    // Dev: local Python spawn failure → 500.
-    const status = process.env.VERCEL ? 502 : 500;
-    return NextResponse.json({ error: `loss compute failed: ${msg}` }, { status });
+    return NextResponse.json({ error: `loss compute failed: ${msg}` }, { status: 500 });
   }
-
-  const now = new Date().toISOString();
-  await db.execute({
-    sql: 'UPDATE simulations SET promoted = 1, promoted_at = ? WHERE id = ?',
-    args: [now, id],
-  });
-
-  return NextResponse.json({
-    sim_id: id,
-    K: pyResult.K,
-    n_cohorts: pyResult.n_cohorts,
-    artifact_path: pyResult.artifact_path ?? null,
-    histogram: pyResult.histogram,
-    summary: pyResult.summary,
-    compute_time_ms: 0,  // SIM.10: populate from real measurement in v1.1
-  });
 }

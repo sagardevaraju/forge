@@ -1,10 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "api/sim_loss.py": {
-      "maxDuration": 60,
-      "includeFiles": "{api_py/**,artifacts/calibration.json}"
-    }
-  },
   "crons": [{ "path": "/api/cron/refresh", "schedule": "0 0 * * *" }]
 }

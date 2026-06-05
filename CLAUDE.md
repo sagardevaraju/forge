@@ -51,6 +51,8 @@ to merely look plausible.
 
 Per-peril severity scales live in `PERIL_SCALES` (TS) and `_PERIL_LEVEL_MULT` (Python). Damage = `HAZUS_base[build_type][peril] × multiplier(severity)`, clamped to [0,1]. **The TS and Python copies must stay in sync** — they are tested independently and one drifting silently inflates / deflates gross loss.
 
+**Live promote runs in-process (TS), not Python.** `app/api/sim/[id]/promote/route.ts` computes the K=1000 loss distribution in-process via `lib/sim/loss-model.ts` (a verified TS port of `api_py/sim_loss.py`) — no spawn, no HTTP — because Vercel can't deploy a standalone Python function inside this Next.js app. `api_py/sim_loss.py` stays the **offline** source of truth for the portfolio precompute/reoptimize; the two are held in parity by the golden test in `tests/lib/sim/loss-model.test.ts`. When you change a severity multiplier, update both copies (per the table below) so the live route and the offline precompute agree.
+
 **Calibration convention** (research.md is the citation file — every numeric value has a published source):
 
 - **Top realistic tier → multiplier = 1.0 = HAZUS-severe damage.** Hail 45 mm = `severe` = 1.0; dNBR `high` = 1.0; NWS `major` flood = 1.20 (slightly past severe — multi-floor); WSSI `extreme` = 1.0; Mw 7.0 = 1.0; EF3 = 1.0. `HAZUS_base × 1.0` is intended to land on the HAZUS-severe damage ratio for that build_type.
