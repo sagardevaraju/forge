@@ -1,0 +1,22 @@
+# Offline-only Python deps: portfolio/VRP solve, ML training, scenario
+# precompute, evaluation, real-mode CV fetch, and the test runner. Installed
+# locally and in CI — NEVER bundled into a Vercel function (see requirements.txt).
+numpy>=1.26
+shapely>=2.0
+scipy>=1.11          # saa.py continuous CRPS (PchipInterpolator + quad)
+requests>=2.31
+pytest>=8.0
+pandas>=2.0
+pyarrow>=14.0
+xgboost>=2.0
+optuna>=3.5
+scikit-learn>=1.4
+joblib>=1.3
+pulp>=2.7
+ortools>=9.10
+matplotlib>=3.8
+# Optional — real-mode Sentinel-2 fetches (FORGE_CV_MODE=real)
+planetary-computer>=1.0
+pystac-client>=0.7
+rasterio>=1.3
+rioxarray>=0.15

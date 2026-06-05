@@ -130,7 +130,8 @@ Every commit in the original plan tags a `Task N` from `docs/superpowers/plans/2
 
 ```bash
 npm install                                            # JS deps
-pip install -r requirements.txt                        # Runtime Python deps (NOT requirements-train.txt for routes)
+pip install -r requirements.txt                        # Vercel-runtime deps ONLY (numpy + shapely) — what Vercel installs
+pip install -r requirements-precompute.txt             # Offline: solve / precompute / eval / tests (pulp, ortools, pandas, scipy, pytest, …)
 pip install -r requirements-train.txt                  # Offline-only: torch + timm for CV head inference
 npm run migrate                                        # Create tables in forge-local.db
 python scripts/seed_policy_book.py                     # 10k synthetic policies (cv_features NULL by design)
