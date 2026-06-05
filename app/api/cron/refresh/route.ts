@@ -2,7 +2,8 @@
  * Task 23 — Scheduled refresh of upstream feeds.
  * Task 25 — Advisory-delta tracking layered on top of Task 23.
  *
- * Vercel hits this route every 15 minutes (see `crons` in vercel.json). We
+ * Vercel hits this route once a day (see `crons` in vercel.json — daily on
+ * the Hobby tier, which caps cron frequency). We
  * re-pull the three live external feeds — NHC cone, FIRMS active fires,
  * OpenFEMA disaster declarations — by invoking their existing tool handlers.
  * Each handler has its own mock fallback, so this route is safe to schedule
