@@ -1,0 +1,22 @@
+# Keep the Vercel upload small. None of these are needed by the deployed surface
+# (sim_loss Python function + precomputed JSON artifacts + Turso). Vercel rebuilds
+# .next and reinstalls node_modules remotely; prod reads the DB via TURSO_URL.
+.git
+node_modules
+.next
+.playwright-mcp
+
+# Local dev SQLite (prod uses Turso) + its WAL sidecars
+forge-local.db
+forge-local.db-shm
+forge-local.db-wal
+
+# Heavy gitignored artifact caches — not read at runtime by any deployed route
+artifacts/chips
+artifacts/simulations
+artifacts/xgb_training.parquet
+artifacts/*.joblib
+
+# Logs / eval outputs
+*.log
+eval/results
