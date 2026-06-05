@@ -29,9 +29,15 @@ Dispatches by target name supplied as the first CLI argument:
           "K": int,          # defaults to 1000
       }
 
-  Response shape::
+  Response shape (delegated to api_py.sim_loss.run_request)::
 
-      {"K": int, "n_cohorts": int, "artifact_path": str}
+      {
+          "K": int,
+          "n_cohorts": int,
+          "artifact_path": str | None,   # None when persist disabled
+          "histogram": {...},
+          "summary": {...},
+      }
 
 Exit codes:
     0  — succeeded; stdout carries valid JSON
@@ -84,43 +90,24 @@ def _handle_optimize_portfolio(args: dict) -> int:
 def _handle_sim_loss(payload: dict) -> int:
     """Dispatch for the K=1000 cohort loss generator (Task SIM.11).
 
-    Builds a per-policy quintile lookup over the *full* policy list so that
-    the cohort_keyer emits the canonical ``{zip3}_{build_type}_q{N}`` keys
-    that match the MIP cohort store in precompute_portfolio_optimization.py.
-    Using prefix-only keys (``{zip3}_{build_type}``) caused every sim lookup
-    to miss, making the joint TVaR-99 equal the hurricane-only TVaR-99.
+    Delegates to api_py.sim_loss.run_request so the dev (spawn) path and the
+    Vercel HTTP function return an identical shape — including the loss
+    distribution summary. run_request owns the canonical quintile-aware
+    cohort keyer and the conditional parquet persist.
     """
     try:
-        from api_py.cohort_keys import cohort_key as _cohort_key, policy_quintile_lookup
-        from api_py.sim_loss import generate_sim_losses, write_artifact
+        from api_py.sim_loss import run_request
     except Exception as e:  # noqa: BLE001
         print(json.dumps({"error": f"import failed: {e}"}), flush=True)
         sys.stderr.write(traceback.format_exc())
         return 1
-
     try:
-        policies = [tuple(p) for p in payload.get("policies", [])]
-        # Build the quintile lookup over the full book so cuts are book-wide,
-        # matching the algorithm in _aggregate_cohorts_from_sqlite.
-        quintile_by_id = policy_quintile_lookup(policies)
-        result = generate_sim_losses(
-            sim_id=payload["sim_id"],
-            footprint=payload["footprint"],
-            policies=policies,
-            cohort_keyer=lambda p: _cohort_key(p, quintile_by_id[int(p[0])]),
-            K=int(payload.get("K") or 1000),
-        )
-        parquet_path, _ = write_artifact(payload["sim_id"], result)
+        resp = run_request(payload)
     except Exception as e:  # noqa: BLE001
         print(json.dumps({"error": f"sim_loss failed: {e}"}), flush=True)
         sys.stderr.write(traceback.format_exc())
         return 1
-
-    print(json.dumps({
-        "K": result["K"],
-        "n_cohorts": len(result["cohort_keys"]),
-        "artifact_path": str(parquet_path),
-    }))
+    print(json.dumps(resp))
     return 0
 
 

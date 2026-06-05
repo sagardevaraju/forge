@@ -271,3 +271,18 @@ def test_run_request_rejects_missing_fields():
     from api_py import sim_loss
     with pytest.raises(ValueError):
         sim_loss.run_request({"policies": SAMPLE_POLICIES})
+
+
+def test_solve_stdin_sim_loss_emits_distribution(monkeypatch, capsys):
+    import api_py._solve_stdin as shim
+    from api_py import sim_loss
+    monkeypatch.setenv("FORGE_SIM_PERSIST", "0")               # no disk write in test
+    monkeypatch.setattr(sim_loss, "write_artifact", lambda *a, **k: (Path("x"), Path("y")))
+    rc = shim._handle_sim_loss({
+        "sim_id": "1234567890123_abcdef00", "footprint": _footprint(),
+        "policies": SAMPLE_POLICIES, "K": 50,
+    })
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["K"] == 50
+    assert "histogram" in out and "summary" in out
