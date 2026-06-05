@@ -1,10 +1,18 @@
 'use client';
 import { useState } from 'react';
+import type { LossHistogram, LossSummary } from './LossDistribution';
+
+export interface PromoteResult {
+  K: number;
+  n_cohorts: number;
+  histogram?: LossHistogram;
+  summary?: LossSummary;
+}
 
 export interface PromoteButtonProps {
   simId: string | null;
   promoted: boolean;
-  onPromoted: (result: { K: number; n_cohorts: number }) => void;
+  onPromoted: (result: PromoteResult) => void;
 }
 
 export function PromoteButton({ simId, promoted, onPromoted }: PromoteButtonProps) {

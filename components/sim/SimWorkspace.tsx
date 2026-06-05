@@ -20,6 +20,7 @@ import { PerilPicker } from './PerilPicker';
 import { SimLibrary, type SimListItem } from './SimLibrary';
 import { ImpactPanel } from './ImpactPanel';
 import { PromoteButton } from './PromoteButton';
+import { LossDistribution, type LossHistogram, type LossSummary } from './LossDistribution';
 import { rebuildFootprint, type SimulationFootprint } from '@/lib/sim/footprint';
 import { PERIL_SCALES, perilLabel, severityLabel, type Peril, type SeverityValue } from '@/lib/sim/severity';
 import type { PreviewImpact } from '@/lib/sim/preview';
@@ -55,6 +56,7 @@ export function SimWorkspace(props: SimWorkspaceProps) {
       ? !!(props.initialSims.find((s) => s.id === props.initialSimId)?.promoted)
       : false,
   );
+  const [distribution, setDistribution] = useState<{ histogram: LossHistogram; summary: LossSummary } | null>(null);
 
   // Switching peril resets severity to the new peril's scale default — a Mw
   // value is meaningless as a hail diameter, etc.
@@ -69,6 +71,14 @@ export function SimWorkspace(props: SimWorkspaceProps) {
     if (p) changePeril(p);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
+
+  // Clear any prior sim's distribution when the selected sim changes (library
+  // select / back-forward / direct ?id= load). SimWorkspace is not remounted on
+  // client-side navigation, so without this the previous sim's distribution would
+  // mis-attribute under a different sim's header.
+  useEffect(() => {
+    setDistribution(null);
+  }, [props.initialSimId]);
 
   async function onFootprintChange(fp: SimulationFootprint) {
     setCurrentFootprint(fp);
@@ -86,6 +96,7 @@ export function SimWorkspace(props: SimWorkspaceProps) {
     setSimId(body.sim_id);
     setImpact(body.impact);
     setPromoted(false);
+    setDistribution(null);
 
     // Refresh the sims library sidebar.
     const listRes = await fetch('/api/sim');
@@ -152,8 +163,14 @@ export function SimWorkspace(props: SimWorkspaceProps) {
         <PromoteButton
           simId={simId}
           promoted={promoted}
-          onPromoted={() => setPromoted(true)}
+          onPromoted={(r) => {
+            setPromoted(true);
+            if (r.histogram && r.summary) setDistribution({ histogram: r.histogram, summary: r.summary });
+          }}
         />
+        {distribution && (
+          <LossDistribution histogram={distribution.histogram} summary={distribution.summary} />
+        )}
       </aside>
     </div>
   );

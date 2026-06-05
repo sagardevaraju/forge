@@ -29,4 +29,19 @@ describe('PromoteButton', () => {
       expect.objectContaining({ method: 'POST' }),
     );
   });
+  test('passes the returned distribution to onPromoted', async () => {
+    const dist = {
+      K: 1000, n_cohorts: 3,
+      histogram: { bin_edges: [0, 1, 2], counts: [2, 1] },
+      summary: { mean: 1, p50: 1, p90: 1, p99: 2, tvar99: 3, min: 0, max: 4 },
+    };
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify(dist), { status: 200, headers: { 'content-type': 'application/json' } })));
+    const onPromoted = vi.fn();
+    render(<PromoteButton simId="1234567890123_abcdef00" promoted={false} onPromoted={onPromoted} />);
+    fireEvent.click(screen.getByRole('button', { name: /promote to scenario/i }));
+    await waitFor(() => expect(onPromoted).toHaveBeenCalledWith(expect.objectContaining({
+      summary: expect.objectContaining({ tvar99: 3 }),
+    })));
+  });
 });
