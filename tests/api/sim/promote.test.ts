@@ -107,7 +107,7 @@ describe('POST /api/sim/[id]/promote', () => {
       const body = await res.json();
       expect(body.summary.tvar99).toBe(3);
       expect(body.histogram.counts).toEqual([2, 1]);
-      expect(calls[0]).toContain('forge-test.vercel.app/api_py/sim_loss');
+      expect(calls[0]).toContain('forge-test.vercel.app/api/sim_loss');
     } finally {
       globalThis.fetch = realFetch;
       if (origVercel === undefined) delete process.env.VERCEL; else process.env.VERCEL = origVercel;

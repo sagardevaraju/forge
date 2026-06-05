@@ -1,7 +1,10 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
-    "app/api/agent/chat/route.ts": { "runtime": "nodejs" },
-    "api_py/sim_loss.py": { "runtime": "python3.12" }
+    "api/sim_loss.py": {
+      "maxDuration": 60,
+      "includeFiles": "{api_py/**,artifacts/calibration.json}"
+    }
   },
   "crons": [{ "path": "/api/cron/refresh", "schedule": "0 0 * * *" }]
 }

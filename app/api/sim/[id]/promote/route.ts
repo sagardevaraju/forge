@@ -41,7 +41,7 @@ function runSimLoss(payload: unknown): Promise<{
   // sim_loss Python function over HTTP. Dev: spawn the local interpreter.
   if (process.env.VERCEL) {
     const base = `https://${process.env.VERCEL_URL}`;
-    return fetch(`${base}/api_py/sim_loss`, {
+    return fetch(`${base}/api/sim_loss`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
