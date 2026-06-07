@@ -21,8 +21,8 @@ export interface PerilPickerProps {
 export function PerilPicker({ active, onChange }: PerilPickerProps) {
   return (
     <div className="flex flex-col gap-1" role="group" aria-label="Select peril">
-      <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">+ New simulation</div>
-      <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1 inline-flex items-center gap-1">
+      <div className="text-xs uppercase tracking-wider text-zinc-500 mb-2">+ New simulation</div>
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1 inline-flex items-center gap-1">
         Peril <InfoIcon term="peril" iconSize="sm" />
       </div>
       {PERILS.map((p) => (
@@ -32,7 +32,7 @@ export function PerilPicker({ active, onChange }: PerilPickerProps) {
           aria-pressed={active === p}
           onClick={() => onChange(p)}
           className={`flex items-center gap-2 px-2 py-1.5 rounded text-left text-sm ${
-            active === p ? 'bg-slate-700 text-white' : 'text-slate-300 hover:bg-slate-800'
+            active === p ? 'bg-zinc-900 text-white' : 'text-zinc-700 hover:bg-zinc-100'
           }`}
         >
           <span aria-hidden className="inline-block w-2 h-2 rounded-full" style={{ background: COLORS[p] }} />

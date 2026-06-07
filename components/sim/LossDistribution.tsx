@@ -21,12 +21,12 @@ export function LossDistribution({ histogram, summary }: LossDistributionProps) 
   const bw = counts.length > 0 ? W / counts.length : W;
   return (
     <div className="mt-4 flex flex-col gap-2">
-      <div className="text-xs uppercase tracking-wider text-slate-400">
+      <div className="text-xs uppercase tracking-wider text-zinc-500">
         Loss distribution (K=1000)
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img"
            aria-label="Loss distribution histogram"
-           className="bg-slate-900/40 rounded">
+           className="bg-zinc-100 rounded">
         {counts.map((c, i) => {
           const h = (c / maxCount) * (H - 4);
           return <rect key={i} x={i * bw} y={H - h} width={Math.max(bw - 1, 1)}
@@ -45,8 +45,8 @@ export function LossDistribution({ histogram, summary }: LossDistributionProps) 
 function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className="flex flex-col">
-      <span className="text-[10px] uppercase tracking-wider text-slate-500">{label}</span>
-      <span className={`tabular-nums ${accent ? 'text-red-300 font-semibold' : 'text-slate-200'}`}>
+      <span className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</span>
+      <span className={`tabular-nums ${accent ? 'text-red-600 font-semibold' : 'text-zinc-900'}`}>
         {value}
       </span>
     </div>

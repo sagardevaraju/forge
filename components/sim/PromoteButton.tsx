@@ -21,7 +21,7 @@ export function PromoteButton({ simId, promoted, onPromoted }: PromoteButtonProp
 
   if (promoted) {
     return (
-      <div className="mt-4 text-center text-xs text-emerald-400 border border-emerald-900 rounded p-2">
+      <div className="mt-4 text-center text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">
         Already promoted — view banner on /portfolio to re-optimize.
       </div>
     );
@@ -51,14 +51,14 @@ export function PromoteButton({ simId, promoted, onPromoted }: PromoteButtonProp
         type="button"
         disabled={!simId || busy}
         onClick={onClick}
-        className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-semibold py-2 rounded"
+        className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-200 disabled:text-zinc-400 text-white font-semibold py-2 rounded"
       >
         {busy ? 'Generating K=1000 draws…' : 'Promote to scenario →'}
       </button>
-      <div className="text-[10px] text-slate-400 text-center">
+      <div className="text-[10px] text-zinc-500 text-center">
         Generates K=1000 cohort losses. /portfolio will surface a re-optimize banner.
       </div>
-      {err && <div className="text-xs text-red-400 bg-red-950/40 border border-red-900 rounded px-2 py-1">{err}</div>}
+      {err && <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">{err}</div>}
     </div>
   );
 }
